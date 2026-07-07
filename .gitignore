@@ -1,0 +1,12 @@
+# Binary
+k5pw
+*.exe
+
+# Logs
+*.log
+
+# Go
+vendor/
+
+# OS
+.DS_Store
