@@ -32,6 +32,16 @@ func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]s
 		socks5Reply(client, 0x01)
 		return
 	}
+	if err := setConnDeadline(client, tunnelIdleTimeout); err != nil {
+		log.Printf("set socks5 client deadline: %v", err)
+		targetConn.Close()
+		return
+	}
+	if err := setConnDeadline(targetConn, tunnelIdleTimeout); err != nil {
+		log.Printf("set socks5 target deadline: %v", err)
+		targetConn.Close()
+		return
+	}
 
 	socks5Reply(client, 0x00)
 	Tunnel(client, clientReader, targetConn)
@@ -109,6 +119,9 @@ func socks5ReadRequest(r *bufio.Reader) (string, error) {
 	if header[1] != 0x01 {
 		return "", fmt.Errorf("unsupported command %d", header[1])
 	}
+	if header[2] != 0x00 {
+		return "", errors.New("invalid reserved byte")
+	}
 
 	var host string
 	switch header[3] {
@@ -147,7 +160,9 @@ func socks5ReadRequest(r *bufio.Reader) (string, error) {
 }
 
 func socks5Reply(client net.Conn, rep byte) {
-	client.Write([]byte{0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+	if _, err := client.Write([]byte{0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+		log.Printf("write socks5 reply: %v", err)
+	}
 }
 
 func contains(b []byte, v byte) bool {

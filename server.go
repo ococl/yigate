@@ -14,15 +14,20 @@ import (
 	"k5pw/proxy"
 )
 
+const handshakeTimeout = 15 * time.Second
+
 // Server 统一代理服务器，支持配置热加载
 type Server struct {
-	cfgPath  string
-	config   atomic.Value
-	mgr      atomic.Value
-	ln       net.Listener
-	quit     chan struct{}
-	stopOnce sync.Once
-	watcher  *fsnotify.Watcher
+	cfgPath   string
+	config    atomic.Value
+	mgr       atomic.Value
+	lnMu      sync.Mutex
+	ln        net.Listener
+	quit      chan struct{}
+	stopOnce  sync.Once
+	watcher   *fsnotify.Watcher
+	connSemMu sync.RWMutex
+	connSem   chan struct{}
 }
 
 // NewServer 创建服务器，cfg 为初始配置
@@ -63,6 +68,15 @@ func (s *Server) ApplyConfig(cfg *Config) error {
 		old.StopHealthCheck()
 	}
 	mgr.StartHealthCheck(cfg.CheckInterval)
+	if cfg.MaxConnections > 0 {
+		s.connSemMu.Lock()
+		s.connSem = make(chan struct{}, cfg.MaxConnections)
+		s.connSemMu.Unlock()
+	} else {
+		s.connSemMu.Lock()
+		s.connSem = nil
+		s.connSemMu.Unlock()
+	}
 	s.config.Store(cfg)
 	s.mgr.Store(mgr)
 	return nil
@@ -91,7 +105,16 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	s.ln = ln
+	s.lnMu.Lock()
+	select {
+	case <-s.quit:
+		s.lnMu.Unlock()
+		ln.Close()
+		return nil
+	default:
+		s.ln = ln
+	}
+	s.lnMu.Unlock()
 	log.Printf("k5pw listening on %s", cfg.Listen)
 
 	if err := s.watchConfig(); err != nil {
@@ -109,7 +132,41 @@ func (s *Server) Start() error {
 				continue
 			}
 		}
-		go s.handle(conn)
+		sem, ok := s.acquireConnSlot(conn)
+		if !ok {
+			continue
+		}
+		go func() {
+			defer s.releaseConnSlot(sem)
+			s.handle(conn)
+		}()
+	}
+}
+
+func (s *Server) acquireConnSlot(conn net.Conn) (chan struct{}, bool) {
+	s.connSemMu.RLock()
+	sem := s.connSem
+	s.connSemMu.RUnlock()
+	if sem == nil {
+		return nil, true
+	}
+	select {
+	case sem <- struct{}{}:
+		return sem, true
+	default:
+		log.Printf("connection limit reached, closing %s", conn.RemoteAddr())
+		conn.Close()
+		return nil, false
+	}
+}
+
+func (s *Server) releaseConnSlot(sem chan struct{}) {
+	if sem == nil {
+		return
+	}
+	select {
+	case <-sem:
+	default:
 	}
 }
 
@@ -117,9 +174,11 @@ func (s *Server) Start() error {
 func (s *Server) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.quit)
+		s.lnMu.Lock()
 		if s.ln != nil {
 			s.ln.Close()
 		}
+		s.lnMu.Unlock()
 		if s.watcher != nil {
 			s.watcher.Close()
 		}
@@ -134,12 +193,13 @@ func (s *Server) watchConfig() error {
 	if err != nil {
 		return err
 	}
-	s.watcher = w
 
 	dir := filepath.Dir(s.cfgPath)
 	if err := w.Add(dir); err != nil {
+		w.Close()
 		return err
 	}
+	s.watcher = w
 
 	go s.watchLoop(w)
 	return nil
@@ -197,6 +257,11 @@ func (s *Server) handle(conn net.Conn) {
 	cfg := s.Config()
 	mgr := s.Manager()
 	if cfg == nil || mgr == nil {
+		return
+	}
+
+	if err := conn.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		log.Printf("set handshake deadline: %v", err)
 		return
 	}
 

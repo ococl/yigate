@@ -24,12 +24,12 @@ go build -o k5pw
 ./k5pw -config config.yml
 ```
 
-默认监听 `:8891`，可修改 `config.yml` 调整配置。
+默认监听 `127.0.0.1:8891`，可修改 `config.yml` 调整配置。
 
 ## 配置说明
 
 ```yaml
-listen: ":8891"
+listen: "127.0.0.1:8891"
 users:
   admin: "admin123"
 upstreams:
@@ -43,15 +43,17 @@ upstreams:
     priority: 2
     weight: 1
 check_interval: 30
+max_connections: 1024
 ```
 
-- `listen`：监听地址，例如 `:8891`。
+- `listen`：监听地址，例如 `127.0.0.1:8891`；如需对外提供服务，可绑定 `0.0.0.0:8891` 或公网地址。
 - `users`：用户名密码映射。留空或删除表示匿名。
 - `upstreams`：上游代理列表。
   - `url`：支持 `http://`、`https://`、`socks5://`。
   - `priority`：数值越小优先级越高。
   - `weight`：同优先级下的权重，越大被选中的概率越高。
 - `check_interval`：健康检查周期，单位秒，默认 30。
+- `max_connections`：最大并发连接数，默认 1024；设置为负数会拒绝启动。
 
 ## 使用示例
 
@@ -78,4 +80,4 @@ curl -x socks5://admin:admin123@127.0.0.1:8891 https://www.example.com
 
 - 本项目仅用于学习、测试或内部网络管理，请勿用于非法用途。
 - 仅实现了 SOCKS5 的 CONNECT 命令，暂不支持 BIND 与 UDP ASSOCIATE。
-- 普通 HTTP 请求支持有 `Content-Length` 的请求体，chunked 传输模式未做完整实现。
+- 普通 HTTP 请求会缓冲最多 32MiB 请求体以支持上游失败重试，超限返回 413。

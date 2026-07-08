@@ -1,7 +1,8 @@
-listen: ":8891"
+listen: "0.0.0.0:8891"
 users: {}
 upstreams:
   - url: "socks5://10.2.3.150:7897"
     priority: 1
     weight: 5
 check_interval: 30
+max_connections: 1024

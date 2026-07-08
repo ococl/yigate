@@ -35,27 +35,29 @@ go build -o k5pw
 ./k5pw -config config.yml
 ```
 
-默认监听 `:8891`，可用 `-config` 指定其他配置文件。
+默认监听 `127.0.0.1:8891`，可用 `-config` 指定其他配置文件。
 
 ## 配置说明
 
 ```yaml
-listen: ":8891"
+listen: "127.0.0.1:8891"
 users: {}
 upstreams:
   - url: "socks5://10.2.3.150:7897"
     priority: 1
     weight: 5
 check_interval: 30
+max_connections: 1024
 ```
 
-- `listen`：监听地址，例如 `:8891`。
+- `listen`：监听地址，例如 `127.0.0.1:8891`。
 - `users`：用户名密码映射。空对象或省略表示匿名。
 - `upstreams`：上游代理列表。
   - `url`：支持 `http://`、`https://`、`socks5://`。
   - `priority`：数值越小优先级越高。
   - `weight`：同优先级下的权重，越大被选中的概率越高。
 - `check_interval`：健康检查周期，单位秒，默认 30。
+- `max_connections`：最大并发连接数，默认 1024；设置为负数会拒绝启动。
 
 ## 核心逻辑
 
@@ -78,8 +80,8 @@ check_interval: 30
 ## 测试注意事项
 
 - 上游不可达时，代理会自动回退到自身直连。
-- 通过 HTTP/HTTPS 上游建立 CONNECT 隧道时，已使用 `http.ReadResponse` 完整读取并消费响应头，避免残留头数据进入 TLS 隧道导致 `wrong version number` 错误。
-- 普通 HTTP 请求支持 `Content-Length` 请求体，chunked 传输编码未完整实现。
+- 通过 HTTP/HTTPS 上游建立 CONNECT 隧道时，仅读取响应头，不再消费隧道数据，避免隧道建立后阻塞。
+- 普通 HTTP 请求会缓冲最多 32MiB 请求体以支持上游失败重试，超限返回 413。
 - 健康检查为简单 TCP 拨号，频率由 `check_interval` 控制。
 
 ## 已知限制

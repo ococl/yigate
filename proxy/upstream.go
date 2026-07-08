@@ -30,7 +30,6 @@ type Upstream struct {
 	Priority int
 	Weight   int
 
-	mu      sync.Mutex
 	current int
 	dead    bool
 }
@@ -44,12 +43,26 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
+func (c *bufferedConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
+func (c *bufferedConn) CloseRead() error {
+	if cr, ok := c.Conn.(interface{ CloseRead() error }); ok {
+		return cr.CloseRead()
+	}
+	return nil
+}
+
 // UpstreamManager 管理多上游、优先级、负载均衡与健康检查
 type UpstreamManager struct {
 	upstreams []*Upstream
 	groups    map[int][]*Upstream
 	order     []int
-	mu        sync.RWMutex
+	mu        sync.Mutex
 	done      chan struct{}
 	wg        sync.WaitGroup
 }
@@ -94,8 +107,8 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 // Select 按优先级选择可用上游，同优先级加权轮询
 // 所有上游均不可用时返回 nil，表示回退到自身直连
 func (m *UpstreamManager) Select() *Upstream {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	for _, p := range m.order {
 		group := m.groups[p]
@@ -126,20 +139,14 @@ func pickWeighted(us []*Upstream) *Upstream {
 	chosen := 0
 	max := -1
 	for i, u := range us {
-		u.mu.Lock()
 		u.current += u.Weight
-		cur := u.current
-		u.mu.Unlock()
-
-		if cur > max {
-			max = cur
+		if u.current > max {
+			max = u.current
 			chosen = i
 		}
 	}
 
-	us[chosen].mu.Lock()
 	us[chosen].current -= total
-	us[chosen].mu.Unlock()
 	return us[chosen]
 }
 
@@ -149,15 +156,20 @@ func (m *UpstreamManager) StartHealthCheck(interval int) {
 		interval = 30
 	}
 	m.StopHealthCheck()
+
+	m.mu.Lock()
 	m.done = make(chan struct{})
+	done := m.done
 	m.wg.Add(1)
+	m.mu.Unlock()
+
 	go func() {
 		defer m.wg.Done()
 		ticker := time.NewTicker(time.Duration(interval) * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-m.done:
+			case <-done:
 				return
 			case <-ticker.C:
 				m.checkAll()
@@ -168,11 +180,17 @@ func (m *UpstreamManager) StartHealthCheck(interval int) {
 
 // StopHealthCheck 停止健康检查
 func (m *UpstreamManager) StopHealthCheck() {
-	if m.done != nil {
-		close(m.done)
-		m.wg.Wait()
-		m.done = nil
+	m.mu.Lock()
+	done := m.done
+	if done == nil {
+		m.mu.Unlock()
+		return
 	}
+	m.done = nil
+	close(done)
+	m.mu.Unlock()
+
+	m.wg.Wait()
 }
 
 func (m *UpstreamManager) checkAll() {
@@ -196,15 +214,7 @@ func (m *UpstreamManager) checkAll() {
 }
 
 func (m *UpstreamManager) check(u *Upstream) bool {
-	host := u.URL.Host
-	var conn net.Conn
-	var err error
-	if u.URL.Scheme == "https" {
-		dialer := &net.Dialer{Timeout: 5 * time.Second}
-		conn, err = tls.DialWithDialer(dialer, "tcp", host, &tls.Config{InsecureSkipVerify: true})
-	} else {
-		conn, err = net.DialTimeout("tcp", host, 5*time.Second)
-	}
+	conn, err := dialProxyConn(u.URL, 5*time.Second)
 	if err != nil {
 		return false
 	}
@@ -244,29 +254,23 @@ func (m *UpstreamManager) Dial(target string) (net.Conn, error) {
 
 // dialHTTP 通过 HTTP/HTTPS 代理的 CONNECT 建立隧道
 func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
-	var conn net.Conn
-	var err error
-	if u.URL.Scheme == "https" {
-		conn, err = tls.Dial("tcp", u.URL.Host, &tls.Config{InsecureSkipVerify: true})
-	} else {
-		conn, err = net.Dial("tcp", u.URL.Host)
-	}
+	conn, err := dialProxyConn(u.URL, proxyDialTimeout)
 	if err != nil {
 		return nil, err
 	}
-
-	creds := ""
-	if user := u.URL.User; user != nil {
-		username := user.Username()
-		password, _ := user.Password()
-		creds = base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	if err := setConnDeadline(conn, proxyHandshakeTimeout); err != nil {
+		conn.Close()
+		return nil, err
 	}
+
+	creds := proxyCredentials(u)
 
 	var authLine string
 	if creds != "" {
 		authLine = "Proxy-Authorization: Basic " + creds + "\r\n"
 	}
 
+	connectReq := &http.Request{Method: http.MethodConnect}
 	req := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", target, target, authLine)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()
@@ -274,20 +278,69 @@ func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
 	}
 
 	br := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(br, nil)
+	resp, err := http.ReadResponse(br, connectReq)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		resp.Body.Close()
 		conn.Close()
 		return nil, fmt.Errorf("upstream CONNECT failed: %s", resp.Status)
 	}
-	// 消费并关闭可能存在的响应体，确保缓冲区后续读取的是隧道数据
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	return &bufferedConn{Conn: conn, r: br}, nil
+}
+
+func setProxyAuthorization(header http.Header, up *Upstream) {
+	creds := proxyCredentials(up)
+	if creds == "" {
+		return
+	}
+	header.Set("Proxy-Authorization", "Basic "+creds)
+}
+
+func proxyCredentials(up *Upstream) string {
+	if up == nil || up.URL == nil || up.URL.User == nil {
+		return ""
+	}
+	username := up.URL.User.Username()
+	password, _ := up.URL.User.Password()
+	return base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+}
+
+func dialProxyConn(u *url.URL, timeout time.Duration) (net.Conn, error) {
+	addr := proxyAddress(u)
+	dialer := &net.Dialer{Timeout: timeout}
+	if u.Scheme == "https" {
+		return tls.DialWithDialer(dialer, "tcp", addr, tlsConfigForHost(addr))
+	}
+	return dialer.Dial("tcp", addr)
+}
+
+func tlsConfigForHost(addr string) *tls.Config {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	return &tls.Config{ServerName: host}
+}
+
+func proxyAddress(u *url.URL) string {
+	if _, _, err := net.SplitHostPort(u.Host); err == nil {
+		return u.Host
+	}
+	port := "80"
+	switch u.Scheme {
+	case "https":
+		port = "443"
+	case "socks5":
+		port = "1080"
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // dialSOCKS5 通过 SOCKS5 上游连接到目标
@@ -300,9 +353,16 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	if portNum <= 0 || portNum > 65535 {
+		return nil, fmt.Errorf("invalid target port %d", portNum)
+	}
 
-	conn, err := net.DialTimeout("tcp", u.URL.Host, 5*time.Second)
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.URL), proxyDialTimeout)
 	if err != nil {
+		return nil, err
+	}
+	if err := setConnDeadline(conn, proxyHandshakeTimeout); err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -352,6 +412,10 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		req = []byte{0x05, 0x01, 0x00, 0x04}
 		req = append(req, ip6...)
 	} else {
+		if len(host) > 255 {
+			conn.Close()
+			return nil, fmt.Errorf("socks5 host name too long: %d", len(host))
+		}
 		req = []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
 		req = append(req, []byte(host)...)
 	}
@@ -399,10 +463,17 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		conn.Close()
 		return nil, err
 	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	return conn, nil
 }
 
 func socks5Auth(conn net.Conn, username, password string) error {
+	if len(username) > 255 || len(password) > 255 {
+		return errors.New("socks5 username/password too long")
+	}
 	buf := make([]byte, 0, 513)
 	buf = append(buf, 0x01, byte(len(username)))
 	buf = append(buf, []byte(username)...)
@@ -423,7 +494,7 @@ func socks5Auth(conn net.Conn, username, password string) error {
 
 // DialTarget 直接连接到目标
 func DialTarget(target string) (net.Conn, error) {
-	return net.DialTimeout("tcp", target, 10*time.Second)
+	return net.DialTimeout("tcp", target, proxyDialTimeout)
 }
 
 // Tunnel 在客户端与目标连接之间双向转发数据
@@ -437,19 +508,37 @@ func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn
 
 	go func() {
 		defer wg.Done()
-		io.Copy(targetConn, clientReader)
-		if c, ok := targetConn.(interface{ CloseWrite() error }); ok {
-			c.CloseWrite()
-		}
+		src := &deadlineReader{r: clientReader, conn: clientConn, timeout: tunnelIdleTimeout}
+		dst := &deadlineWriter{w: targetConn, conn: targetConn, timeout: tunnelIdleTimeout}
+		_, _ = io.Copy(dst, src)
+		closeWrite(targetConn)
+		closeRead(clientConn)
 	}()
 
 	go func() {
 		defer wg.Done()
-		io.Copy(clientConn, targetConn)
-		if c, ok := clientConn.(interface{ CloseWrite() error }); ok {
-			c.CloseWrite()
-		}
+		src := &deadlineReader{r: targetConn, conn: targetConn, timeout: tunnelIdleTimeout}
+		dst := &deadlineWriter{w: clientConn, conn: clientConn, timeout: tunnelIdleTimeout}
+		_, _ = io.Copy(dst, src)
+		closeWrite(clientConn)
+		closeRead(targetConn)
 	}()
 
 	wg.Wait()
+}
+
+func closeWrite(conn net.Conn) {
+	if c, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = c.CloseWrite()
+		return
+	}
+	_ = conn.Close()
+}
+
+func closeRead(conn net.Conn) {
+	if c, ok := conn.(interface{ CloseRead() error }); ok {
+		_ = c.CloseRead()
+		return
+	}
+	_ = conn.Close()
 }

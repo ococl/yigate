@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
 	"strings"
@@ -17,7 +18,10 @@ func Authenticate(username, password string, users map[string]string) bool {
 		return true
 	}
 	pass, ok := users[username]
-	return ok && pass == password
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1
 }
 
 // HTTPAuthOK 检查 HTTP 代理 Basic 认证
@@ -35,7 +39,7 @@ func HTTPAuthOK(header http.Header, users map[string]string) bool {
 
 func parseBasicAuth(header string) (user, pass string, ok bool) {
 	const prefix = "Basic "
-	if !strings.HasPrefix(header, prefix) {
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
 		return
 	}
 	payload, err := base64.StdEncoding.DecodeString(header[len(prefix):])
