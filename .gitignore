@@ -11,12 +11,26 @@ geosite.dat
 upstream-types.txt
 *.tmp
 
-# Test artifacts
-.last_proxy_test_summary
-
 # Go
 vendor/
 coverage.out
+*.test
+__debug_bin
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build / dist
+dist/
+build/
+tmp/
 
 # OS
 .DS_Store
+
+# Test artifacts
+.last_proxy_test_summary
