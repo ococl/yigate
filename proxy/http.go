@@ -251,12 +251,24 @@ func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, na
 		}
 		lastErr = err
 		log.Printf("forward via upstream %s failed: %v", up.Name, err)
-		mgr.markDead(up)
+		if !isTargetError(err) {
+			mgr.markDead(up)
+		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no available upstream")
 	}
 	return nil, lastErr
+}
+
+func isTargetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "target unreachable") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "connection refused")
 }
 
 func forwardRequest(req *http.Request, up *Upstream) (*http.Response, error) {

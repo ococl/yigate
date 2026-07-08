@@ -87,35 +87,6 @@ func (u *Upstream) supportsProxyType(typ string) bool {
 	return false
 }
 
-func (u *Upstream) setDetectedTypes(types []string) {
-	if u == nil || u.ExplicitTypes || len(types) == 0 {
-		return
-	}
-	u.typesMu.Lock()
-	defer u.typesMu.Unlock()
-	u.Types = append([]string(nil), types...)
-	u.typesSource = "probe"
-}
-
-func (u *Upstream) setCachedTypes(types []string) {
-	if u == nil || u.ExplicitTypes || len(types) == 0 {
-		return
-	}
-	u.typesMu.Lock()
-	defer u.typesMu.Unlock()
-	u.Types = append([]string(nil), types...)
-	u.typesSource = "cache"
-}
-
-func (u *Upstream) typeSource() string {
-	if u == nil {
-		return ""
-	}
-	u.typesMu.RLock()
-	defer u.typesMu.RUnlock()
-	return u.typesSource
-}
-
 func (u *Upstream) primaryProxyType() string {
 	if u == nil {
 		return ""
@@ -165,17 +136,15 @@ type UpstreamConfig struct {
 
 // Upstream 表示一个已解析的上游代理
 type Upstream struct {
-	Name          string
-	URL           *url.URL
-	Types         []string
-	ExplicitTypes bool
-	Priority      int
-	Weight        int
+	Name     string
+	URL      *url.URL
+	Types    []string
+	Priority int
+	Weight   int
 
-	typesMu     sync.RWMutex
-	typesSource string
-	current     int
-	dead        bool
+	typesMu sync.RWMutex
+	current int
+	dead    bool
 }
 
 type bufferedConn struct {
@@ -239,7 +208,7 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if _, exists := m.byName[name]; exists {
 			return nil, fmt.Errorf("duplicate upstream name %q", name)
 		}
-		types, explicitTypes, err := normalizeProxyTypes(c.Types)
+		types, _, err := normalizeProxyTypes(c.Types)
 		if err != nil {
 			return nil, fmt.Errorf("upstreams[%d].types: %w", i, err)
 		}
@@ -247,16 +216,11 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 			types = []string{normalizeProxyType(u.Scheme)}
 		}
 		up := &Upstream{
-			Name:          name,
-			URL:           u,
-			Types:         types,
-			ExplicitTypes: explicitTypes,
-			Priority:      c.Priority,
-			Weight:        c.Weight,
-			typesSource:   "url",
-		}
-		if explicitTypes {
-			up.typesSource = "config"
+			Name:     name,
+			URL:      u,
+			Types:    types,
+			Priority: c.Priority,
+			Weight:   c.Weight,
 		}
 		if up.Weight <= 0 {
 			up.Weight = 1
@@ -400,7 +364,7 @@ func pickWeighted(us []*Upstream) *Upstream {
 // StartHealthCheck 启动定时健康检查
 func (m *UpstreamManager) StartHealthCheck(interval int) {
 	if interval <= 0 {
-		interval = 30
+		return
 	}
 	m.StopHealthCheck()
 
@@ -644,6 +608,10 @@ func tlsConfigForHost(addr string) *tls.Config {
 	if err != nil {
 		host = addr
 	}
+	// TLS SNI 不支持 IP 地址，对 IP 目标不发送 ServerName
+	if net.ParseIP(host) != nil {
+		return &tls.Config{}
+	}
 	return &tls.Config{ServerName: host}
 }
 
@@ -731,7 +699,7 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("invalid target port %q", portStr)
 	}
-	addr, err := k5pwSOCKS5AddressBytes(host)
+	addr, err := socks5AddressBytes(host)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -751,13 +719,16 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 	}
 	if reply[0] != 0x05 || reply[1] != 0x00 {
 		conn.Close()
-		return nil, fmt.Errorf("socks5 connect failed: 0x%02x", reply[1])
+		if reply[0] == 0x05 && reply[1] >= 0x01 && reply[1] <= 0x06 {
+			return nil, fmt.Errorf("socks5 target unreachable: 0x%02x", reply[1])
+		}
+		return nil, fmt.Errorf("socks5 upstream protocol failed: 0x%02x", reply[1])
 	}
-	if _, err := k5pwReadSOCKS5AddressValue(conn, reply[3]); err != nil {
+	if _, err := readSOCKS5AddressValue(conn, reply[3]); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	if _, err := k5pwReadSOCKS5PortValue(conn); err != nil {
+	if _, err := readSOCKS5PortValue(conn); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -807,9 +778,15 @@ func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn
 
 	go func() {
 		defer wg.Done()
-		src := &deadlineReader{r: clientReader, conn: clientConn, timeout: tunnelIdleTimeout}
+		var src io.Reader
+		if clientReader != nil {
+			src = clientReader
+		} else {
+			src = clientConn
+		}
+		dr := &deadlineReader{r: src, conn: clientConn, timeout: tunnelIdleTimeout}
 		dst := &deadlineWriter{w: targetConn, conn: targetConn, timeout: tunnelIdleTimeout}
-		_, _ = io.Copy(dst, src)
+		_, _ = io.Copy(dst, dr)
 		closeWrite(targetConn)
 		closeRead(clientConn)
 	}()

@@ -14,23 +14,22 @@ import (
 	"k5pw/proxy"
 )
 
-const handshakeTimeout = 15 * time.Second
-
 // Server 统一代理服务器，支持配置热加载
 type Server struct {
-	cfgPath   string
-	config    atomic.Value
-	mgr       atomic.Value
-	router    atomic.Value
-	geoUpdate *proxy.GeoSiteUpdater
-	typeProbe *proxy.UpstreamTypeProber
-	lnMu      sync.Mutex
-	ln        net.Listener
-	quit      chan struct{}
-	stopOnce  sync.Once
-	watcher   *fsnotify.Watcher
-	connSemMu sync.RWMutex
-	connSem   chan struct{}
+	cfgPath     string
+	config      atomic.Value
+	mgr         atomic.Value
+	router      atomic.Value
+	geoUpdate   *proxy.GeoSiteUpdater
+	lnMu        sync.Mutex
+	ln          net.Listener
+	quit        chan struct{}
+	stopOnce    sync.Once
+	activeConns sync.WaitGroup
+	watcherMu   sync.Mutex
+	watcher     *fsnotify.Watcher
+	connCount   atomic.Int64
+	maxConns    atomic.Int64
 }
 
 // NewServer 创建服务器，cfg 为初始配置
@@ -80,7 +79,6 @@ func (s *Server) applyConfig(cfg *Config, updateGeoSite bool) error {
 		return err
 	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
-	prober := proxy.NewUpstreamTypeProber(cfg.UpstreamTypeProbe, mgr)
 	if updateGeoSite && cfg.Routing.GeoSite.AutoUpdate {
 		if err := updater.UpdateOnce(); err != nil {
 			log.Printf("initial geosite update failed: %v", err)
@@ -93,14 +91,10 @@ func (s *Server) applyConfig(cfg *Config, updateGeoSite bool) error {
 	if oldUpdater := s.geoUpdate; oldUpdater != nil {
 		oldUpdater.Stop()
 	}
-	if oldProber := s.typeProbe; oldProber != nil {
-		oldProber.Stop()
-	}
 	if old := s.Manager(); old != nil {
 		old.StopHealthCheck()
 	}
 	mgr.StartHealthCheck(cfg.CheckInterval)
-	prober.Start()
 	updater.Start(func() {
 		cfg, err := LoadConfig(s.cfgPath)
 		if err != nil {
@@ -111,20 +105,12 @@ func (s *Server) applyConfig(cfg *Config, updateGeoSite bool) error {
 			log.Printf("reload after geosite update: %v", err)
 		}
 	})
-	if cfg.MaxConnections > 0 {
-		s.connSemMu.Lock()
-		s.connSem = make(chan struct{}, cfg.MaxConnections)
-		s.connSemMu.Unlock()
-	} else {
-		s.connSemMu.Lock()
-		s.connSem = nil
-		s.connSemMu.Unlock()
-	}
+	s.maxConns.Store(int64(cfg.MaxConnections))
+	proxy.SetTimeouts(cfg.Timeouts)
 	s.config.Store(cfg)
 	s.mgr.Store(mgr)
 	s.router.Store(router)
 	s.geoUpdate = updater
-	s.typeProbe = prober
 	return nil
 }
 
@@ -178,41 +164,49 @@ func (s *Server) Start() error {
 				continue
 			}
 		}
-		sem, ok := s.acquireConnSlot(conn)
-		if !ok {
+		if !s.acquireConnSlot(conn) {
 			continue
 		}
+		s.activeConns.Add(1)
 		go func() {
-			defer s.releaseConnSlot(sem)
+			defer s.activeConns.Done()
+			defer s.releaseConnSlot()
 			s.handle(conn)
 		}()
 	}
 }
 
-func (s *Server) acquireConnSlot(conn net.Conn) (chan struct{}, bool) {
-	s.connSemMu.RLock()
-	sem := s.connSem
-	s.connSemMu.RUnlock()
-	if sem == nil {
-		return nil, true
+func (s *Server) acquireConnSlot(conn net.Conn) bool {
+	max := s.maxConns.Load()
+	if max <= 0 {
+		return true
 	}
-	select {
-	case sem <- struct{}{}:
-		return sem, true
-	default:
-		log.Printf("connection limit reached, closing %s", conn.RemoteAddr())
-		conn.Close()
-		return nil, false
+	for {
+		cur := s.connCount.Load()
+		if cur >= max {
+			log.Printf("connection limit reached, closing %s", conn.RemoteAddr())
+			conn.Close()
+			return false
+		}
+		if s.connCount.CompareAndSwap(cur, cur+1) {
+			return true
+		}
 	}
 }
 
-func (s *Server) releaseConnSlot(sem chan struct{}) {
-	if sem == nil {
+func (s *Server) releaseConnSlot() {
+	max := s.maxConns.Load()
+	if max <= 0 {
 		return
 	}
-	select {
-	case <-sem:
-	default:
+	for {
+		cur := s.connCount.Load()
+		if cur <= 0 {
+			return
+		}
+		if s.connCount.CompareAndSwap(cur, cur-1) {
+			return
+		}
 	}
 }
 
@@ -225,22 +219,29 @@ func (s *Server) Stop() {
 			s.ln.Close()
 		}
 		s.lnMu.Unlock()
+		s.watcherMu.Lock()
 		if s.watcher != nil {
 			s.watcher.Close()
+			s.watcher = nil
 		}
+		s.watcherMu.Unlock()
 		if s.geoUpdate != nil {
 			s.geoUpdate.Stop()
-		}
-		if s.typeProbe != nil {
-			s.typeProbe.Stop()
 		}
 		if mgr := s.Manager(); mgr != nil {
 			mgr.StopHealthCheck()
 		}
+		s.activeConns.Wait()
 	})
 }
 
 func (s *Server) watchConfig() error {
+	s.watcherMu.Lock()
+	defer s.watcherMu.Unlock()
+	if s.watcher != nil {
+		s.watcher.Close()
+		s.watcher = nil
+	}
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -313,7 +314,7 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 
-	if err := conn.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(proxy.ProxyHandshakeTimeout())); err != nil {
 		log.Printf("set handshake deadline: %v", err)
 		return
 	}

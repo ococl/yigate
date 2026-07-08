@@ -30,11 +30,17 @@ func TestLoadConfigWithRouting(t *testing.T) {
 	if len(cfg.Upstreams) == 0 || len(cfg.Upstreams[0].Types) == 0 {
 		t.Fatalf("upstream types were not loaded: %#v", cfg.Upstreams)
 	}
-	if !cfg.UpstreamTypeProbe.Enabled {
-		t.Fatal("upstream type probe was not enabled")
+	if cfg.Timeouts.Dial == 0 {
+		t.Fatal("timeouts.dial was not loaded")
 	}
-	if cfg.UpstreamTypeProbe.CachePath == "" {
-		t.Fatal("upstream type probe cache path was not loaded")
+	if cfg.Timeouts.Handshake == 0 {
+		t.Fatal("timeouts.handshake was not loaded")
+	}
+	if cfg.Timeouts.HTTPExchange == 0 {
+		t.Fatal("timeouts.http_exchange was not loaded")
+	}
+	if cfg.Timeouts.TunnelIdle == 0 {
+		t.Fatal("timeouts.tunnel_idle was not loaded")
 	}
 	if !cfg.Routing.Socks5HRedirect.Enabled {
 		t.Fatal("routing socks5h redirect was not enabled")

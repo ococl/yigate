@@ -7,7 +7,7 @@ import (
 	"net"
 )
 
-func k5pwSOCKS5AddressBytes(host string) ([]byte, error) {
+func socks5AddressBytes(host string) ([]byte, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		if ipv4 := ip.To4(); ipv4 != nil {
 			return append([]byte{0x01}, ipv4...), nil
@@ -24,7 +24,7 @@ func k5pwSOCKS5AddressBytes(host string) ([]byte, error) {
 	return addr, nil
 }
 
-func k5pwReadSOCKS5AddressValue(r io.Reader, atyp byte) (string, error) {
+func readSOCKS5AddressValue(r io.Reader, atyp byte) (string, error) {
 	switch atyp {
 	case 0x01:
 		addr := make([]byte, net.IPv4len)
@@ -53,7 +53,7 @@ func k5pwReadSOCKS5AddressValue(r io.Reader, atyp byte) (string, error) {
 	}
 }
 
-func k5pwReadSOCKS5PortValue(r io.Reader) (int, error) {
+func readSOCKS5PortValue(r io.Reader) (int, error) {
 	var raw [2]byte
 	if _, err := io.ReadFull(r, raw[:]); err != nil {
 		return 0, err

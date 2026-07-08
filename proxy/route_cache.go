@@ -11,13 +11,24 @@ type RouteCacheEntry struct {
 	ExpiresAt    time.Time
 }
 
+const defaultRouteCacheCap = 10000
+
 type RouteCache struct {
 	mu      sync.RWMutex
 	entries map[string]RouteCacheEntry
+	order   []string
+	cap     int
 }
 
 func NewRouteCache() *RouteCache {
-	return &RouteCache{entries: make(map[string]RouteCacheEntry)}
+	return NewRouteCacheWithCap(defaultRouteCacheCap)
+}
+
+func NewRouteCacheWithCap(cap int) *RouteCache {
+	if cap <= 0 {
+		cap = defaultRouteCacheCap
+	}
+	return &RouteCache{entries: make(map[string]RouteCacheEntry), cap: cap}
 }
 
 func (c *RouteCache) Get(key string) (RouteCacheEntry, bool) {
@@ -62,7 +73,15 @@ func (c *RouteCache) set(key string, entry RouteCacheEntry) {
 		return
 	}
 	c.mu.Lock()
+	if _, exists := c.entries[key]; !exists {
+		c.order = append(c.order, key)
+	}
 	c.entries[key] = entry
+	for len(c.entries) > c.cap && len(c.order) > 0 {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.entries, oldest)
+	}
 	c.mu.Unlock()
 }
 

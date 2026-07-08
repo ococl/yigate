@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const minGeoSiteDatSize = 1024
+const (
+	minGeoSiteDatSize      = 1024
+	geoSiteDownloadTimeout = 5 * time.Minute
+)
 
 type GeoSiteUpdater struct {
 	cfg  GeoSiteConfig
@@ -113,7 +116,7 @@ func (u *GeoSiteUpdater) doRequest(req *http.Request) (*http.Response, error) {
 	if u.mgr != nil && u.mgr.AttemptCount(nil) > 0 {
 		return u.requestViaAutoProxy(req)
 	}
-	client := &http.Client{Timeout: httpExchangeTimeout}
+	client := &http.Client{Timeout: geoSiteDownloadTimeout}
 	return client.Do(req)
 }
 
@@ -131,7 +134,7 @@ func (u *GeoSiteUpdater) requestViaAutoProxy(req *http.Request) (*http.Response,
 		}
 		lastErr = err
 		log.Printf("download geosite via upstream %s failed: %v", up.Name, err)
-		u.mgr.markDead(up)
+		// 下载 geosite 失败不应影响上游健康状态，可能是目标 URL 不可达
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no available upstream")
@@ -148,7 +151,7 @@ func requestViaUpstreamClient(req *http.Request, up *Upstream) (*http.Response, 
 	} else {
 		transport.Proxy = http.ProxyURL(up.urlForType(up.primaryProxyType()))
 	}
-	client := &http.Client{Transport: transport, Timeout: httpExchangeTimeout}
+	client := &http.Client{Transport: transport, Timeout: geoSiteDownloadTimeout}
 	return client.Do(req)
 }
 

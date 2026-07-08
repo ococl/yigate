@@ -29,7 +29,7 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 	host, _, err := net.SplitHostPort(target)
 	if router != nil && router.Socks5HEnabled() && err == nil && net.ParseIP(host) != nil {
 		log.Printf("socks5 ip target %s will be handled with sniff/rewrite", target)
-		k5pwHandleSOCKS5ConnectWithSniff(client, target, mgr, router)
+		handleSOCKS5ConnectWithSniff(client, target, mgr, router)
 		return
 	}
 

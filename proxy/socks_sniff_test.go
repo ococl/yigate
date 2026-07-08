@@ -9,24 +9,24 @@ import (
 
 func TestRewriteSOCKS5TargetFromHTTPHost(t *testing.T) {
 	initial := []byte("GET / HTTP/1.1\r\nHost: www.google.com\r\nUser-Agent: k5pw-test\r\n\r\n")
-	got := k5pwRewriteSOCKS5TargetFromInitial("142.250.72.14:80", initial)
+	got := rewriteSOCKS5TargetFromInitial("142.250.72.14:80", initial)
 	if got != "www.google.com:80" {
-		t.Fatalf("k5pwRewriteSOCKS5TargetFromInitial() = %q", got)
+		t.Fatalf("rewriteSOCKS5TargetFromInitial() = %q", got)
 	}
 }
 
 func TestRewriteSOCKS5TargetFromTLSSNI(t *testing.T) {
 	initial := tlsClientHello(t, "www.youtube.com")
-	got := k5pwRewriteSOCKS5TargetFromInitial("142.250.72.14:443", initial)
+	got := rewriteSOCKS5TargetFromInitial("142.250.72.14:443", initial)
 	if got != "www.youtube.com:443" {
-		t.Fatalf("k5pwRewriteSOCKS5TargetFromInitial() = %q", got)
+		t.Fatalf("rewriteSOCKS5TargetFromInitial() = %q", got)
 	}
 }
 
 func TestSOCKS5AddressBytesIPv6(t *testing.T) {
-	addr, err := k5pwSOCKS5AddressBytes("2001:db8::1")
+	addr, err := socks5AddressBytes("2001:db8::1")
 	if err != nil {
-		t.Fatalf("k5pwSOCKS5AddressBytes() error = %v", err)
+		t.Fatalf("socks5AddressBytes() error = %v", err)
 	}
 	if len(addr) != 1+net.IPv6len || addr[0] != 0x04 {
 		t.Fatalf("IPv6 SOCKS5 addr = %#v", addr)

@@ -4,71 +4,71 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io"
+	"log"
 	"net"
 	"strings"
 	"time"
 )
 
-const k5pwSOCKS5SniffTimeout = 2 * time.Second
+const socks5SniffTimeout = 2 * time.Second
 
-func k5pwHandleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router) {
-	if !k5pwShouldSniffSOCKS5Target(target, mgr, router) {
+func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router) {
+	if !shouldSniffSOCKS5Target(target, mgr, router) {
 		remote, err := dialTargetForRequest(target, mgr, router)
 		if err != nil {
-			k5pwWriteSOCKS5ConnectReply(client, 0x05)
+			writeSOCKS5ConnectReply(client, 0x05)
 			return
 		}
 		defer remote.Close()
-		if !k5pwWriteSOCKS5ConnectReply(client, 0x00) {
+		if !writeSOCKS5ConnectReply(client, 0x00) {
 			return
 		}
-		k5pwSOCKS5SniffRelayTCP(client, remote)
+		Tunnel(client, nil, remote)
 		return
 	}
 
 	// socks5:// clients often send an IP after local DNS resolution. Reply first,
 	// then recover the domain from TLS SNI or HTTP Host and redial by name.
-	if !k5pwWriteSOCKS5ConnectReply(client, 0x00) {
+	if !writeSOCKS5ConnectReply(client, 0x00) {
 		return
 	}
-	initial := k5pwReadInitialClientBytes(client)
-	rewritten := k5pwRewriteSOCKS5TargetFromInitial(target, initial)
-	fmt.Printf("[socks5] target=%s rewritten=%s initial=%d\n", target, rewritten, len(initial))
-	remote, err := k5pwDialSOCKS5RecoveredTarget(rewritten, target, mgr, router)
+	initial := readInitialClientBytes(client)
+	rewritten := rewriteSOCKS5TargetFromInitial(target, initial)
+	log.Printf("[socks5] target=%s rewritten=%s initial=%d", target, rewritten, len(initial))
+	remote, err := dialSOCKS5RecoveredTarget(rewritten, target, mgr, router)
 	if err != nil {
-		fmt.Printf("[socks5] connect to %s failed: %v\n", rewritten, err)
+		log.Printf("[socks5] connect to %s failed: %v", rewritten, err)
 		return
 	}
 	defer remote.Close()
-	fmt.Printf("[socks5] connected to %s\n", rewritten)
+	log.Printf("[socks5] connected to %s", rewritten)
 	if len(initial) > 0 {
 		if _, err := remote.Write(initial); err != nil {
-			fmt.Printf("[socks5] write initial to %s failed: %v\n", rewritten, err)
+			log.Printf("[socks5] write initial to %s failed: %v", rewritten, err)
 			return
 		}
 	}
-	k5pwSOCKS5SniffRelayTCP(client, remote)
+	Tunnel(client, nil, remote)
 }
 
-func k5pwDialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
+func dialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
 	if rewritten != original {
 		// 优先使用域名本身走路由（socks5h / domain_suffix 规则），避免本地 DNS 污染
 		// 导致解析到虚假 IP 后 TCP 握手成功但无响应。
 		if conn, err := dialTargetForRequest(rewritten, mgr, router); err == nil {
-			fmt.Printf("[socks5] dial domain %s succeeded\n", rewritten)
+			log.Printf("[socks5] dial domain %s succeeded", rewritten)
 			return conn, nil
 		}
 		// 域名路由失败后再尝试本地解析兜底。
-		if conn, err := k5pwDialLocalResolvedTarget(rewritten, mgr, router); err == nil {
-			fmt.Printf("[socks5] local re-resolve %s succeeded\n", rewritten)
+		if conn, err := dialLocalResolvedTarget(rewritten, mgr, router); err == nil {
+			log.Printf("[socks5] local re-resolve %s succeeded", rewritten)
 			return conn, nil
 		}
 	}
 	return dialTargetForRequest(original, mgr, router)
 }
 
-func k5pwDialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
+func dialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(target)
 	if err != nil {
 		return nil, err
@@ -80,20 +80,20 @@ func k5pwDialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Ro
 	defer cancel()
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
-		fmt.Printf("[socks5] local resolve %s failed: %v\n", host, err)
+		log.Printf("[socks5] local resolve %s failed: %v", host, err)
 		return nil, err
 	}
-	fmt.Printf("[socks5] local resolve %s addrs=%v\n", host, addrs)
+	log.Printf("[socks5] local resolve %s addrs=%v", host, addrs)
 	var lastErr error
-	for _, ip := range k5pwPreferIPv4(addrs) {
+	for _, ip := range preferIPv4(addrs) {
 		dialTarget := net.JoinHostPort(ip.String(), port)
 		conn, err := dialTargetForRequest(dialTarget, mgr, router)
 		if err == nil {
-			fmt.Printf("[socks5] dial %s succeeded\n", dialTarget)
+			log.Printf("[socks5] dial %s succeeded", dialTarget)
 			return conn, nil
 		}
 		lastErr = err
-		fmt.Printf("[socks5] dial %s failed: %v\n", dialTarget, err)
+		log.Printf("[socks5] dial %s failed: %v", dialTarget, err)
 	}
 	if lastErr == nil {
 		lastErr = &net.DNSError{Err: "no addresses", Name: host}
@@ -101,7 +101,7 @@ func k5pwDialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Ro
 	return nil, lastErr
 }
 
-func k5pwPreferIPv4(addrs []net.IPAddr) []net.IP {
+func preferIPv4(addrs []net.IPAddr) []net.IP {
 	ordered := make([]net.IP, 0, len(addrs))
 	for _, addr := range addrs {
 		if ip4 := addr.IP.To4(); ip4 != nil {
@@ -118,7 +118,7 @@ func k5pwPreferIPv4(addrs []net.IPAddr) []net.IP {
 	return ordered
 }
 
-func k5pwShouldSniffSOCKS5Target(target string, mgr *UpstreamManager, router *Router) bool {
+func shouldSniffSOCKS5Target(target string, mgr *UpstreamManager, router *Router) bool {
 	if mgr == nil || router == nil || !router.socks5h.Enabled {
 		return false
 	}
@@ -132,13 +132,13 @@ func k5pwShouldSniffSOCKS5Target(target string, mgr *UpstreamManager, router *Ro
 	return net.ParseIP(host) != nil
 }
 
-func k5pwWriteSOCKS5ConnectReply(conn net.Conn, rep byte) bool {
+func writeSOCKS5ConnectReply(conn net.Conn, rep byte) bool {
 	_, err := conn.Write([]byte{0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 	return err == nil
 }
 
-func k5pwReadInitialClientBytes(conn net.Conn) []byte {
-	_ = conn.SetReadDeadline(time.Now().Add(k5pwSOCKS5SniffTimeout))
+func readInitialClientBytes(conn net.Conn) []byte {
+	_ = conn.SetReadDeadline(time.Now().Add(socks5SniffTimeout))
 	defer conn.SetReadDeadline(time.Time{})
 
 	buf := make([]byte, 0, 8192)
@@ -148,14 +148,14 @@ func k5pwReadInitialClientBytes(conn net.Conn) []byte {
 		if n > 0 {
 			buf = append(buf, tmp[:n]...)
 		}
-		if k5pwHasEnoughInitialBytes(buf) || err != nil {
+		if hasEnoughInitialBytes(buf) || err != nil {
 			break
 		}
 	}
 	return buf
 }
 
-func k5pwHasEnoughInitialBytes(buf []byte) bool {
+func hasEnoughInitialBytes(buf []byte) bool {
 	if len(buf) == 0 {
 		return false
 	}
@@ -176,7 +176,7 @@ func k5pwHasEnoughInitialBytes(buf []byte) bool {
 	return false
 }
 
-func k5pwRewriteSOCKS5TargetFromInitial(target string, initial []byte) string {
+func rewriteSOCKS5TargetFromInitial(target string, initial []byte) string {
 	if len(initial) == 0 {
 		return target
 	}
@@ -184,9 +184,9 @@ func k5pwRewriteSOCKS5TargetFromInitial(target string, initial []byte) string {
 	if err != nil {
 		return target
 	}
-	host := k5pwSniffTLSServerName(initial)
+	host := sniffTLSServerName(initial)
 	if host == "" {
-		host = k5pwSniffHTTPHost(initial)
+		host = sniffHTTPHost(initial)
 	}
 	if host == "" || net.ParseIP(host) != nil {
 		return target
@@ -194,7 +194,7 @@ func k5pwRewriteSOCKS5TargetFromInitial(target string, initial []byte) string {
 	return net.JoinHostPort(host, port)
 }
 
-func k5pwSniffHTTPHost(data []byte) string {
+func sniffHTTPHost(data []byte) string {
 	text := string(data)
 	if !(strings.HasPrefix(text, "GET ") || strings.HasPrefix(text, "POST ") || strings.HasPrefix(text, "HEAD ") || strings.HasPrefix(text, "PUT ") || strings.HasPrefix(text, "DELETE ") || strings.HasPrefix(text, "OPTIONS ") || strings.HasPrefix(text, "PATCH ")) {
 		return ""
@@ -212,7 +212,7 @@ func k5pwSniffHTTPHost(data []byte) string {
 	return ""
 }
 
-func k5pwSniffTLSServerName(data []byte) string {
+func sniffTLSServerName(data []byte) string {
 	if len(data) < 5 || data[0] != 0x16 {
 		return ""
 	}
@@ -262,14 +262,14 @@ func k5pwSniffTLSServerName(data []byte) string {
 		}
 		extData := extensions[4 : 4+extDataLen]
 		if extType == 0x0000 {
-			return k5pwParseTLSServerNameExtension(extData)
+			return parseTLSServerNameExtension(extData)
 		}
 		extensions = extensions[4+extDataLen:]
 	}
 	return ""
 }
 
-func k5pwParseTLSServerNameExtension(data []byte) string {
+func parseTLSServerNameExtension(data []byte) string {
 	if len(data) < 2 {
 		return ""
 	}
@@ -293,18 +293,4 @@ func k5pwParseTLSServerNameExtension(data []byte) string {
 		list = list[3+nameLen:]
 	}
 	return ""
-}
-
-func k5pwSOCKS5SniffRelayTCP(a net.Conn, b net.Conn) {
-	done := make(chan struct{}, 2)
-	go func() {
-		_, _ = io.Copy(b, a)
-		done <- struct{}{}
-	}()
-	go func() {
-		_, _ = io.Copy(a, b)
-		done <- struct{}{}
-	}()
-	<-done
-	<-done
 }

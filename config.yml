@@ -6,10 +6,6 @@ upstreams:
     types: ["http", "https", "socks5", "socks5h"]
     priority: 1
     weight: 5
-upstream_type_probe:
-  enabled: true
-  delay: 30s
-  cache_path: "upstream-types.txt"
 routing:
   final: auto
   geosite:
@@ -45,5 +41,10 @@ routing:
         - "docker.io"
         - "docker.com"
       action: proxy
+timeouts:
+  dial: 10s
+  handshake: 10s
+  http_exchange: 60s
+  tunnel_idle: 5m
 check_interval: 30
 max_connections: 1024

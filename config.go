@@ -13,13 +13,13 @@ import (
 
 // Config 代理服务器配置
 type Config struct {
-	Listen            string                    `yaml:"listen"`
-	Users             map[string]string         `yaml:"users"`
-	Upstreams         []proxy.UpstreamConfig    `yaml:"upstreams"`
-	UpstreamTypeProbe proxy.UpstreamProbeConfig `yaml:"upstream_type_probe"`
-	Routing           proxy.RoutingConfig       `yaml:"routing"`
-	CheckInterval     int                       `yaml:"check_interval"`
-	MaxConnections    int                       `yaml:"max_connections"`
+	Listen         string                 `yaml:"listen"`
+	Users          map[string]string      `yaml:"users"`
+	Upstreams      []proxy.UpstreamConfig `yaml:"upstreams"`
+	Routing        proxy.RoutingConfig    `yaml:"routing"`
+	Timeouts       proxy.TimeoutConfig    `yaml:"timeouts"`
+	CheckInterval  int                    `yaml:"check_interval"`
+	MaxConnections int                    `yaml:"max_connections"`
 }
 
 const (
@@ -32,9 +32,19 @@ func defaultConfig() *Config {
 		Listen:    "127.0.0.1:8891",
 		Users:     make(map[string]string),
 		Upstreams: []proxy.UpstreamConfig{},
-		UpstreamTypeProbe: proxy.UpstreamProbeConfig{
-			Enabled: true,
-			Delay:   proxy.Duration(30 * time.Second),
+		Routing: proxy.RoutingConfig{
+			Final: "auto",
+			Auto: proxy.AutoConfig{
+				Mode:          "direct_first",
+				DirectTimeout: proxy.Duration(1500 * time.Millisecond),
+				CacheTTL:      proxy.Duration(time.Hour),
+			},
+			GeoSite: proxy.GeoSiteConfig{
+				AutoUpdate:     true,
+				UpdateURL:      "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
+				UpdateInterval: proxy.Duration(24 * time.Hour),
+			},
+			Socks5HRedirect: proxy.Socks5HConfig{Enabled: true},
 		},
 		CheckInterval:  30,
 		MaxConnections: defaultMaxConnections,
@@ -67,9 +77,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	baseDir := filepath.Dir(path)
 	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
-	proxy.ResolveUpstreamProbePath(&cfg.UpstreamTypeProbe, baseDir)
 	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
-	proxy.NormalizeUpstreamProbeConfig(&cfg.UpstreamTypeProbe)
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
