@@ -10,8 +10,8 @@ import (
 	"strconv"
 )
 
-// HandleSOCKS 处理 SOCKS5 代理请求
-func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router) {
+// HandleSOCKS5 处理 SOCKS5 代理请求，并在 socks5h_redirect 开启时尝试恢复域名
+func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router) {
 	defer client.Close()
 
 	if err := socks5NegotiateAuth(client, clientReader, users); err != nil {
@@ -23,6 +23,13 @@ func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]s
 	if err != nil {
 		log.Printf("socks5 request: %v", err)
 		socks5Reply(client, 0x01)
+		return
+	}
+
+	host, _, err := net.SplitHostPort(target)
+	if router != nil && router.Socks5HEnabled() && err == nil && net.ParseIP(host) != nil {
+		log.Printf("socks5 ip target %s will be handled with sniff/rewrite", target)
+		k5pwHandleSOCKS5ConnectWithSniff(client, target, mgr, router)
 		return
 	}
 
@@ -45,6 +52,11 @@ func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]s
 
 	socks5Reply(client, 0x00)
 	Tunnel(client, clientReader, targetConn)
+}
+
+// HandleSOCKS is retained as a public alias for callers that use the old name.
+func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router) {
+	HandleSOCKS5(client, clientReader, users, mgr, router)
 }
 
 func socks5NegotiateAuth(client net.Conn, r *bufio.Reader, users map[string]string) error {

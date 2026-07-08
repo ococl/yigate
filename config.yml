@@ -3,7 +3,7 @@ users: {}
 upstreams:
   - name: "default"
     url: "socks5h://10.2.3.150:7897"
-    types: ["socks5", "socks5h"]
+    types: ["http", "https", "socks5", "socks5h"]
     priority: 1
     weight: 5
 upstream_type_probe:

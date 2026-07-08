@@ -11,6 +11,9 @@ geosite.dat
 upstream-types.txt
 *.tmp
 
+# Test artifacts
+.last_proxy_test_summary
+
 # Go
 vendor/
 coverage.out

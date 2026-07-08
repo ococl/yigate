@@ -27,7 +27,7 @@ func TestLoadConfigWithRouting(t *testing.T) {
 	if cfg.Routing.GeoSite.UpdateURL != "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" {
 		t.Fatalf("routing geosite update url = %q", cfg.Routing.GeoSite.UpdateURL)
 	}
-	if len(cfg.Upstreams) == 0 || len(cfg.Upstreams[0].Types) != 2 {
+	if len(cfg.Upstreams) == 0 || len(cfg.Upstreams[0].Types) == 0 {
 		t.Fatalf("upstream types were not loaded: %#v", cfg.Upstreams)
 	}
 	if !cfg.UpstreamTypeProbe.Enabled {

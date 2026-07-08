@@ -663,18 +663,6 @@ func proxyAddress(u *url.URL) string {
 
 // dialSOCKS5 通过 SOCKS5 上游连接到目标
 func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(target)
-	if err != nil {
-		return nil, err
-	}
-	portNum, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, err
-	}
-	if portNum <= 0 || portNum > 65535 {
-		return nil, fmt.Errorf("invalid target port %d", portNum)
-	}
-
 	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), proxyDialTimeout)
 	if err != nil {
 		return nil, err
@@ -684,107 +672,96 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		return nil, err
 	}
 
-	username, password := "", ""
-	if user := u.URL.User; user != nil {
-		username = user.Username()
-		password, _ = user.Password()
+	user := ""
+	pass := ""
+	if u.URL != nil && u.URL.User != nil {
+		user = u.URL.User.Username()
+		pass, _ = u.URL.User.Password()
 	}
-
-	authMethod := byte(0x00)
-	if username != "" {
-		authMethod = 0x02
+	methods := []byte{0x00}
+	if user != "" || pass != "" {
+		if len(user) > 255 || len(pass) > 255 {
+			conn.Close()
+			return nil, errors.New("socks5 credentials too long")
+		}
+		methods = append(methods, 0x02)
 	}
-
-	// greeting
-	if _, err := conn.Write([]byte{0x05, 0x01, authMethod}); err != nil {
+	greeting := []byte{0x05, byte(len(methods))}
+	greeting = append(greeting, methods...)
+	if _, err := conn.Write(greeting); err != nil {
 		conn.Close()
 		return nil, err
 	}
-
-	buf := make([]byte, 2)
-	if _, err := io.ReadFull(conn, buf); err != nil {
+	var methodResp [2]byte
+	if _, err := io.ReadFull(conn, methodResp[:]); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	if buf[0] != 0x05 {
+	if methodResp[0] != 0x05 || methodResp[1] == 0xff {
 		conn.Close()
-		return nil, errors.New("invalid socks5 version")
+		return nil, errors.New("socks5 auth method rejected")
 	}
-	if buf[1] == 0x02 {
-		if err := socks5Auth(conn, username, password); err != nil {
+	if methodResp[1] == 0x02 {
+		auth := []byte{0x01, byte(len(user))}
+		auth = append(auth, []byte(user)...)
+		auth = append(auth, byte(len(pass)))
+		auth = append(auth, []byte(pass)...)
+		if _, err := conn.Write(auth); err != nil {
 			conn.Close()
 			return nil, err
 		}
-	} else if buf[1] != 0x00 {
-		conn.Close()
-		return nil, errors.New("unsupported socks5 auth method")
-	}
-
-	// request
-	ip := net.ParseIP(host)
-	var req []byte
-	if ip4 := ip.To4(); ip4 != nil {
-		req = []byte{0x05, 0x01, 0x00, 0x01}
-		req = append(req, ip4...)
-	} else if ip6 := ip.To16(); ip6 != nil {
-		req = []byte{0x05, 0x01, 0x00, 0x04}
-		req = append(req, ip6...)
-	} else {
-		if len(host) > 255 {
+		var authResp [2]byte
+		if _, err := io.ReadFull(conn, authResp[:]); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("socks5 host name too long: %d", len(host))
+			return nil, err
 		}
-		req = []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
-		req = append(req, []byte(host)...)
-	}
-	req = append(req, byte(portNum>>8), byte(portNum))
-	if _, err := conn.Write(req); err != nil {
-		conn.Close()
-		return nil, err
+		if authResp[0] != 0x01 || authResp[1] != 0x00 {
+			conn.Close()
+			return nil, errors.New("socks5 authentication failed")
+		}
 	}
 
-	// response: VER REP RSV ATYP BND.ADDR BND.PORT
-	resp := make([]byte, 4)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if resp[0] != 0x05 {
-		conn.Close()
-		return nil, errors.New("invalid socks5 response version")
-	}
-	if resp[1] != 0x00 {
-		conn.Close()
-		return nil, fmt.Errorf("socks5 request failed: %d", resp[1])
-	}
-	if resp[2] != 0x00 {
-		conn.Close()
-		return nil, errors.New("invalid socks5 reserved byte")
-	}
-	// skip bound address
-	switch resp[3] {
-	case 0x01: // IPv4
-		_, err = io.ReadFull(conn, make([]byte, 4+2))
-	case 0x03: // domain
-		l := make([]byte, 1)
-		_, err = io.ReadFull(conn, l)
-		if err == nil {
-			_, err = io.ReadFull(conn, make([]byte, int(l[0])+2))
-		}
-	case 0x04: // IPv6
-		_, err = io.ReadFull(conn, make([]byte, 16+2))
-	default:
-		conn.Close()
-		return nil, errors.New("unsupported socks5 address type")
-	}
+	host, portStr, err := net.SplitHostPort(target)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
-	if err := conn.SetDeadline(time.Time{}); err != nil {
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 0 || port > 65535 {
+		conn.Close()
+		return nil, fmt.Errorf("invalid target port %q", portStr)
+	}
+	addr, err := k5pwSOCKS5AddressBytes(host)
+	if err != nil {
 		conn.Close()
 		return nil, err
 	}
+	packet := []byte{0x05, 0x01, 0x00}
+	packet = append(packet, addr...)
+	packet = append(packet, byte(port>>8), byte(port))
+	if _, err := conn.Write(packet); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	var reply [4]byte
+	if _, err := io.ReadFull(conn, reply[:]); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if reply[0] != 0x05 || reply[1] != 0x00 {
+		conn.Close()
+		return nil, fmt.Errorf("socks5 connect failed: 0x%02x", reply[1])
+	}
+	if _, err := k5pwReadSOCKS5AddressValue(conn, reply[3]); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if _, err := k5pwReadSOCKS5PortValue(conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
 	return conn, nil
 }
 
