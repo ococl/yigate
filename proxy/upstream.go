@@ -172,13 +172,14 @@ func (c *bufferedConn) CloseRead() error {
 
 // UpstreamManager 管理多上游、优先级、负载均衡与健康检查
 type UpstreamManager struct {
-	upstreams []*Upstream
-	byName    map[string]*Upstream
-	groups    map[int][]*Upstream
-	order     []int
-	mu        sync.Mutex
-	done      chan struct{}
-	wg        sync.WaitGroup
+	upstreams     []*Upstream
+	byName        map[string]*Upstream
+	groups        map[int][]*Upstream
+	order         []int
+	mu            sync.Mutex
+	done          chan struct{}
+	wg            sync.WaitGroup
+	checkInterval int
 }
 
 // NewUpstreamManager 根据配置创建上游管理器
@@ -369,6 +370,7 @@ func (m *UpstreamManager) StartHealthCheck(interval int) {
 	m.StopHealthCheck()
 
 	m.mu.Lock()
+	m.checkInterval = interval
 	m.done = make(chan struct{})
 	done := m.done
 	m.wg.Add(1)
@@ -504,6 +506,10 @@ func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, err
 
 func (m *UpstreamManager) markDead(up *Upstream) {
 	m.mu.Lock()
+	if m.checkInterval <= 0 {
+		m.mu.Unlock()
+		return
+	}
 	up.dead = true
 	m.mu.Unlock()
 }
@@ -536,11 +542,11 @@ func (u *Upstream) DialSOCKS5H(target string) (net.Conn, error) {
 
 // dialHTTP 通过 HTTP/HTTPS 代理的 CONNECT 建立隧道
 func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
-	conn, err := dialProxyConn(u.urlForType(u.primaryProxyType()), proxyDialTimeout)
+	conn, err := dialProxyConn(u.urlForType(u.primaryProxyType()), ProxyDialTimeout())
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnDeadline(conn, proxyHandshakeTimeout); err != nil {
+	if err := setConnDeadline(conn, ProxyHandshakeTimeout()); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -609,10 +615,11 @@ func tlsConfigForHost(addr string) *tls.Config {
 		host = addr
 	}
 	// TLS SNI 不支持 IP 地址，对 IP 目标不发送 ServerName
-	if net.ParseIP(host) != nil {
-		return &tls.Config{}
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if net.ParseIP(host) == nil {
+		cfg.ServerName = host
 	}
-	return &tls.Config{ServerName: host}
+	return cfg
 }
 
 func proxyAddress(u *url.URL) string {
@@ -631,11 +638,11 @@ func proxyAddress(u *url.URL) string {
 
 // dialSOCKS5 通过 SOCKS5 上游连接到目标
 func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), proxyDialTimeout)
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), ProxyDialTimeout())
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnDeadline(conn, proxyHandshakeTimeout); err != nil {
+	if err := setConnDeadline(conn, ProxyHandshakeTimeout()); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -760,7 +767,7 @@ func socks5Auth(conn net.Conn, username, password string) error {
 
 // DialTarget 直接连接到目标
 func DialTarget(target string) (net.Conn, error) {
-	return DialTargetTimeout(target, proxyDialTimeout)
+	return DialTargetTimeout(target, ProxyDialTimeout())
 }
 
 func DialTargetTimeout(target string, timeout time.Duration) (net.Conn, error) {
@@ -784,8 +791,8 @@ func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn
 		} else {
 			src = clientConn
 		}
-		dr := &deadlineReader{r: src, conn: clientConn, timeout: tunnelIdleTimeout}
-		dst := &deadlineWriter{w: targetConn, conn: targetConn, timeout: tunnelIdleTimeout}
+		dr := &deadlineReader{r: src, conn: clientConn, timeout: TunnelIdleTimeout()}
+		dst := &deadlineWriter{w: targetConn, conn: targetConn, timeout: TunnelIdleTimeout()}
 		_, _ = io.Copy(dst, dr)
 		closeWrite(targetConn)
 		closeRead(clientConn)
@@ -793,8 +800,8 @@ func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn
 
 	go func() {
 		defer wg.Done()
-		src := &deadlineReader{r: targetConn, conn: targetConn, timeout: tunnelIdleTimeout}
-		dst := &deadlineWriter{w: clientConn, conn: clientConn, timeout: tunnelIdleTimeout}
+		src := &deadlineReader{r: targetConn, conn: targetConn, timeout: TunnelIdleTimeout()}
+		dst := &deadlineWriter{w: clientConn, conn: clientConn, timeout: TunnelIdleTimeout()}
 		_, _ = io.Copy(dst, src)
 		closeWrite(clientConn)
 		closeRead(targetConn)

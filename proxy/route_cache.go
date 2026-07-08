@@ -65,6 +65,7 @@ func (c *RouteCache) Delete(key string) {
 	}
 	c.mu.Lock()
 	delete(c.entries, key)
+	c.removeFromOrderLocked(key)
 	c.mu.Unlock()
 }
 
@@ -73,16 +74,26 @@ func (c *RouteCache) set(key string, entry RouteCacheEntry) {
 		return
 	}
 	c.mu.Lock()
-	if _, exists := c.entries[key]; !exists {
-		c.order = append(c.order, key)
+	defer c.mu.Unlock()
+	if _, exists := c.entries[key]; exists {
+		c.removeFromOrderLocked(key)
 	}
+	c.order = append(c.order, key)
 	c.entries[key] = entry
 	for len(c.entries) > c.cap && len(c.order) > 0 {
 		oldest := c.order[0]
 		c.order = c.order[1:]
 		delete(c.entries, oldest)
 	}
-	c.mu.Unlock()
+}
+
+func (c *RouteCache) removeFromOrderLocked(key string) {
+	for i, k := range c.order {
+		if k == key {
+			c.order = append(c.order[:i], c.order[i+1:]...)
+			return
+		}
+	}
 }
 
 func expiresAt(ttl time.Duration) time.Time {

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const maxBufferedRequestBody = 32 << 20
+const maxBufferedRequestBody = 1 << 20 // 1 MiB
 
 type responseBody struct {
 	io.ReadCloser
@@ -45,7 +45,7 @@ func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]st
 		return
 	}
 
-	if err := setConnDeadline(client, httpExchangeTimeout); err != nil {
+	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 		log.Printf("set http deadline: %v", err)
 		return
 	}
@@ -65,12 +65,12 @@ func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, u
 		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
-	if err := setConnDeadline(client, tunnelIdleTimeout); err != nil {
+	if err := setConnDeadline(client, TunnelIdleTimeout()); err != nil {
 		log.Printf("set connect client deadline: %v", err)
 		targetConn.Close()
 		return
 	}
-	if err := setConnDeadline(targetConn, tunnelIdleTimeout); err != nil {
+	if err := setConnDeadline(targetConn, TunnelIdleTimeout()); err != nil {
 		log.Printf("set connect target deadline: %v", err)
 		targetConn.Close()
 		return
@@ -130,7 +130,7 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		resp, err = requestViaSocks5H(req, mgr, router, resetBody)
 		if err == nil {
 			defer resp.Body.Close()
-			if err := setConnDeadline(client, httpExchangeTimeout); err != nil {
+			if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 				log.Printf("set response deadline: %v", err)
 				return
 			}
@@ -157,7 +157,7 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		return
 	}
 	defer resp.Body.Close()
-	if err := setConnDeadline(client, httpExchangeTimeout); err != nil {
+	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 		log.Printf("set response deadline: %v", err)
 		return
 	}
@@ -172,7 +172,7 @@ func requestViaSocks5H(req *http.Request, mgr *UpstreamManager, router *Router, 
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnDeadline(conn, httpExchangeTimeout); err != nil {
+	if err := setConnDeadline(conn, HTTPExchangeTimeout()); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -286,7 +286,7 @@ func viaHTTPUpstream(req *http.Request, up *Upstream) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnDeadline(conn, httpExchangeTimeout); err != nil {
+	if err := setConnDeadline(conn, HTTPExchangeTimeout()); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func viaSOCKS5Upstream(req *http.Request, up *Upstream) (*http.Response, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnDeadline(conn, httpExchangeTimeout); err != nil {
+	if err := setConnDeadline(conn, HTTPExchangeTimeout()); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -330,11 +330,11 @@ func viaSOCKS5Upstream(req *http.Request, up *Upstream) (*http.Response, error) 
 }
 
 func directRequest(req *http.Request) (*http.Response, error) {
-	return directRequestWithDeadlines(req, proxyDialTimeout, httpExchangeTimeout, httpExchangeTimeout)
+	return directRequestWithDeadlines(req, ProxyDialTimeout(), HTTPExchangeTimeout(), HTTPExchangeTimeout())
 }
 
 func directRequestWithTimeout(req *http.Request, timeout time.Duration) (*http.Response, error) {
-	return directRequestWithDeadlines(req, timeout, timeout, httpExchangeTimeout)
+	return directRequestWithDeadlines(req, timeout, timeout, HTTPExchangeTimeout())
 }
 
 func directRequestWithDeadlines(req *http.Request, dialTimeout, headerTimeout, bodyTimeout time.Duration) (*http.Response, error) {
@@ -388,7 +388,7 @@ func targetHost(req *http.Request) string {
 }
 
 func dialRaw(up *Upstream) (net.Conn, error) {
-	return dialProxyConn(up.urlForType(up.primaryProxyType()), proxyDialTimeout)
+	return dialProxyConn(up.urlForType(up.primaryProxyType()), ProxyDialTimeout())
 }
 
 func writeHTTPRequest(w io.Writer, req *http.Request, viaUpstream bool, up *Upstream) error {

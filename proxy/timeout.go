@@ -3,6 +3,7 @@ package proxy
 import (
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,12 +14,23 @@ const (
 	defaultTunnelIdleTimeout     = 5 * time.Minute
 )
 
-var (
-	proxyDialTimeout      = defaultProxyDialTimeout
-	proxyHandshakeTimeout = defaultProxyHandshakeTimeout
-	httpExchangeTimeout   = defaultHTTPExchangeTimeout
-	tunnelIdleTimeout     = defaultTunnelIdleTimeout
-)
+var timeouts atomic.Value
+
+func init() {
+	timeouts.Store(timeoutConfig{
+		dial:      defaultProxyDialTimeout,
+		handshake: defaultProxyHandshakeTimeout,
+		http:      defaultHTTPExchangeTimeout,
+		tunnel:    defaultTunnelIdleTimeout,
+	})
+}
+
+type timeoutConfig struct {
+	dial      time.Duration
+	handshake time.Duration
+	http      time.Duration
+	tunnel    time.Duration
+}
 
 // TimeoutConfig 可配置的超时参数
 type TimeoutConfig struct {
@@ -28,40 +40,44 @@ type TimeoutConfig struct {
 	TunnelIdle   Duration `yaml:"tunnel_idle"`
 }
 
-// SetTimeouts 根据配置更新超时参数，未设置项保持默认值
+// SetTimeouts 根据配置更新超时参数，未设置项保持当前值
 func SetTimeouts(cfg TimeoutConfig) {
+	cur := timeouts.Load().(timeoutConfig)
 	if cfg.Dial > 0 {
-		proxyDialTimeout = time.Duration(cfg.Dial)
+		cur.dial = time.Duration(cfg.Dial)
 	}
 	if cfg.Handshake > 0 {
-		proxyHandshakeTimeout = time.Duration(cfg.Handshake)
+		cur.handshake = time.Duration(cfg.Handshake)
 	}
 	if cfg.HTTPExchange > 0 {
-		httpExchangeTimeout = time.Duration(cfg.HTTPExchange)
+		cur.http = time.Duration(cfg.HTTPExchange)
 	}
 	if cfg.TunnelIdle > 0 {
-		tunnelIdleTimeout = time.Duration(cfg.TunnelIdle)
+		cur.tunnel = time.Duration(cfg.TunnelIdle)
 	}
+	timeouts.Store(cur)
 }
 
 func resetTimeouts() {
-	proxyDialTimeout = defaultProxyDialTimeout
-	proxyHandshakeTimeout = defaultProxyHandshakeTimeout
-	httpExchangeTimeout = defaultHTTPExchangeTimeout
-	tunnelIdleTimeout = defaultTunnelIdleTimeout
+	timeouts.Store(timeoutConfig{
+		dial:      defaultProxyDialTimeout,
+		handshake: defaultProxyHandshakeTimeout,
+		http:      defaultHTTPExchangeTimeout,
+		tunnel:    defaultTunnelIdleTimeout,
+	})
 }
 
 // ProxyDialTimeout 返回当前拨号超时
-func ProxyDialTimeout() time.Duration { return proxyDialTimeout }
+func ProxyDialTimeout() time.Duration { return timeouts.Load().(timeoutConfig).dial }
 
 // ProxyHandshakeTimeout 返回当前握手超时
-func ProxyHandshakeTimeout() time.Duration { return proxyHandshakeTimeout }
+func ProxyHandshakeTimeout() time.Duration { return timeouts.Load().(timeoutConfig).handshake }
 
 // HTTPExchangeTimeout 返回当前 HTTP 交换超时
-func HTTPExchangeTimeout() time.Duration { return httpExchangeTimeout }
+func HTTPExchangeTimeout() time.Duration { return timeouts.Load().(timeoutConfig).http }
 
 // TunnelIdleTimeout 返回当前隧道空闲超时
-func TunnelIdleTimeout() time.Duration { return tunnelIdleTimeout }
+func TunnelIdleTimeout() time.Duration { return timeouts.Load().(timeoutConfig).tunnel }
 
 type deadlineReader struct {
 	r       io.Reader

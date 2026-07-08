@@ -38,6 +38,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 	remote, err := dialSOCKS5RecoveredTarget(rewritten, target, mgr, router)
 	if err != nil {
 		log.Printf("[socks5] connect to %s failed: %v", rewritten, err)
+		client.Close()
 		return
 	}
 	defer remote.Close()
@@ -45,6 +46,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 	if len(initial) > 0 {
 		if _, err := remote.Write(initial); err != nil {
 			log.Printf("[socks5] write initial to %s failed: %v", rewritten, err)
+			client.Close()
 			return
 		}
 	}

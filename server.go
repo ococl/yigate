@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -73,15 +74,18 @@ func (s *Server) ApplyConfig(cfg *Config) error {
 	return s.applyConfig(cfg, true)
 }
 
-func (s *Server) applyConfig(cfg *Config, updateGeoSite bool) error {
+func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
 	if err != nil {
 		return err
 	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
-	if updateGeoSite && cfg.Routing.GeoSite.AutoUpdate {
-		if err := updater.UpdateOnce(); err != nil {
-			log.Printf("initial geosite update failed: %v", err)
+	if initialLoad && cfg.Routing.GeoSite.AutoUpdate {
+		// 仅在 geosite 文件不存在时同步下载，避免每次启动/重载都阻塞。
+		if _, err := os.Stat(cfg.Routing.GeoSite.Path); os.IsNotExist(err) {
+			if err := updater.UpdateOnce(); err != nil {
+				log.Printf("initial geosite update failed: %v", err)
+			}
 		}
 	}
 	router, err := proxy.NewRouter(cfg.Routing)
@@ -123,7 +127,7 @@ func (s *Server) LoadAndApply() error {
 	if old := s.Config(); old != nil && old.Listen != cfg.Listen {
 		log.Printf("config listen changed from %s to %s, restart required to apply", old.Listen, cfg.Listen)
 	}
-	return s.ApplyConfig(cfg)
+	return s.applyConfig(cfg, false)
 }
 
 // Start 启动监听并处理连接
@@ -305,23 +309,25 @@ func (s *Server) watchLoop(w *fsnotify.Watcher) {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer conn.Close()
-
+	// 连接关闭由 public handler 负责，避免重复关闭。
 	cfg := s.Config()
 	mgr := s.Manager()
 	router := s.Router()
 	if cfg == nil || mgr == nil || router == nil {
+		conn.Close()
 		return
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(proxy.ProxyHandshakeTimeout())); err != nil {
 		log.Printf("set handshake deadline: %v", err)
+		conn.Close()
 		return
 	}
 
 	br := bufio.NewReader(conn)
 	b, err := br.Peek(1)
 	if err != nil {
+		conn.Close()
 		return
 	}
 

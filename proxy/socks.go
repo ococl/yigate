@@ -39,12 +39,12 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 		socks5Reply(client, 0x01)
 		return
 	}
-	if err := setConnDeadline(client, tunnelIdleTimeout); err != nil {
+	if err := setConnDeadline(client, TunnelIdleTimeout()); err != nil {
 		log.Printf("set socks5 client deadline: %v", err)
 		targetConn.Close()
 		return
 	}
-	if err := setConnDeadline(targetConn, tunnelIdleTimeout); err != nil {
+	if err := setConnDeadline(targetConn, TunnelIdleTimeout()); err != nil {
 		log.Printf("set socks5 target deadline: %v", err)
 		targetConn.Close()
 		return
