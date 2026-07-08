@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 )
 
 // HandleSOCKS 处理 SOCKS5 代理请求
@@ -142,7 +143,7 @@ func socks5ReadRequest(r *bufio.Reader) (string, error) {
 		return "", err
 	}
 	p := int(port[0])<<8 | int(port[1])
-	return fmt.Sprintf("%s:%d", host, p), nil
+	return net.JoinHostPort(host, strconv.Itoa(p)), nil
 }
 
 func socks5Reply(client net.Conn, rep byte) {

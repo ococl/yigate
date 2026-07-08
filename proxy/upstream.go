@@ -50,6 +50,8 @@ type UpstreamManager struct {
 	groups    map[int][]*Upstream
 	order     []int
 	mu        sync.RWMutex
+	done      chan struct{}
+	wg        sync.WaitGroup
 }
 
 // NewUpstreamManager 根据配置创建上游管理器
@@ -146,10 +148,30 @@ func (m *UpstreamManager) StartHealthCheck(interval int) {
 	if interval <= 0 {
 		interval = 30
 	}
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	defer ticker.Stop()
-	for ; true; <-ticker.C {
-		m.checkAll()
+	m.StopHealthCheck()
+	m.done = make(chan struct{})
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.done:
+				return
+			case <-ticker.C:
+				m.checkAll()
+			}
+		}
+	}()
+}
+
+// StopHealthCheck 停止健康检查
+func (m *UpstreamManager) StopHealthCheck() {
+	if m.done != nil {
+		close(m.done)
+		m.wg.Wait()
+		m.done = nil
 	}
 }
 
@@ -339,23 +361,26 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		return nil, err
 	}
 
-	// response
-	resp := make([]byte, 2)
+	// response: VER REP RSV ATYP BND.ADDR BND.PORT
+	resp := make([]byte, 4)
 	if _, err := io.ReadFull(conn, resp); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	if resp[0] != 0x05 || resp[1] != 0x00 {
+	if resp[0] != 0x05 {
+		conn.Close()
+		return nil, errors.New("invalid socks5 response version")
+	}
+	if resp[1] != 0x00 {
 		conn.Close()
 		return nil, fmt.Errorf("socks5 request failed: %d", resp[1])
 	}
-	// skip bound address
-	addrType := make([]byte, 1)
-	if _, err := io.ReadFull(conn, addrType); err != nil {
+	if resp[2] != 0x00 {
 		conn.Close()
-		return nil, err
+		return nil, errors.New("invalid socks5 reserved byte")
 	}
-	switch addrType[0] {
+	// skip bound address
+	switch resp[3] {
 	case 0x01: // IPv4
 		_, err = io.ReadFull(conn, make([]byte, 4+2))
 	case 0x03: // domain
