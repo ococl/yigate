@@ -11,7 +11,7 @@ import (
 )
 
 // HandleSOCKS 处理 SOCKS5 代理请求
-func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager) {
+func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router) {
 	defer client.Close()
 
 	if err := socks5NegotiateAuth(client, clientReader, users); err != nil {
@@ -26,7 +26,7 @@ func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]s
 		return
 	}
 
-	targetConn, err := mgr.Dial(target)
+	targetConn, err := router.Dial(target, mgr)
 	if err != nil {
 		log.Printf("socks5 connect to %s failed: %v", target, err)
 		socks5Reply(client, 0x01)

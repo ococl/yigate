@@ -1,12 +1,18 @@
 # Binary
 k5pw
 *.exe
+*.new
 
 # Logs
 *.log
 
+# Downloaded routing data
+geosite.dat
+*.tmp
+
 # Go
 vendor/
+coverage.out
 
 # OS
 .DS_Store

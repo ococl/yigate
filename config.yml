@@ -1,8 +1,39 @@
 listen: "0.0.0.0:8891"
 users: {}
 upstreams:
-  - url: "socks5://10.2.3.150:7897"
+  - name: "default"
+    url: "socks5://10.2.3.150:7897"
     priority: 1
     weight: 5
+routing:
+  final: auto
+  geosite:
+    path: "geosite.dat"
+  auto:
+    mode: direct_first
+    direct_timeout: 1500ms
+    cache_ttl: 1h
+  rules:
+    - type: geosite
+      values: ["CN"]
+      action: direct
+    - type: ip_cidr
+      values:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+        - "127.0.0.0/8"
+        - "100.64.0.0/10"
+      action: direct
+    - type: domain_suffix
+      values:
+        - "github.com"
+        - "githubusercontent.com"
+        - "githubassets.com"
+        - "google.com"
+        - "gstatic.com"
+        - "docker.io"
+        - "docker.com"
+      action: proxy
 check_interval: 30
 max_connections: 1024

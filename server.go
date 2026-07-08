@@ -21,6 +21,7 @@ type Server struct {
 	cfgPath   string
 	config    atomic.Value
 	mgr       atomic.Value
+	router    atomic.Value
 	lnMu      sync.Mutex
 	ln        net.Listener
 	quit      chan struct{}
@@ -58,9 +59,21 @@ func (s *Server) Manager() *proxy.UpstreamManager {
 	return nil
 }
 
+// Router 返回当前生效的路由器
+func (s *Server) Router() *proxy.Router {
+	if v := s.router.Load(); v != nil {
+		return v.(*proxy.Router)
+	}
+	return nil
+}
+
 // ApplyConfig 应用新配置，替换上游管理器并重启健康检查
 func (s *Server) ApplyConfig(cfg *Config) error {
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
+	if err != nil {
+		return err
+	}
+	router, err := proxy.NewRouter(cfg.Routing)
 	if err != nil {
 		return err
 	}
@@ -79,6 +92,7 @@ func (s *Server) ApplyConfig(cfg *Config) error {
 	}
 	s.config.Store(cfg)
 	s.mgr.Store(mgr)
+	s.router.Store(router)
 	return nil
 }
 
@@ -256,7 +270,8 @@ func (s *Server) handle(conn net.Conn) {
 
 	cfg := s.Config()
 	mgr := s.Manager()
-	if cfg == nil || mgr == nil {
+	router := s.Router()
+	if cfg == nil || mgr == nil || router == nil {
 		return
 	}
 
@@ -272,8 +287,8 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	if b[0] == 0x05 {
-		proxy.HandleSOCKS(conn, br, cfg.Users, mgr)
+		proxy.HandleSOCKS(conn, br, cfg.Users, mgr, router)
 	} else {
-		proxy.HandleHTTP(conn, br, cfg.Users, mgr)
+		proxy.HandleHTTP(conn, br, cfg.Users, mgr, router)
 	}
 }

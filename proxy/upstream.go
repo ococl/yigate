@@ -13,12 +13,14 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 // UpstreamConfig 单个上游代理配置
 type UpstreamConfig struct {
+	Name     string `yaml:"name"`
 	URL      string `yaml:"url"`
 	Priority int    `yaml:"priority"`
 	Weight   int    `yaml:"weight"`
@@ -26,6 +28,7 @@ type UpstreamConfig struct {
 
 // Upstream 表示一个已解析的上游代理
 type Upstream struct {
+	Name     string
 	URL      *url.URL
 	Priority int
 	Weight   int
@@ -60,6 +63,7 @@ func (c *bufferedConn) CloseRead() error {
 // UpstreamManager 管理多上游、优先级、负载均衡与健康检查
 type UpstreamManager struct {
 	upstreams []*Upstream
+	byName    map[string]*Upstream
 	groups    map[int][]*Upstream
 	order     []int
 	mu        sync.Mutex
@@ -70,9 +74,10 @@ type UpstreamManager struct {
 // NewUpstreamManager 根据配置创建上游管理器
 func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 	m := &UpstreamManager{
+		byName: make(map[string]*Upstream),
 		groups: make(map[int][]*Upstream),
 	}
-	for _, c := range configs {
+	for i, c := range configs {
 		if c.URL == "" {
 			continue
 		}
@@ -86,7 +91,15 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if u.Host == "" {
 			return nil, fmt.Errorf("upstream host missing in %q", c.URL)
 		}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			name = fmt.Sprintf("upstream-%d", i+1)
+		}
+		if _, exists := m.byName[name]; exists {
+			return nil, fmt.Errorf("duplicate upstream name %q", name)
+		}
 		up := &Upstream{
+			Name:     name,
 			URL:      u,
 			Priority: c.Priority,
 			Weight:   c.Weight,
@@ -95,6 +108,7 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 			up.Weight = 1
 		}
 		m.upstreams = append(m.upstreams, up)
+		m.byName[name] = up
 		m.groups[c.Priority] = append(m.groups[c.Priority], up)
 	}
 	for p := range m.groups {
@@ -105,8 +119,12 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 }
 
 // Select 按优先级选择可用上游，同优先级加权轮询
-// 所有上游均不可用时返回 nil，表示回退到自身直连
+// 所有上游均不可用时返回 nil。
 func (m *UpstreamManager) Select() *Upstream {
+	return m.selectFrom(nil)
+}
+
+func (m *UpstreamManager) selectFrom(allowed map[string]struct{}) *Upstream {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -114,9 +132,15 @@ func (m *UpstreamManager) Select() *Upstream {
 		group := m.groups[p]
 		alive := make([]*Upstream, 0, len(group))
 		for _, u := range group {
-			if !u.dead {
-				alive = append(alive, u)
+			if u.dead {
+				continue
 			}
+			if allowed != nil {
+				if _, ok := allowed[u.Name]; !ok {
+					continue
+				}
+			}
+			alive = append(alive, u)
 		}
 		if len(alive) == 0 {
 			continue
@@ -124,6 +148,17 @@ func (m *UpstreamManager) Select() *Upstream {
 		return pickWeighted(alive)
 	}
 	return nil
+}
+
+func (m *UpstreamManager) SelectFor(names []string) *Upstream {
+	return m.selectFrom(namesToSet(names))
+}
+
+func (m *UpstreamManager) AttemptCount(names []string) int {
+	if len(names) == 0 {
+		return len(m.upstreams)
+	}
+	return len(names)
 }
 
 // pickWeighted 平滑加权轮询
@@ -235,21 +270,77 @@ func (u *Upstream) Dial(target string) (net.Conn, error) {
 
 // Dial 尝试通过上游建立连接，单个上游失败时尝试下一个，全部失败后回退自身直连
 func (m *UpstreamManager) Dial(target string) (net.Conn, error) {
-	for i := 0; i < len(m.upstreams); i++ {
-		up := m.Select()
+	conn, _, err := m.DialProxy(target, nil)
+	if err == nil {
+		return conn, nil
+	}
+	return DialTarget(target)
+}
+
+// DialProxy 只通过上游建立连接，names 为空时使用全部上游。
+func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *Upstream, error) {
+	allowed := namesToSet(names)
+	attempts := len(m.upstreams)
+	if allowed != nil {
+		attempts = len(allowed)
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		up := m.selectFrom(allowed)
 		if up == nil {
 			break
 		}
 		conn, err := up.Dial(target)
 		if err == nil {
-			return conn, nil
+			return conn, up, nil
 		}
-		log.Printf("upstream %s dial %s failed: %v", up.URL.Host, target, err)
-		m.mu.Lock()
-		up.dead = true
-		m.mu.Unlock()
+		lastErr = err
+		log.Printf("upstream %s dial %s failed: %v", up.Name, target, err)
+		m.markDead(up)
 	}
-	return DialTarget(target)
+	if lastErr == nil {
+		lastErr = errors.New("no available upstream")
+	}
+	return nil, nil, lastErr
+}
+
+func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, error) {
+	m.mu.Lock()
+	up := m.byName[name]
+	if up != nil && up.dead {
+		up = nil
+	}
+	m.mu.Unlock()
+	if up == nil {
+		return nil, nil, fmt.Errorf("upstream %q unavailable", name)
+	}
+	conn, err := up.Dial(target)
+	if err != nil {
+		log.Printf("upstream %s dial %s failed: %v", up.Name, target, err)
+		m.markDead(up)
+		return nil, nil, err
+	}
+	return conn, up, nil
+}
+
+func (m *UpstreamManager) markDead(up *Upstream) {
+	m.mu.Lock()
+	up.dead = true
+	m.mu.Unlock()
+}
+
+func namesToSet(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			set[name] = struct{}{}
+		}
+	}
+	return set
 }
 
 // dialHTTP 通过 HTTP/HTTPS 代理的 CONNECT 建立隧道
@@ -494,7 +585,11 @@ func socks5Auth(conn net.Conn, username, password string) error {
 
 // DialTarget 直接连接到目标
 func DialTarget(target string) (net.Conn, error) {
-	return net.DialTimeout("tcp", target, proxyDialTimeout)
+	return DialTargetTimeout(target, proxyDialTimeout)
+}
+
+func DialTargetTimeout(target string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout("tcp", target, timeout)
 }
 
 // Tunnel 在客户端与目标连接之间双向转发数据

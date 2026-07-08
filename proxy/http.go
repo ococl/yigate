@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const maxBufferedRequestBody = 32 << 20
@@ -28,7 +30,7 @@ func (b *responseBody) Close() error {
 
 // HandleHTTP 处理 HTTP/HTTPS 代理请求
 // 该方法会复用 clientReader 中已经预读的字节
-func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager) {
+func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router) {
 	defer client.Close()
 
 	req, err := http.ReadRequest(clientReader)
@@ -49,15 +51,15 @@ func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]st
 	}
 
 	if req.Method == "CONNECT" {
-		handleConnect(client, clientReader, req.Host, users, mgr)
+		handleConnect(client, clientReader, req.Host, users, mgr, router)
 		return
 	}
 
-	handleHTTPRequest(client, req, mgr)
+	handleHTTPRequest(client, req, mgr, router)
 }
 
-func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager) {
-	targetConn, err := mgr.Dial(target)
+func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager, router *Router) {
+	targetConn, err := router.Dial(target, mgr)
 	if err != nil {
 		log.Printf("connect to %s failed: %v", target, err)
 		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
@@ -77,12 +79,11 @@ func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, u
 	Tunnel(client, clientReader, targetConn)
 }
 
-func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager) {
+func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) {
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 
-	// 普通 HTTP 请求可能通过上游转发，失败时尝试其他上游或回退直连。
-	// 为支持重试，先把请求体读到内存并允许重复设置。
+	// 普通 HTTP 请求可能需要根据规则重试，先缓存请求体以便重放。
 	var bodyBytes []byte
 	if req.Body != nil {
 		var err error
@@ -114,22 +115,15 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager)
 
 	var resp *http.Response
 	var err error
-	for i := 0; i <= len(mgr.upstreams); i++ {
-		up := mgr.Select()
-		if up == nil {
-			resetBody()
-			resp, err = directRequest(req)
-			break
-		}
+	decision := router.Decide(targetHost(req))
+	switch decision.Action {
+	case ActionDirect:
 		resetBody()
-		resp, err = forwardRequest(req, up)
-		if err == nil {
-			break
-		}
-		log.Printf("forward via upstream %s failed: %v", up.URL.Host, err)
-		mgr.mu.Lock()
-		up.dead = true
-		mgr.mu.Unlock()
+		resp, err = directRequest(req)
+	case ActionProxy:
+		resp, err = requestViaProxy(req, mgr, router, decision.Upstreams, resetBody)
+	default:
+		resp, err = requestAuto(req, mgr, router, resetBody)
 	}
 	if err != nil {
 		log.Printf("forward request: %v", err)
@@ -144,6 +138,76 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager)
 	if err := resp.Write(client); err != nil {
 		log.Printf("write response to client: %v", err)
 	}
+}
+
+func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func()) (*http.Response, error) {
+	target := targetHost(req)
+	key := routeCacheKey(target)
+	if entry, ok := router.cache.Get(key); ok {
+		switch entry.Action {
+		case ActionDirect:
+			resetBody()
+			resp, err := directRequestWithTimeout(req, router.auto.DirectTimeout)
+			if err == nil {
+				return resp, nil
+			}
+			router.cache.Delete(key)
+		case ActionProxy:
+			resp, err := requestViaProxy(req, mgr, router, []string{entry.UpstreamName}, resetBody)
+			if err == nil {
+				return resp, nil
+			}
+			router.cache.Delete(key)
+		}
+	}
+
+	if router.auto.Mode == "proxy_first" {
+		resp, err := requestViaProxy(req, mgr, router, nil, resetBody)
+		if err == nil {
+			return resp, nil
+		}
+		resetBody()
+		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout)
+		if err == nil {
+			router.cache.SetDirect(key, router.auto.CacheTTL)
+		}
+		return resp, err
+	}
+
+	resetBody()
+	resp, directErr := directRequestWithTimeout(req, router.auto.DirectTimeout)
+	if directErr == nil {
+		router.cache.SetDirect(key, router.auto.CacheTTL)
+		return resp, nil
+	}
+	resp, proxyErr := requestViaProxy(req, mgr, router, nil, resetBody)
+	if proxyErr == nil {
+		return resp, nil
+	}
+	return nil, fmt.Errorf("direct failed: %v; proxy failed: %w", directErr, proxyErr)
+}
+
+func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, names []string, resetBody func()) (*http.Response, error) {
+	var lastErr error
+	for i := 0; i < mgr.AttemptCount(names); i++ {
+		up := mgr.SelectFor(names)
+		if up == nil {
+			break
+		}
+		resetBody()
+		resp, err := forwardRequest(req, up)
+		if err == nil {
+			router.cache.SetProxy(routeCacheKey(targetHost(req)), up.Name, router.auto.CacheTTL)
+			return resp, nil
+		}
+		lastErr = err
+		log.Printf("forward via upstream %s failed: %v", up.Name, err)
+		mgr.markDead(up)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no available upstream")
+	}
+	return nil, lastErr
 }
 
 func forwardRequest(req *http.Request, up *Upstream) (*http.Response, error) {
@@ -202,15 +266,23 @@ func viaSOCKS5Upstream(req *http.Request, up *Upstream) (*http.Response, error) 
 }
 
 func directRequest(req *http.Request) (*http.Response, error) {
+	return directRequestWithDeadlines(req, proxyDialTimeout, httpExchangeTimeout, httpExchangeTimeout)
+}
+
+func directRequestWithTimeout(req *http.Request, timeout time.Duration) (*http.Response, error) {
+	return directRequestWithDeadlines(req, timeout, timeout, httpExchangeTimeout)
+}
+
+func directRequestWithDeadlines(req *http.Request, dialTimeout, headerTimeout, bodyTimeout time.Duration) (*http.Response, error) {
 	target := targetHost(req)
 	if target == "" {
 		return nil, errors.New("missing target host")
 	}
-	conn, err := DialTarget(target)
+	conn, err := DialTargetTimeout(target, dialTimeout)
 	if err != nil {
 		return nil, err
 	}
-	if err := setConnDeadline(conn, httpExchangeTimeout); err != nil {
+	if err := setConnDeadline(conn, headerTimeout); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -220,6 +292,11 @@ func directRequest(req *http.Request) (*http.Response, error) {
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := setConnDeadline(conn, bodyTimeout); err != nil {
+		resp.Body.Close()
 		conn.Close()
 		return nil, err
 	}

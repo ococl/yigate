@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,7 @@ type Config struct {
 	Listen         string                 `yaml:"listen"`
 	Users          map[string]string      `yaml:"users"`
 	Upstreams      []proxy.UpstreamConfig `yaml:"upstreams"`
+	Routing        proxy.RoutingConfig    `yaml:"routing"`
 	CheckInterval  int                    `yaml:"check_interval"`
 	MaxConnections int                    `yaml:"max_connections"`
 }
@@ -57,6 +59,7 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.MaxConnections == 0 {
 		cfg.MaxConnections = defaultMaxConnections
 	}
+	proxy.ResolveRoutingPaths(&cfg.Routing, filepath.Dir(path))
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}

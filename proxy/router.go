@@ -1,0 +1,446 @@
+package proxy
+
+import (
+	"fmt"
+	"net"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	ActionDirect = "direct"
+	ActionProxy  = "proxy"
+	ActionAuto   = "auto"
+)
+
+const (
+	defaultAutoMode      = "direct_first"
+	defaultDirectTimeout = 1500 * time.Millisecond
+	defaultCacheTTL      = time.Hour
+)
+
+// Duration supports Go duration strings in YAML, with bare numbers treated as seconds.
+type Duration time.Duration
+
+func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil || strings.TrimSpace(value.Value) == "" {
+		return nil
+	}
+	if value.Tag == "!!int" {
+		seconds, err := strconv.Atoi(value.Value)
+		if err != nil {
+			return err
+		}
+		*d = Duration(time.Duration(seconds) * time.Second)
+		return nil
+	}
+	parsed, err := time.ParseDuration(value.Value)
+	if err == nil {
+		*d = Duration(parsed)
+		return nil
+	}
+	seconds, intErr := strconv.Atoi(value.Value)
+	if intErr == nil {
+		*d = Duration(time.Duration(seconds) * time.Second)
+		return nil
+	}
+	return err
+}
+
+func (d Duration) value(def time.Duration) time.Duration {
+	if d == 0 {
+		return def
+	}
+	return time.Duration(d)
+}
+
+// RoutingConfig defines Clash-like routing rules.
+type RoutingConfig struct {
+	Final   string        `yaml:"final"`
+	GeoSite GeoSiteConfig `yaml:"geosite"`
+	Auto    AutoConfig    `yaml:"auto"`
+	Rules   []RouteRule   `yaml:"rules"`
+}
+
+type GeoSiteConfig struct {
+	Path string `yaml:"path"`
+}
+
+type AutoConfig struct {
+	Mode          string   `yaml:"mode"`
+	DirectTimeout Duration `yaml:"direct_timeout"`
+	CacheTTL      Duration `yaml:"cache_ttl"`
+}
+
+type RouteRule struct {
+	Type      string   `yaml:"type"`
+	Values    []string `yaml:"values"`
+	Action    string   `yaml:"action"`
+	Upstreams []string `yaml:"upstreams"`
+}
+
+type RouteDecision struct {
+	Action    string
+	Upstreams []string
+}
+
+type Router struct {
+	final   RouteDecision
+	rules   []compiledRouteRule
+	geoSite *GeoSiteMatcher
+	auto    autoRuntimeConfig
+	cache   *RouteCache
+}
+
+type autoRuntimeConfig struct {
+	Mode          string
+	DirectTimeout time.Duration
+	CacheTTL      time.Duration
+}
+
+type compiledRouteRule struct {
+	typ      string
+	values   []string
+	regexps  []*regexp.Regexp
+	cidrs    []*net.IPNet
+	decision RouteDecision
+}
+
+func ResolveRoutingPaths(cfg *RoutingConfig, baseDir string) {
+	if cfg == nil || cfg.GeoSite.Path == "" || filepath.IsAbs(cfg.GeoSite.Path) {
+		return
+	}
+	cfg.GeoSite.Path = filepath.Join(baseDir, cfg.GeoSite.Path)
+}
+
+func NewRouter(cfg RoutingConfig) (*Router, error) {
+	finalAction := normalizeAction(cfg.Final)
+	if finalAction == "" {
+		finalAction = ActionAuto
+	}
+	if !validAction(finalAction) {
+		return nil, fmt.Errorf("routing.final has unsupported action %q", cfg.Final)
+	}
+
+	codes := geositeCodes(cfg.Rules)
+	var matcher *GeoSiteMatcher
+	if len(codes) > 0 {
+		if strings.TrimSpace(cfg.GeoSite.Path) == "" {
+			return nil, fmt.Errorf("routing.geosite.path is required when geosite rules are used")
+		}
+		var err error
+		matcher, err = LoadGeoSiteDat(cfg.GeoSite.Path, codes)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	r := &Router{
+		final:   RouteDecision{Action: finalAction},
+		geoSite: matcher,
+		auto: autoRuntimeConfig{
+			Mode:          normalizeAutoMode(cfg.Auto.Mode),
+			DirectTimeout: cfg.Auto.DirectTimeout.value(defaultDirectTimeout),
+			CacheTTL:      cfg.Auto.CacheTTL.value(defaultCacheTTL),
+		},
+		cache: NewRouteCache(),
+	}
+
+	for i, rule := range cfg.Rules {
+		compiled, err := compileRouteRule(rule)
+		if err != nil {
+			return nil, fmt.Errorf("routing.rules[%d]: %w", i, err)
+		}
+		r.rules = append(r.rules, compiled)
+	}
+	return r, nil
+}
+
+func compileRouteRule(rule RouteRule) (compiledRouteRule, error) {
+	typ := normalizeRuleType(rule.Type)
+	if typ == "" {
+		return compiledRouteRule{}, fmt.Errorf("type must not be empty")
+	}
+	action := normalizeAction(rule.Action)
+	if action == "" {
+		action = ActionAuto
+	}
+	if !validAction(action) {
+		return compiledRouteRule{}, fmt.Errorf("unsupported action %q", rule.Action)
+	}
+	compiled := compiledRouteRule{
+		typ: typ,
+		decision: RouteDecision{
+			Action:    action,
+			Upstreams: normalizeUpstreamNames(rule.Upstreams),
+		},
+	}
+
+	switch typ {
+	case "domain", "domain_suffix", "domain_keyword":
+		for _, v := range rule.Values {
+			v = normalizeDomainRuleValue(v)
+			if v != "" {
+				compiled.values = append(compiled.values, v)
+			}
+		}
+	case "geosite":
+		for _, v := range rule.Values {
+			v = normalizeGeoSiteCode(v)
+			if v != "" {
+				compiled.values = append(compiled.values, v)
+			}
+		}
+	case "domain_regex":
+		for _, v := range rule.Values {
+			re, err := regexp.Compile(v)
+			if err != nil {
+				return compiledRouteRule{}, fmt.Errorf("compile regex %q: %w", v, err)
+			}
+			compiled.regexps = append(compiled.regexps, re)
+		}
+	case "ip_cidr":
+		for _, v := range rule.Values {
+			_, network, err := net.ParseCIDR(strings.TrimSpace(v))
+			if err != nil {
+				return compiledRouteRule{}, fmt.Errorf("parse cidr %q: %w", v, err)
+			}
+			compiled.cidrs = append(compiled.cidrs, network)
+		}
+	case "match":
+		// MATCH does not need values.
+	default:
+		return compiledRouteRule{}, fmt.Errorf("unsupported type %q", rule.Type)
+	}
+	return compiled, nil
+}
+
+func (r *Router) Decide(target string) RouteDecision {
+	if r == nil {
+		return RouteDecision{Action: ActionAuto}
+	}
+	host := normalizeTargetHost(target)
+	ip := net.ParseIP(host)
+	for _, rule := range r.rules {
+		if rule.match(host, ip, r.geoSite) {
+			return rule.decision
+		}
+	}
+	return r.final
+}
+
+func (r *Router) Dial(target string, mgr *UpstreamManager) (net.Conn, error) {
+	decision := r.Decide(target)
+	switch decision.Action {
+	case ActionDirect:
+		return DialTarget(target)
+	case ActionProxy:
+		conn, _, err := r.dialProxy(target, mgr, decision.Upstreams)
+		return conn, err
+	default:
+		return r.dialAuto(target, mgr)
+	}
+}
+
+func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error) {
+	key := routeCacheKey(target)
+	if entry, ok := r.cache.Get(key); ok {
+		switch entry.Action {
+		case ActionDirect:
+			conn, err := DialTarget(target)
+			if err == nil {
+				return conn, nil
+			}
+			r.cache.Delete(key)
+		case ActionProxy:
+			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName})
+			if err == nil {
+				return conn, nil
+			}
+			r.cache.Delete(key)
+		}
+	}
+
+	if r.auto.Mode == "proxy_first" {
+		if conn, up, err := r.dialProxy(target, mgr, nil); err == nil {
+			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
+			return conn, nil
+		}
+		conn, err := DialTargetTimeout(target, r.auto.DirectTimeout)
+		if err == nil {
+			r.cache.SetDirect(key, r.auto.CacheTTL)
+		}
+		return conn, err
+	}
+
+	conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
+	if directErr == nil {
+		r.cache.SetDirect(key, r.auto.CacheTTL)
+		return conn, nil
+	}
+	conn, up, proxyErr := r.dialProxy(target, mgr, nil)
+	if proxyErr == nil {
+		r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
+		return conn, nil
+	}
+	return nil, fmt.Errorf("direct failed: %v; proxy failed: %w", directErr, proxyErr)
+}
+
+func (r *Router) dialProxy(target string, mgr *UpstreamManager, names []string) (net.Conn, *Upstream, error) {
+	key := routeCacheKey(target)
+	if len(names) == 0 {
+		if entry, ok := r.cache.Get(key); ok && entry.Action == ActionProxy && entry.UpstreamName != "" {
+			if conn, up, err := mgr.DialOne(target, entry.UpstreamName); err == nil {
+				return conn, up, nil
+			}
+			r.cache.Delete(key)
+		}
+	}
+	conn, up, err := mgr.DialProxy(target, names)
+	if err == nil && up != nil {
+		r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
+	}
+	return conn, up, err
+}
+
+func (rule compiledRouteRule) match(host string, ip net.IP, matcher *GeoSiteMatcher) bool {
+	switch rule.typ {
+	case "domain":
+		for _, value := range rule.values {
+			if host == value {
+				return true
+			}
+		}
+	case "domain_suffix":
+		for _, value := range rule.values {
+			if domainSuffixMatch(host, value) {
+				return true
+			}
+		}
+	case "domain_keyword":
+		for _, value := range rule.values {
+			if strings.Contains(host, value) {
+				return true
+			}
+		}
+	case "domain_regex":
+		for _, re := range rule.regexps {
+			if re.MatchString(host) {
+				return true
+			}
+		}
+	case "ip_cidr":
+		if ip == nil {
+			return false
+		}
+		for _, network := range rule.cidrs {
+			if network.Contains(ip) {
+				return true
+			}
+		}
+	case "geosite":
+		if matcher == nil || ip != nil {
+			return false
+		}
+		for _, code := range rule.values {
+			if matcher.Match(code, host) {
+				return true
+			}
+		}
+	case "match":
+		return true
+	}
+	return false
+}
+
+func routeCacheKey(target string) string {
+	return normalizeTargetHost(target)
+}
+
+func normalizeTargetHost(target string) string {
+	host := target
+	if h, _, err := net.SplitHostPort(target); err == nil {
+		host = h
+	}
+	host = strings.Trim(strings.ToLower(host), "[] ")
+	host = strings.TrimSuffix(host, ".")
+	return host
+}
+
+func normalizeRuleType(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.ReplaceAll(v, "-", "_")
+	return v
+}
+
+func normalizeAction(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
+}
+
+func validAction(action string) bool {
+	return action == ActionDirect || action == ActionProxy || action == ActionAuto
+}
+
+func normalizeAutoMode(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "proxy_first" {
+		return v
+	}
+	return defaultAutoMode
+}
+
+func normalizeDomainRuleValue(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.TrimPrefix(v, "+.")
+	v = strings.TrimPrefix(v, ".")
+	v = strings.TrimSuffix(v, ".")
+	return v
+}
+
+func normalizeGeoSiteCode(v string) string {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	v = strings.TrimPrefix(v, "GEOSITE:")
+	return strings.TrimSpace(v)
+}
+
+func normalizeUpstreamNames(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func domainSuffixMatch(host, suffix string) bool {
+	return host == suffix || strings.HasSuffix(host, "."+suffix)
+}
+
+func geositeCodes(rules []RouteRule) []string {
+	seen := make(map[string]struct{})
+	var codes []string
+	for _, rule := range rules {
+		if normalizeRuleType(rule.Type) != "geosite" {
+			continue
+		}
+		for _, value := range rule.Values {
+			code := normalizeGeoSiteCode(value)
+			if code == "" {
+				continue
+			}
+			if _, ok := seen[code]; ok {
+				continue
+			}
+			seen[code] = struct{}{}
+			codes = append(codes, code)
+		}
+	}
+	return codes
+}
