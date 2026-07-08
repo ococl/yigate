@@ -26,7 +26,7 @@ func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]s
 		return
 	}
 
-	targetConn, err := router.Dial(target, mgr)
+	targetConn, err := dialTargetForRequest(target, mgr, router)
 	if err != nil {
 		log.Printf("socks5 connect to %s failed: %v", target, err)
 		socks5Reply(client, 0x01)

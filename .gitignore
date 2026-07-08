@@ -8,6 +8,7 @@ k5pw
 
 # Downloaded routing data
 geosite.dat
+upstream-types.txt
 *.tmp
 
 # Go

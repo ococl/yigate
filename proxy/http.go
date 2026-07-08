@@ -59,7 +59,7 @@ func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]st
 }
 
 func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager, router *Router) {
-	targetConn, err := router.Dial(target, mgr)
+	targetConn, err := dialTargetForRequest(target, mgr, router)
 	if err != nil {
 		log.Printf("connect to %s failed: %v", target, err)
 		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
@@ -77,6 +77,17 @@ func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, u
 	}
 	writeResponse(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
 	Tunnel(client, clientReader, targetConn)
+}
+
+func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
+	if router != nil && router.Socks5HEnabled() {
+		conn, err := router.DialSocks5H(target, mgr)
+		if err == nil {
+			return conn, nil
+		}
+		log.Printf("socks5h redirect to %s failed, fallback to routing: %v", target, err)
+	}
+	return router.Dial(target, mgr)
 }
 
 func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) {
@@ -115,6 +126,21 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 
 	var resp *http.Response
 	var err error
+	if router.Socks5HEnabled() {
+		resp, err = requestViaSocks5H(req, mgr, router, resetBody)
+		if err == nil {
+			defer resp.Body.Close()
+			if err := setConnDeadline(client, httpExchangeTimeout); err != nil {
+				log.Printf("set response deadline: %v", err)
+				return
+			}
+			if err := resp.Write(client); err != nil {
+				log.Printf("write response to client: %v", err)
+			}
+			return
+		}
+		log.Printf("socks5h request failed, fallback to routing: %v", err)
+	}
 	decision := router.Decide(targetHost(req))
 	switch decision.Action {
 	case ActionDirect:
@@ -138,6 +164,29 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 	if err := resp.Write(client); err != nil {
 		log.Printf("write response to client: %v", err)
 	}
+}
+
+func requestViaSocks5H(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func()) (*http.Response, error) {
+	resetBody()
+	conn, err := router.DialSocks5H(targetHost(req), mgr)
+	if err != nil {
+		return nil, err
+	}
+	if err := setConnDeadline(conn, httpExchangeTimeout); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := writeHTTPRequest(conn, req, false, nil); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	resp.Body = &responseBody{ReadCloser: resp.Body, conn: conn}
+	return resp, nil
 }
 
 func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func()) (*http.Response, error) {
@@ -211,10 +260,13 @@ func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, na
 }
 
 func forwardRequest(req *http.Request, up *Upstream) (*http.Response, error) {
-	if up.URL.Scheme == "http" || up.URL.Scheme == "https" {
+	switch up.primaryProxyType() {
+	case ProxyTypeHTTP, ProxyTypeHTTPS:
 		return viaHTTPUpstream(req, up)
+	case ProxyTypeSocks5, ProxyTypeSocks5H:
+		return viaSOCKS5Upstream(req, up)
 	}
-	return viaSOCKS5Upstream(req, up)
+	return nil, errors.New("unsupported upstream type")
 }
 
 func viaHTTPUpstream(req *http.Request, up *Upstream) (*http.Response, error) {
@@ -324,7 +376,7 @@ func targetHost(req *http.Request) string {
 }
 
 func dialRaw(up *Upstream) (net.Conn, error) {
-	return dialProxyConn(up.URL, proxyDialTimeout)
+	return dialProxyConn(up.urlForType(up.primaryProxyType()), proxyDialTimeout)
 }
 
 func writeHTTPRequest(w io.Writer, req *http.Request, viaUpstream bool, up *Upstream) error {

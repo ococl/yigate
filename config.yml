@@ -2,17 +2,27 @@ listen: "0.0.0.0:8891"
 users: {}
 upstreams:
   - name: "default"
-    url: "socks5://10.2.3.150:7897"
+    url: "socks5h://10.2.3.150:7897"
+    types: ["socks5", "socks5h"]
     priority: 1
     weight: 5
+upstream_type_probe:
+  enabled: true
+  delay: 30s
+  cache_path: "upstream-types.txt"
 routing:
   final: auto
   geosite:
     path: "geosite.dat"
+    auto_update: true
+    update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+    update_interval: 24h
   auto:
     mode: direct_first
     direct_timeout: 1500ms
     cache_ttl: 1h
+  socks5h_redirect:
+    enabled: true
   rules:
     - type: geosite
       values: ["CN"]

@@ -18,6 +18,27 @@ func TestLoadConfigWithRouting(t *testing.T) {
 	if cfg.Routing.GeoSite.Path == "" {
 		t.Fatal("routing geosite path was not loaded")
 	}
+	if !cfg.Routing.GeoSite.AutoUpdate {
+		t.Fatal("routing geosite auto update was not enabled")
+	}
+	if cfg.Routing.GeoSite.UpdateURL == "" {
+		t.Fatal("routing geosite update url was not defaulted")
+	}
+	if cfg.Routing.GeoSite.UpdateURL != "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" {
+		t.Fatalf("routing geosite update url = %q", cfg.Routing.GeoSite.UpdateURL)
+	}
+	if len(cfg.Upstreams) == 0 || len(cfg.Upstreams[0].Types) != 2 {
+		t.Fatalf("upstream types were not loaded: %#v", cfg.Upstreams)
+	}
+	if !cfg.UpstreamTypeProbe.Enabled {
+		t.Fatal("upstream type probe was not enabled")
+	}
+	if cfg.UpstreamTypeProbe.CachePath == "" {
+		t.Fatal("upstream type probe cache path was not loaded")
+	}
+	if !cfg.Routing.Socks5HRedirect.Enabled {
+		t.Fatal("routing socks5h redirect was not enabled")
+	}
 	if len(cfg.Routing.Rules) == 0 {
 		t.Fatal("routing rules were not loaded")
 	}

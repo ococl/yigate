@@ -22,6 +22,8 @@ type Server struct {
 	config    atomic.Value
 	mgr       atomic.Value
 	router    atomic.Value
+	geoUpdate *proxy.GeoSiteUpdater
+	typeProbe *proxy.UpstreamTypeProber
 	lnMu      sync.Mutex
 	ln        net.Listener
 	quit      chan struct{}
@@ -69,18 +71,46 @@ func (s *Server) Router() *proxy.Router {
 
 // ApplyConfig 应用新配置，替换上游管理器并重启健康检查
 func (s *Server) ApplyConfig(cfg *Config) error {
+	return s.applyConfig(cfg, true)
+}
+
+func (s *Server) applyConfig(cfg *Config, updateGeoSite bool) error {
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
 	if err != nil {
 		return err
+	}
+	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
+	prober := proxy.NewUpstreamTypeProber(cfg.UpstreamTypeProbe, mgr)
+	if updateGeoSite && cfg.Routing.GeoSite.AutoUpdate {
+		if err := updater.UpdateOnce(); err != nil {
+			log.Printf("initial geosite update failed: %v", err)
+		}
 	}
 	router, err := proxy.NewRouter(cfg.Routing)
 	if err != nil {
 		return err
 	}
+	if oldUpdater := s.geoUpdate; oldUpdater != nil {
+		oldUpdater.Stop()
+	}
+	if oldProber := s.typeProbe; oldProber != nil {
+		oldProber.Stop()
+	}
 	if old := s.Manager(); old != nil {
 		old.StopHealthCheck()
 	}
 	mgr.StartHealthCheck(cfg.CheckInterval)
+	prober.Start()
+	updater.Start(func() {
+		cfg, err := LoadConfig(s.cfgPath)
+		if err != nil {
+			log.Printf("load after geosite update: %v", err)
+			return
+		}
+		if err := s.applyConfig(cfg, false); err != nil {
+			log.Printf("reload after geosite update: %v", err)
+		}
+	})
 	if cfg.MaxConnections > 0 {
 		s.connSemMu.Lock()
 		s.connSem = make(chan struct{}, cfg.MaxConnections)
@@ -93,6 +123,8 @@ func (s *Server) ApplyConfig(cfg *Config) error {
 	s.config.Store(cfg)
 	s.mgr.Store(mgr)
 	s.router.Store(router)
+	s.geoUpdate = updater
+	s.typeProbe = prober
 	return nil
 }
 
@@ -195,6 +227,12 @@ func (s *Server) Stop() {
 		s.lnMu.Unlock()
 		if s.watcher != nil {
 			s.watcher.Close()
+		}
+		if s.geoUpdate != nil {
+			s.geoUpdate.Stop()
+		}
+		if s.typeProbe != nil {
+			s.typeProbe.Stop()
 		}
 		if mgr := s.Manager(); mgr != nil {
 			mgr.StopHealthCheck()

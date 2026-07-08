@@ -18,23 +18,164 @@ import (
 	"time"
 )
 
+const (
+	ProxyTypeHTTP    = "http"
+	ProxyTypeHTTPS   = "https"
+	ProxyTypeSocks5  = "socks5"
+	ProxyTypeSocks5H = "socks5h"
+)
+
+func normalizeProxyTypes(values []string) ([]string, bool, error) {
+	if len(values) == 0 {
+		return nil, false, nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	types := make([]string, 0, len(values))
+	for _, value := range values {
+		typ := normalizeProxyType(value)
+		if typ == "" {
+			return nil, true, fmt.Errorf("unsupported proxy type %q", value)
+		}
+		if _, ok := seen[typ]; ok {
+			continue
+		}
+		seen[typ] = struct{}{}
+		types = append(types, typ)
+	}
+	return types, true, nil
+}
+
+func normalizeProxyType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ProxyTypeHTTP:
+		return ProxyTypeHTTP
+	case ProxyTypeHTTPS:
+		return ProxyTypeHTTPS
+	case ProxyTypeSocks5:
+		return ProxyTypeSocks5
+	case ProxyTypeSocks5H:
+		return ProxyTypeSocks5H
+	default:
+		return ""
+	}
+}
+
+func (u *Upstream) proxyTypes() []string {
+	if u == nil {
+		return nil
+	}
+	u.typesMu.RLock()
+	defer u.typesMu.RUnlock()
+	return append([]string(nil), u.Types...)
+}
+
+func (u *Upstream) supportsProxyType(typ string) bool {
+	if u == nil {
+		return false
+	}
+	typ = normalizeProxyType(typ)
+	if typ == "" {
+		return false
+	}
+	u.typesMu.RLock()
+	defer u.typesMu.RUnlock()
+	for _, candidate := range u.Types {
+		if candidate == typ || (typ == ProxyTypeSocks5 && candidate == ProxyTypeSocks5H) {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *Upstream) setDetectedTypes(types []string) {
+	if u == nil || u.ExplicitTypes || len(types) == 0 {
+		return
+	}
+	u.typesMu.Lock()
+	defer u.typesMu.Unlock()
+	u.Types = append([]string(nil), types...)
+	u.typesSource = "probe"
+}
+
+func (u *Upstream) setCachedTypes(types []string) {
+	if u == nil || u.ExplicitTypes || len(types) == 0 {
+		return
+	}
+	u.typesMu.Lock()
+	defer u.typesMu.Unlock()
+	u.Types = append([]string(nil), types...)
+	u.typesSource = "cache"
+}
+
+func (u *Upstream) typeSource() string {
+	if u == nil {
+		return ""
+	}
+	u.typesMu.RLock()
+	defer u.typesMu.RUnlock()
+	return u.typesSource
+}
+
+func (u *Upstream) primaryProxyType() string {
+	if u == nil {
+		return ""
+	}
+	types := u.proxyTypes()
+	if len(types) > 0 {
+		return types[0]
+	}
+	if u.URL != nil {
+		return normalizeProxyType(u.URL.Scheme)
+	}
+	return ""
+}
+
+func (u *Upstream) urlForType(typ string) *url.URL {
+	if u == nil || u.URL == nil {
+		return nil
+	}
+	proxyURL := *u.URL
+	if typ = normalizeProxyType(typ); typ != "" {
+		proxyURL.Scheme = typ
+	}
+	return &proxyURL
+}
+
+func (u *Upstream) withProxyType(typ string) *Upstream {
+	proxyURL := u.urlForType(typ)
+	if proxyURL == nil {
+		return u
+	}
+	return &Upstream{Name: u.Name, URL: proxyURL}
+}
+
+func ValidateProxyTypes(values []string) error {
+	_, _, err := normalizeProxyTypes(values)
+	return err
+}
+
 // UpstreamConfig 单个上游代理配置
 type UpstreamConfig struct {
-	Name     string `yaml:"name"`
-	URL      string `yaml:"url"`
-	Priority int    `yaml:"priority"`
-	Weight   int    `yaml:"weight"`
+	Name     string   `yaml:"name"`
+	URL      string   `yaml:"url"`
+	Types    []string `yaml:"types"`
+	Priority int      `yaml:"priority"`
+	Weight   int      `yaml:"weight"`
 }
 
 // Upstream 表示一个已解析的上游代理
 type Upstream struct {
-	Name     string
-	URL      *url.URL
-	Priority int
-	Weight   int
+	Name          string
+	URL           *url.URL
+	Types         []string
+	ExplicitTypes bool
+	Priority      int
+	Weight        int
 
-	current int
-	dead    bool
+	typesMu     sync.RWMutex
+	typesSource string
+	current     int
+	dead        bool
 }
 
 type bufferedConn struct {
@@ -85,7 +226,7 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse upstream %q: %w", c.URL, err)
 		}
-		if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5" {
+		if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5" && u.Scheme != "socks5h" {
 			return nil, fmt.Errorf("unsupported upstream scheme %q in %q", u.Scheme, c.URL)
 		}
 		if u.Host == "" {
@@ -98,11 +239,24 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if _, exists := m.byName[name]; exists {
 			return nil, fmt.Errorf("duplicate upstream name %q", name)
 		}
+		types, explicitTypes, err := normalizeProxyTypes(c.Types)
+		if err != nil {
+			return nil, fmt.Errorf("upstreams[%d].types: %w", i, err)
+		}
+		if len(types) == 0 {
+			types = []string{normalizeProxyType(u.Scheme)}
+		}
 		up := &Upstream{
-			Name:     name,
-			URL:      u,
-			Priority: c.Priority,
-			Weight:   c.Weight,
+			Name:          name,
+			URL:           u,
+			Types:         types,
+			ExplicitTypes: explicitTypes,
+			Priority:      c.Priority,
+			Weight:        c.Weight,
+			typesSource:   "url",
+		}
+		if explicitTypes {
+			up.typesSource = "config"
 		}
 		if up.Weight <= 0 {
 			up.Weight = 1
@@ -154,11 +308,69 @@ func (m *UpstreamManager) SelectFor(names []string) *Upstream {
 	return m.selectFrom(namesToSet(names))
 }
 
+func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
+	allowed := namesToSet(names)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.order {
+		group := m.groups[p]
+		alive := make([]*Upstream, 0, len(group))
+		for _, u := range group {
+			if u.dead || !u.supportsProxyType(ProxyTypeSocks5) {
+				continue
+			}
+			if allowed != nil {
+				if _, ok := allowed[u.Name]; !ok {
+					continue
+				}
+			}
+			alive = append(alive, u)
+		}
+		if len(alive) == 0 {
+			continue
+		}
+		return pickWeighted(alive)
+	}
+	return nil
+}
+
 func (m *UpstreamManager) AttemptCount(names []string) int {
 	if len(names) == 0 {
 		return len(m.upstreams)
 	}
 	return len(names)
+}
+
+func (m *UpstreamManager) Socks5AttemptCount(names []string) int {
+	allowed := namesToSet(names)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	count := 0
+	for _, up := range m.upstreams {
+		if !up.supportsProxyType(ProxyTypeSocks5) {
+			continue
+		}
+		if allowed != nil {
+			if _, ok := allowed[up.Name]; !ok {
+				continue
+			}
+		}
+		count++
+	}
+	return count
+}
+
+func (m *UpstreamManager) Socks5ByName(name string) *Upstream {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	up := m.byName[name]
+	if up == nil || up.dead || !up.supportsProxyType(ProxyTypeSocks5) {
+		return nil
+	}
+	return up
 }
 
 // pickWeighted 平滑加权轮询
@@ -259,13 +471,16 @@ func (m *UpstreamManager) check(u *Upstream) bool {
 
 // Dial 通过该上游连接到目标地址 target（host:port）
 func (u *Upstream) Dial(target string) (net.Conn, error) {
-	switch u.URL.Scheme {
-	case "http", "https":
+	if u == nil {
+		return nil, errors.New("nil upstream")
+	}
+	switch u.primaryProxyType() {
+	case ProxyTypeHTTP, ProxyTypeHTTPS:
 		return u.dialHTTP(target)
-	case "socks5":
+	case ProxyTypeSocks5, ProxyTypeSocks5H:
 		return u.dialSOCKS5(target)
 	}
-	return nil, fmt.Errorf("unsupported scheme %q", u.URL.Scheme)
+	return nil, fmt.Errorf("unsupported upstream type %q", u.primaryProxyType())
 }
 
 // Dial 尝试通过上游建立连接，单个上游失败时尝试下一个，全部失败后回退自身直连
@@ -329,6 +544,10 @@ func (m *UpstreamManager) markDead(up *Upstream) {
 	m.mu.Unlock()
 }
 
+func (u *Upstream) isSocks5() bool {
+	return u != nil && u.supportsProxyType(ProxyTypeSocks5)
+}
+
 func namesToSet(names []string) map[string]struct{} {
 	if len(names) == 0 {
 		return nil
@@ -343,9 +562,17 @@ func namesToSet(names []string) map[string]struct{} {
 	return set
 }
 
+// DialSOCKS5H 通过 SOCKS5 上游以域名地址类型连接目标，避免本地 DNS 解析。
+func (u *Upstream) DialSOCKS5H(target string) (net.Conn, error) {
+	if !u.isSocks5() {
+		return nil, fmt.Errorf("upstream %q is not socks5", u.Name)
+	}
+	return u.dialSOCKS5(target)
+}
+
 // dialHTTP 通过 HTTP/HTTPS 代理的 CONNECT 建立隧道
 func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
-	conn, err := dialProxyConn(u.URL, proxyDialTimeout)
+	conn, err := dialProxyConn(u.urlForType(u.primaryProxyType()), proxyDialTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +655,7 @@ func proxyAddress(u *url.URL) string {
 	switch u.Scheme {
 	case "https":
 		port = "443"
-	case "socks5":
+	case "socks5", "socks5h":
 		port = "1080"
 	}
 	return net.JoinHostPort(u.Hostname(), port)
@@ -448,7 +675,7 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		return nil, fmt.Errorf("invalid target port %d", portNum)
 	}
 
-	conn, err := net.DialTimeout("tcp", proxyAddress(u.URL), proxyDialTimeout)
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), proxyDialTimeout)
 	if err != nil {
 		return nil, err
 	}

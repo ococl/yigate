@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"k5pw/proxy"
@@ -12,12 +13,13 @@ import (
 
 // Config 代理服务器配置
 type Config struct {
-	Listen         string                 `yaml:"listen"`
-	Users          map[string]string      `yaml:"users"`
-	Upstreams      []proxy.UpstreamConfig `yaml:"upstreams"`
-	Routing        proxy.RoutingConfig    `yaml:"routing"`
-	CheckInterval  int                    `yaml:"check_interval"`
-	MaxConnections int                    `yaml:"max_connections"`
+	Listen            string                    `yaml:"listen"`
+	Users             map[string]string         `yaml:"users"`
+	Upstreams         []proxy.UpstreamConfig    `yaml:"upstreams"`
+	UpstreamTypeProbe proxy.UpstreamProbeConfig `yaml:"upstream_type_probe"`
+	Routing           proxy.RoutingConfig       `yaml:"routing"`
+	CheckInterval     int                       `yaml:"check_interval"`
+	MaxConnections    int                       `yaml:"max_connections"`
 }
 
 const (
@@ -27,9 +29,13 @@ const (
 
 func defaultConfig() *Config {
 	return &Config{
-		Listen:         "127.0.0.1:8891",
-		Users:          make(map[string]string),
-		Upstreams:      []proxy.UpstreamConfig{},
+		Listen:    "127.0.0.1:8891",
+		Users:     make(map[string]string),
+		Upstreams: []proxy.UpstreamConfig{},
+		UpstreamTypeProbe: proxy.UpstreamProbeConfig{
+			Enabled: true,
+			Delay:   proxy.Duration(30 * time.Second),
+		},
 		CheckInterval:  30,
 		MaxConnections: defaultMaxConnections,
 	}
@@ -59,7 +65,11 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.MaxConnections == 0 {
 		cfg.MaxConnections = defaultMaxConnections
 	}
-	proxy.ResolveRoutingPaths(&cfg.Routing, filepath.Dir(path))
+	baseDir := filepath.Dir(path)
+	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
+	proxy.ResolveUpstreamProbePath(&cfg.UpstreamTypeProbe, baseDir)
+	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
+	proxy.NormalizeUpstreamProbeConfig(&cfg.UpstreamTypeProbe)
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -85,6 +95,9 @@ func validateConfig(cfg *Config) error {
 		}
 		if up.Weight > maxUpstreamWeight {
 			return fmt.Errorf("upstreams[%d].weight must be <= %d", i, maxUpstreamWeight)
+		}
+		if err := proxy.ValidateProxyTypes(up.Types); err != nil {
+			return fmt.Errorf("upstreams[%d].types: %w", i, err)
 		}
 	}
 	return nil

@@ -19,9 +19,11 @@ const (
 )
 
 const (
-	defaultAutoMode      = "direct_first"
-	defaultDirectTimeout = 1500 * time.Millisecond
-	defaultCacheTTL      = time.Hour
+	defaultAutoMode              = "direct_first"
+	defaultDirectTimeout         = 1500 * time.Millisecond
+	defaultCacheTTL              = time.Hour
+	defaultGeoSiteUpdateURL      = "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+	defaultGeoSiteUpdateInterval = 24 * time.Hour
 )
 
 // Duration supports Go duration strings in YAML, with bare numbers treated as seconds.
@@ -61,14 +63,23 @@ func (d Duration) value(def time.Duration) time.Duration {
 
 // RoutingConfig defines Clash-like routing rules.
 type RoutingConfig struct {
-	Final   string        `yaml:"final"`
-	GeoSite GeoSiteConfig `yaml:"geosite"`
-	Auto    AutoConfig    `yaml:"auto"`
-	Rules   []RouteRule   `yaml:"rules"`
+	Final           string        `yaml:"final"`
+	GeoSite         GeoSiteConfig `yaml:"geosite"`
+	Auto            AutoConfig    `yaml:"auto"`
+	Socks5HRedirect Socks5HConfig `yaml:"socks5h_redirect"`
+	Rules           []RouteRule   `yaml:"rules"`
 }
 
 type GeoSiteConfig struct {
-	Path string `yaml:"path"`
+	Path           string   `yaml:"path"`
+	AutoUpdate     bool     `yaml:"auto_update"`
+	UpdateURL      string   `yaml:"update_url"`
+	UpdateInterval Duration `yaml:"update_interval"`
+}
+
+type Socks5HConfig struct {
+	Enabled   bool     `yaml:"enabled"`
+	Upstreams []string `yaml:"upstreams"`
 }
 
 type AutoConfig struct {
@@ -94,6 +105,7 @@ type Router struct {
 	rules   []compiledRouteRule
 	geoSite *GeoSiteMatcher
 	auto    autoRuntimeConfig
+	socks5h Socks5HConfig
 	cache   *RouteCache
 }
 
@@ -147,6 +159,10 @@ func NewRouter(cfg RoutingConfig) (*Router, error) {
 			Mode:          normalizeAutoMode(cfg.Auto.Mode),
 			DirectTimeout: cfg.Auto.DirectTimeout.value(defaultDirectTimeout),
 			CacheTTL:      cfg.Auto.CacheTTL.value(defaultCacheTTL),
+		},
+		socks5h: Socks5HConfig{
+			Enabled:   cfg.Socks5HRedirect.Enabled,
+			Upstreams: normalizeUpstreamNames(cfg.Socks5HRedirect.Upstreams),
 		},
 		cache: NewRouteCache(),
 	}
