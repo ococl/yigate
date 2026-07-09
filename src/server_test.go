@@ -300,6 +300,7 @@ func TestServerReloadViaManagementAPI(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
 management: 127.0.0.1:0
+management_auth_token: test-token
 log:
   level: info
   output: stdout
@@ -332,6 +333,7 @@ log:
 	}
 
 	req, _ := http.NewRequest(http.MethodPost, "http://"+mgmtAddr+"/api/v1/reload", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("reload request: %v", err)

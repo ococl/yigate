@@ -1,9 +1,11 @@
-listen: "0.0.0.0:4479"
-# management: "127.0.0.1:8892"  # 可选管理端口，提供 /health 与 /metrics
-users: {}
+listen: "127.0.0.1:4479"
+management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
+management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"  # 非空时所有管理端点要求 Authorization: Bearer <token>
+users:
+  username: "${K5PW_PROXY_PASSWORD}"
 upstreams:
   - name: "default"
-    url: "socks5h://your-upstream-ip:port"
+    url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"
     types: ["http", "https", "socks5", "socks5h"]
     priority: 1
     weight: 5

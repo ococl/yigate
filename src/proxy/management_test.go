@@ -200,6 +200,66 @@ func TestManagementServerReloadNotConfigured(t *testing.T) {
 	}
 }
 
+func TestManagementServerAuthToken(t *testing.T) {
+	m := NewManagementServer(func() HealthStatus {
+		return HealthStatus{Status: "up", RouterReady: true, ManagerReady: true}
+	}, true, "secret-token")
+	m.SetStatusSnapshotGetter(func() StatusSnapshot {
+		return StatusSnapshot{Status: "up"}
+	})
+	m.SetReload(func() error { return nil })
+	if m.AuthToken() != "secret-token" {
+		t.Fatal("expected auth token set")
+	}
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+
+	resp, err := http.Get("http://" + addr + "/health")
+	if err != nil {
+		t.Fatalf("unauthenticated health: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("health without token = %d, want 401", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated status: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status with token = %d, want 200", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, "http://"+addr+"/api/v1/reload", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated reload: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reload with token = %d, want 200", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, "http://"+addr+"/debug/pprof/", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authenticated pprof: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pprof with token = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestManagementSetters(t *testing.T) {
 	m := NewManagementServer(nil, false)
 	m.SetPprofEnabled(true)

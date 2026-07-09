@@ -14,17 +14,18 @@ import (
 
 // Config 代理服务器配置
 type Config struct {
-	Listen         string                    `yaml:"listen"`
-	Management     string                    `yaml:"management"`
-	Users          map[string]string         `yaml:"users"`
-	Upstreams      []proxy.UpstreamConfig    `yaml:"upstreams"`
-	Routing        proxy.RoutingConfig       `yaml:"routing"`
-	Timeouts       proxy.TimeoutConfig       `yaml:"timeouts"`
-	Log            proxy.LogConfig           `yaml:"log"`
-	CheckInterval  int                       `yaml:"check_interval"`
-	MaxConnections int                       `yaml:"max_connections"`
-	AccessControl  proxy.AccessControlConfig `yaml:"access_control"`
-	EnablePprof    bool                      `yaml:"enable_pprof"`
+	Listen              string                    `yaml:"listen"`
+	Management          string                    `yaml:"management"`
+	ManagementAuthToken string                    `yaml:"management_auth_token"`
+	Users               map[string]string         `yaml:"users"`
+	Upstreams           []proxy.UpstreamConfig    `yaml:"upstreams"`
+	Routing             proxy.RoutingConfig       `yaml:"routing"`
+	Timeouts            proxy.TimeoutConfig       `yaml:"timeouts"`
+	Log                 proxy.LogConfig           `yaml:"log"`
+	CheckInterval       int                       `yaml:"check_interval"`
+	MaxConnections      int                       `yaml:"max_connections"`
+	AccessControl       proxy.AccessControlConfig `yaml:"access_control"`
+	EnablePprof         bool                      `yaml:"enable_pprof"`
 }
 
 const (
@@ -81,6 +82,9 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.MaxConnections == 0 {
 		cfg.MaxConnections = defaultMaxConnections
 	}
+	if err := expandConfigEnv(cfg); err != nil {
+		return nil, err
+	}
 	baseDir := filepath.Dir(path)
 	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
 	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
@@ -89,6 +93,69 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func expandConfigEnv(cfg *Config) error {
+	if cfg.ManagementAuthToken != "" {
+		expanded, err := expandEnvStrict("management_auth_token", cfg.ManagementAuthToken)
+		if err != nil {
+			return err
+		}
+		cfg.ManagementAuthToken = strings.TrimSpace(expanded)
+		if cfg.ManagementAuthToken == "" {
+			return fmt.Errorf("management_auth_token must not be empty")
+		}
+	}
+	for user, pass := range cfg.Users {
+		if strings.TrimSpace(user) == "" {
+			return fmt.Errorf("users contains empty username")
+		}
+		expanded, err := expandEnvStrict(fmt.Sprintf("users[%q]", user), pass)
+		if err != nil {
+			return err
+		}
+		expanded = strings.TrimSpace(expanded)
+		if expanded == "" {
+			return fmt.Errorf("users[%q] password must not be empty", user)
+		}
+		cfg.Users[user] = expanded
+	}
+	for i := range cfg.Upstreams {
+		expanded, err := expandEnvStrict(fmt.Sprintf("upstreams[%d].url", i), cfg.Upstreams[i].URL)
+		if err != nil {
+			return err
+		}
+		cfg.Upstreams[i].URL = strings.TrimSpace(expanded)
+	}
+	return nil
+}
+
+func expandEnvStrict(field, value string) (string, error) {
+	var missing []string
+	expanded := os.Expand(value, func(name string) string {
+		v, ok := os.LookupEnv(name)
+		if !ok || v == "" {
+			missing = append(missing, name)
+			return ""
+		}
+		return v
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("%s references unset or empty environment variable %s", field, strings.Join(missing, ","))
+	}
+	return expanded, nil
+}
+
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validateConfig(cfg *Config) error {
@@ -103,6 +170,9 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.MaxConnections < 0 {
 		return fmt.Errorf("max_connections must be >= 0")
+	}
+	if cfg.Management != "" && !isLoopbackListen(cfg.Management) && cfg.ManagementAuthToken == "" {
+		return fmt.Errorf("management_auth_token is required when management listens on a non-loopback address")
 	}
 	if err := proxy.ValidateLogConfig(cfg.Log); err != nil {
 		return fmt.Errorf("log: %w", err)

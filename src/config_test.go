@@ -162,6 +162,16 @@ func TestValidateConfigErrors(t *testing.T) {
 	if err := validateConfig(cfg); err == nil {
 		t.Fatal("expected error for invalid CIDR")
 	}
+
+	cfg = defaultConfig()
+	cfg.Management = "0.0.0.0:8892"
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("expected error for public management without auth token")
+	}
+	cfg.ManagementAuthToken = "secret-token"
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("unexpected error for public management with auth token: %v", err)
+	}
 }
 
 func TestLoadConfigMissingFile(t *testing.T) {
@@ -183,5 +193,66 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if cfg.MaxConnections != defaultMaxConnections {
 		t.Fatalf("max connections default = %d", cfg.MaxConnections)
+	}
+}
+
+func TestLoadConfigExpandsSensitiveEnv(t *testing.T) {
+	t.Setenv("K5PW_MANAGEMENT_TOKEN", "mgmt-token")
+	t.Setenv("K5PW_PROXY_PASSWORD", "proxy-pass")
+	t.Setenv("UPSTREAM_HOST", "127.0.0.1")
+	t.Setenv("UPSTREAM_PORT", "1080")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"
+users:
+  alice: "${K5PW_PROXY_PASSWORD}"
+upstreams:
+  - name: default
+    url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"
+`), 0644)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ManagementAuthToken != "mgmt-token" {
+		t.Fatalf("management token = %q", cfg.ManagementAuthToken)
+	}
+	if cfg.Users["alice"] != "proxy-pass" {
+		t.Fatalf("user password = %q", cfg.Users["alice"])
+	}
+	if cfg.Upstreams[0].URL != "socks5h://127.0.0.1:1080" {
+		t.Fatalf("upstream url = %q", cfg.Upstreams[0].URL)
+	}
+}
+
+func TestLoadConfigRejectsMissingSensitiveEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+management_auth_token: "${MISSING_TOKEN}"
+`), 0644)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for missing management token env")
+	}
+
+	path = filepath.Join(dir, "config-users.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+users:
+  alice: "${MISSING_PASSWORD}"
+`), 0644)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for missing user password env")
+	}
+
+	path = filepath.Join(dir, "config-upstream.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+upstreams:
+  - url: "socks5h://${MISSING_HOST}:1080"
+`), 0644)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for missing upstream env")
 	}
 }

@@ -41,7 +41,7 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 	s := &Server{
 		cfgPath: cfgPath,
 		quit:    make(chan struct{}),
-		mgmt:    proxy.NewManagementServer(nil, cfg.EnablePprof),
+		mgmt:    proxy.NewManagementServer(nil, cfg.EnablePprof, cfg.ManagementAuthToken),
 	}
 	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
 	s.mgmt.SetReload(s.reloadConfig)
@@ -166,7 +166,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 	_ = oldRouter // 旧 router 无背景任务，直接由 GC 回收即可。
 
-	if s.mgmtAddr != cfg.Management || s.mgmt.PprofEnabled() != cfg.EnablePprof {
+	if s.mgmtAddr != cfg.Management || s.mgmt.PprofEnabled() != cfg.EnablePprof || s.mgmt.AuthToken() != cfg.ManagementAuthToken {
 		if s.mgmtAddr != "" {
 			s.mgmt.Stop()
 		}
@@ -183,7 +183,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 				ManagerReady:  s.Manager() != nil,
 				RouterReady:   s.Router() != nil,
 			}
-		}, cfg.EnablePprof)
+		}, cfg.EnablePprof, cfg.ManagementAuthToken)
 		if cfg.Management != "" {
 			if err := s.mgmt.Start(cfg.Management); err != nil {
 				proxy.Logger().Warnw("start management server failed", "address", cfg.Management, "error", err)

@@ -2,11 +2,13 @@ package proxy
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"strings"
 	"sync"
 	"time"
 )
@@ -40,6 +42,7 @@ type ManagementServer struct {
 	getStatusSnapshot func() StatusSnapshot
 	reload            func() error
 	enablePprof       bool
+	authToken         string
 	mu                sync.Mutex
 	ln                net.Listener
 	srv               *http.Server
@@ -48,10 +51,16 @@ type ManagementServer struct {
 
 // NewManagementServer 创建管理服务器，getStatus 提供当前健康状态。
 // enablePprof 为 true 时注册 /debug/pprof 路由，用于线上问题排查。
-func NewManagementServer(getStatus func() HealthStatus, enablePprof bool) *ManagementServer {
+// authToken 非空时，所有管理端点都要求 Authorization: Bearer <token>。
+func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authToken ...string) *ManagementServer {
+	token := ""
+	if len(authToken) > 0 {
+		token = strings.TrimSpace(authToken[0])
+	}
 	m := &ManagementServer{
 		getStatus:   getStatus,
 		enablePprof: enablePprof,
+		authToken:   token,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", m.handleHealth)
@@ -73,7 +82,7 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool) *Manag
 			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
 		}
 		for path, h := range m.pprofHandlers {
-			mux.Handle(path, h)
+			mux.Handle(path, m.authenticatedHandler(h))
 		}
 	}
 	m.srv = &http.Server{
@@ -83,6 +92,50 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool) *Manag
 		IdleTimeout:  60 * time.Second,
 	}
 	return m
+}
+
+func (m *ManagementServer) AuthToken() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.authToken
+}
+
+func (m *ManagementServer) checkAuth(r *http.Request) bool {
+	m.mu.Lock()
+	token := m.authToken
+	m.mu.Unlock()
+	if token == "" {
+		return true
+	}
+	const prefix = "Bearer "
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, prefix) {
+		return false
+	}
+	provided := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	if provided == "" || len(provided) != len(token) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+}
+
+func (m *ManagementServer) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	if m.checkAuth(r) {
+		return true
+	}
+	w.Header().Set("WWW-Authenticate", `Bearer realm="k5pw-management"`)
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "unauthorized"})
+	return false
+}
+
+func (m *ManagementServer) authenticatedHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !m.requireAuth(w, r) {
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // SetPprofEnabled 动态启用或禁用 pprof 端点。需要重启管理服务器生效。
@@ -176,6 +229,9 @@ func (m *ManagementServer) handleHealth(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	if !m.requireAuth(w, r) {
+		return
+	}
 	MetricInc("k5pw_management_requests_total", "path=/health")
 	m.mu.Lock()
 	getStatus := m.getStatus
@@ -202,6 +258,9 @@ func (m *ManagementServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	if !m.requireAuth(w, r) {
+		return
+	}
 	MetricInc("k5pw_management_requests_total", "path=/metrics")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -211,6 +270,9 @@ func (m *ManagementServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 func (m *ManagementServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !m.requireAuth(w, r) {
 		return
 	}
 	MetricInc("k5pw_management_requests_total", "path=/api/v1/status")
@@ -242,6 +304,9 @@ func (m *ManagementServer) handleStatus(w http.ResponseWriter, r *http.Request) 
 func (m *ManagementServer) handleReload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !m.requireAuth(w, r) {
 		return
 	}
 	MetricInc("k5pw_management_requests_total", "path=/api/v1/reload")
