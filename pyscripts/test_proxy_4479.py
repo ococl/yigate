@@ -478,7 +478,8 @@ def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
     """使用指定代理批量访问测试站点，返回结果列表。"""
     results = []
     for site in TEST_SITES:
-        proxies = {scheme: proxy_url}
+        # 测试 URL 都是 https://，因此无论入口代理类型是 http/socks5/socks5h，都需要为 https 设置代理
+        proxies = {"http": proxy_url, "https": proxy_url}
         try:
             r = requests.get(
                 site["url"],
@@ -511,6 +512,22 @@ def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
 # 主函数
 # ---------------------------------------------------------------------------
 
+def wait_for_upstream_recovery(timeout=45):
+    """等待上游从 BIND/UDP 测试中恢复。代理健康检查周期默认 30s，这里最多轮询 45s。"""
+    probe_url = "https://github.com"
+    proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}", "https": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = requests.get(probe_url, proxies=proxies, timeout=10, verify=False)
+            if r.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
+
+
 def run_single_tests():
     print_header("单能力测试")
     tests = [
@@ -534,6 +551,11 @@ def run_single_tests():
 
 def run_site_tests():
     print_header("路由分流测试（外部站点）")
+    print(f"{Colors.INFO}等待上游健康检查恢复...{Colors.RESET}")
+    if wait_for_upstream_recovery():
+        print(f"{Colors.OK}上游已恢复{Colors.RESET}")
+    else:
+        print(f"{Colors.WARN}上游尚未恢复，站点测试可能因无可用上游而失败{Colors.RESET}")
     all_results = {}
     for label, url in [
         ("HTTP", f"http://{PROXY_HOST}:{PROXY_PORT}"),
