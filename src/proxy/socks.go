@@ -19,7 +19,7 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 		return
 	}
 
-	target, rep, err := socks5ReadRequest(clientReader)
+	cmd, target, rep, err := socks5ReadRequest(clientReader)
 	if err != nil {
 		log.Printf("socks5 request: %v", err)
 		if rep == 0 {
@@ -29,6 +29,20 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 		return
 	}
 
+	switch cmd {
+	case 0x01: // CONNECT
+		handleSOCKS5Connect(client, clientReader, target, mgr, router)
+	case 0x02: // BIND
+		handleSOCKS5Bind(client, target)
+	case 0x03: // UDP ASSOCIATE
+		handleSOCKS5UDPAssociate(client, clientReader, target)
+	default:
+		log.Printf("socks5 unsupported command %d", cmd)
+		socks5Reply(client, 0x07)
+	}
+}
+
+func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router) {
 	host, _, err := net.SplitHostPort(target)
 	if router != nil && router.Socks5HEnabled() && err == nil && net.ParseIP(host) != nil {
 		log.Printf("socks5 ip target %s will be handled with sniff/rewrite", target)
@@ -123,19 +137,17 @@ func socks5ServerAuth(client net.Conn, r *bufio.Reader, users map[string]string)
 	return err
 }
 
-func socks5ReadRequest(r *bufio.Reader) (string, byte, error) {
+func socks5ReadRequest(r *bufio.Reader) (cmd byte, target string, rep byte, err error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(r, header); err != nil {
-		return "", 0x01, err
+		return 0, "", 0x01, err
 	}
 	if header[0] != 0x05 {
-		return "", 0x01, errors.New("invalid version")
+		return 0, "", 0x01, errors.New("invalid version")
 	}
-	if header[1] != 0x01 {
-		return "", 0x07, fmt.Errorf("unsupported command %d", header[1])
-	}
+	cmd = header[1]
 	if header[2] != 0x00 {
-		return "", 0x01, errors.New("invalid reserved byte")
+		return 0, "", 0x01, errors.New("invalid reserved byte")
 	}
 
 	var host string
@@ -143,41 +155,78 @@ func socks5ReadRequest(r *bufio.Reader) (string, byte, error) {
 	case 0x01: // IPv4
 		ip := make([]byte, 4)
 		if _, err := io.ReadFull(r, ip); err != nil {
-			return "", 0x01, err
+			return 0, "", 0x01, err
 		}
 		host = net.IP(ip).String()
 	case 0x03: // domain
 		l := make([]byte, 1)
 		if _, err := io.ReadFull(r, l); err != nil {
-			return "", 0x01, err
+			return 0, "", 0x01, err
 		}
 		domain := make([]byte, l[0])
 		if _, err := io.ReadFull(r, domain); err != nil {
-			return "", 0x01, err
+			return 0, "", 0x01, err
 		}
 		host = string(domain)
 	case 0x04: // IPv6
 		ip := make([]byte, 16)
 		if _, err := io.ReadFull(r, ip); err != nil {
-			return "", 0x01, err
+			return 0, "", 0x01, err
 		}
 		host = net.IP(ip).String()
 	default:
-		return "", 0x08, fmt.Errorf("unsupported address type %d", header[3])
+		return 0, "", 0x08, fmt.Errorf("unsupported address type %d", header[3])
 	}
 
 	port := make([]byte, 2)
 	if _, err := io.ReadFull(r, port); err != nil {
-		return "", 0x01, err
+		return 0, "", 0x01, err
 	}
 	p := int(port[0])<<8 | int(port[1])
-	return net.JoinHostPort(host, strconv.Itoa(p)), 0x00, nil
+	return cmd, net.JoinHostPort(host, strconv.Itoa(p)), 0x00, nil
 }
 
 func socks5Reply(client net.Conn, rep byte) {
-	if _, err := client.Write([]byte{0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
-		log.Printf("write socks5 reply: %v", err)
+	_ = socks5ReplyWithAddr(client, rep, "0.0.0.0:0")
+}
+
+func socks5ReplyWithAddr(client net.Conn, rep byte, addr string) bool {
+	if addr == "" {
+		addr = "0.0.0.0:0"
 	}
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = "0.0.0.0"
+		portStr = "0"
+	}
+	// 0.0.0.0/:: 对客户端无意义，回复 127.0.0.1 便于本地测试与使用。
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		port = 0
+	}
+
+	var reply []byte
+	if ip := net.ParseIP(host); ip != nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			reply = []byte{0x05, rep, 0x00, 0x01}
+			reply = append(reply, ip4...)
+		} else {
+			reply = []byte{0x05, rep, 0x00, 0x04}
+			reply = append(reply, ip.To16()...)
+		}
+	} else {
+		reply = []byte{0x05, rep, 0x00, 0x03, byte(len(host))}
+		reply = append(reply, []byte(host)...)
+	}
+	reply = append(reply, byte(port>>8), byte(port))
+	if _, err := client.Write(reply); err != nil {
+		log.Printf("write socks5 reply: %v", err)
+		return false
+	}
+	return true
 }
 
 func contains(b []byte, v byte) bool {

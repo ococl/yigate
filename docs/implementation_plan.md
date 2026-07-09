@@ -11,7 +11,7 @@
 | P0 | 上游凭据在 URL 中明文 | 安全风险，泄露上游认证信息 | 支持通过环境变量注入上游用户名/密码 |
 | P0 | 健康检查仅 TCP 拨号 | 无法识别协议层故障 | 改为协议级探测（HTTP/SOCKS5 握手） |
 | P1 | HTTP 普通请求不支持 chunked 编码 | 部分现代客户端/请求会失败 | 对 chunked 请求改为直接透传，禁用重试但保证可用 |
-| P1 | SOCKS5 不支持 BIND/UDP ASSOCIATE | 功能缺口，不符合完整 SOCKS5 标准 | 返回标准错误码 `0x07`（Command not supported），并记录日志；后续可逐步补充实现 |
+| P1 | SOCKS5 不支持 BIND/UDP ASSOCIATE | 功能缺口，不符合完整 SOCKS5 标准 | 已实现 CONNECT/BIND/UDP ASSOCIATE 三种命令，BIND/UDP ASSOCIATE 当前仅支持本地直连 |
 | P1 | 监听地址变更需重启 | 配置热加载不完整 | 支持 `listen` 变更时平滑重启监听（先启动新 listener，再关闭旧 listener） |
 | P2 | 请求体缓冲 1 MiB 限制 | 大文件上传受限 | 超大请求体改为直接透传，不缓冲；或把限制改为可配置项 |
 | P2 | socks5h 嗅探失败回退 | 可能受 DNS 污染影响 | 保持现有回退，但增加更明确的日志和统计 |
@@ -35,5 +35,5 @@
 
 ## 备注
 
-- 本计划按“小步快跑”原则，优先解决安全和可用性问题，完整 SOCKS5 实现作为后续迭代。
+- 本计划按“小步快跑”原则，优先解决安全和可用性问题，完整 SOCKS5 协议覆盖（CONNECT/BIND/UDP ASSOCIATE）已在本轮迭代完成。
 - 所有变更完成后应再次提交一次代码。

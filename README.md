@@ -5,7 +5,7 @@
 ## 功能
 
 - **统一端口**：HTTP/HTTPS/SOCKS5 共用一个监听端口，自动识别协议。
-- **协议支持**：普通 HTTP 请求转发、HTTPS CONNECT 隧道、SOCKS5 CONNECT。
+- **协议支持**：普通 HTTP 请求转发、HTTPS CONNECT 隧道、SOCKS5 CONNECT/BIND/UDP ASSOCIATE。
 - **级联与多上游**：可配置多个上级代理，支持 HTTP、HTTPS、SOCKS5 三种上游。
 - **规则分流**：支持 `direct`、`proxy`、`auto` 三种动作，可按域名、域名后缀、关键词、正则、IP CIDR、GEOSITE 匹配。
 - **GEOSITE**：可直接读取并自动更新 v2ray/xray/sing-box 生态的 `geosite.dat`，例如使用 `GEOSITE:CN` 让国内站点直连。
@@ -236,7 +236,7 @@ curl -x socks5://username:your-password@127.0.0.1:4479 https://www.example.com
 ## 注意
 
 - 本项目仅用于学习、测试或内部网络管理，请勿用于非法用途。
-- 仅实现了 SOCKS5 的 CONNECT 命令，暂不支持 BIND 与 UDP ASSOCIATE；收到这些命令会返回标准错误码 `0x07`。
+- 已实现 SOCKS5 CONNECT、BIND 和 UDP ASSOCIATE；BIND 与 UDP ASSOCIATE 目前仅支持本地直连，暂未通过上游代理级联。
 - 普通 HTTP 请求默认缓冲最多 1 MiB 请求体以支持重试；chunked 编码或超过 1 MiB 的请求体会改为直接透传，透传时无法重试。
 - `GEOSITE:CN` 是域名分流，不需要提前 DNS 解析；GEOIP 暂未实现。
 - 监听地址变更后保存配置即可热加载，无需重启服务。

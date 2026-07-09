@@ -132,7 +132,12 @@ python3 pyscripts/test_proxy_8891.py
 
 ### SOCKS5 代理处理
 
-`HandleSOCKS5`（`proxy/socks.go`）处理 SOCKS5 协商。支持匿名和用户名密码认证，仅实现 `CONNECT` 命令。当目标为 IP 且开启 `socks5h_redirect` 时，会先回复连接成功，然后由 `socks_sniff.go` 嗅探客户端首包的 TLS SNI 或 HTTP Host，恢复域名后重新按域名路由。
+`HandleSOCKS5`（`proxy/socks.go`）处理 SOCKS5 协商。支持匿名和用户名密码认证，实现 `CONNECT`、`BIND` 和 `UDP ASSOCIATE` 三种命令。当目标为 IP 且开启 `socks5h_redirect` 时，会先回复连接成功，然后由 `socks_sniff.go` 嗅探客户端首包的 TLS SNI 或 HTTP Host，恢复域名后重新按域名路由。
+
+### SOCKS5 BIND 与 UDP ASSOCIATE
+
+- `BIND`（`proxy/socks_bind.go`）：服务器监听一个随机端口，等待目标连接，建立后进入双向转发。
+- `UDP ASSOCIATE`（`proxy/socks_bind.go`）：服务器监听一个 UDP 端口，接收客户端的 SOCKS5 UDP 数据报，去掉头部后转发到目标，并将目标回复加上 SOCKS5 UDP 头部返回客户端。不支持分片（FRAG > 0）。
 
 ### socks5h 重定向
 
@@ -161,5 +166,5 @@ python3 pyscripts/test_proxy_8891.py
 
 ## 已知限制
 
-- 仅支持 SOCKS5 `CONNECT` 命令，不支持 BIND / UDP ASSOCIATE；收到这些命令会返回标准错误码 `0x07`。
+- `SOCKS5 BIND` 和 `UDP ASSOCIATE` 仅支持本地直连场景，暂未通过上游代理级联。
 - 监听地址变更后保存配置即可热加载，无需重启服务（端口切换期间会短暂中断连接）。
