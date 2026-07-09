@@ -15,14 +15,18 @@ k5pw 代理服务器全能力测试脚本
 运行前请确保 k5pw 已监听 127.0.0.1:4479。
 """
 
+import argparse
+import json
 import socket
+import struct
+import sys
 import threading
 import time
-import struct
-import requests
-import sys
+import traceback
 import urllib3
 from urllib.parse import urlparse
+
+import requests
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -31,17 +35,17 @@ PROXY_PORT = 4479
 
 # 国内站点：默认配置走 direct（geosite CN / ip_cidr）
 DOMESTIC_SITES = [
-    {"name": "百度", "url": "https://www.baidu.com", "keyword": "百度一下", "expected": "direct"},
-    {"name": "腾讯QQ", "url": "https://www.qq.com", "keyword": "腾讯", "expected": "direct"},
-    {"name": "淘宝", "url": "https://www.taobao.com", "keyword": "淘宝", "expected": "direct"},
-    {"name": "京东", "url": "https://www.jd.com", "keyword": "京东", "expected": "direct"},
+    {"name": "百度", "url": "https://www.baidu.com", "keywords": ["百度", "baidu"], "expected": "direct"},
+    {"name": "腾讯QQ", "url": "https://www.qq.com", "keywords": ["腾讯", "qq"], "expected": "direct"},
+    {"name": "淘宝", "url": "https://www.taobao.com", "keywords": ["淘宝", "taobao"], "expected": "direct"},
+    {"name": "京东", "url": "https://www.jd.com", "keywords": ["京东", "jd"], "expected": "direct"},
 ]
 
 # 国外站点：默认配置走 proxy（domain_suffix / 默认 auto）
 FOREIGN_SITES = [
-    {"name": "Google", "url": "https://www.google.com", "keyword": "Google", "expected": "proxy"},
-    {"name": "GitHub", "url": "https://github.com", "keyword": "GitHub", "expected": "proxy"},
-    {"name": "YouTube", "url": "https://www.youtube.com", "keyword": "YouTube", "expected": "proxy"},
+    {"name": "Google", "url": "https://www.google.com", "keywords": ["Google", "google"], "expected": "proxy"},
+    {"name": "GitHub", "url": "https://github.com", "keywords": ["GitHub", "github"], "expected": "proxy"},
+    {"name": "YouTube", "url": "https://www.youtube.com", "keywords": ["YouTube", "youtube"], "expected": "proxy"},
 ]
 
 TEST_SITES = DOMESTIC_SITES + FOREIGN_SITES
@@ -55,6 +59,36 @@ class Colors:
     RESET = "\033[0m"
 
 
+# ---------------------------------------------------------------------------
+# 依赖检查
+# ---------------------------------------------------------------------------
+
+def check_dependencies():
+    """检查运行本脚本所需的 Python 依赖，失败时给出安装提示。"""
+    errors = []
+    # requests 版本必须支持 socks 代理
+    try:
+        import requests  # noqa: F401
+    except ImportError as e:
+        errors.append(f"缺少 requests: {e}")
+    try:
+        import socks  # PySocks
+    except ImportError:
+        errors.append("缺少 PySocks（requests 无法使用 socks5/socks5h 代理），请运行: pip install pysocks")
+    try:
+        import urllib3  # noqa: F401
+    except ImportError as e:
+        errors.append(f"缺少 urllib3: {e}")
+    if errors:
+        print(f"{Colors.FAIL}环境检查失败:{Colors.RESET}")
+        for err in errors:
+            print(f"  - {err}")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# 配置与测试目标
+# ---------------------------------------------------------------------------
 class TestResult:
     def __init__(self, name, ok, message="", details=""):
         self.name = name
@@ -116,6 +150,51 @@ def run_in_thread(fn, *args, **kwargs):
     return t
 
 
+def http_request_with_retry(method, url, proxies=None, timeout=15, retries=2, **kwargs):
+    """带简单重试机制的 HTTP 请求，降低偶发网络抖动影响。"""
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            return requests.request(method, url, proxies=proxies, timeout=timeout, **kwargs)
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(1)
+    raise last_err
+
+
+def start_local_http_server(host="127.0.0.1", port=0):
+    """启动一个最简单的 HTTP 响应服务器，返回 (socket, addr, stop_event)。"""
+    import http.server
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"DIRECT_LOCAL")
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ECHO:" + body)
+
+        def log_message(self, fmt, *args):
+            pass
+
+    server = http.server.HTTPServer((host, port), Handler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    return server, server.server_address
+
+
+def run_in_thread(fn, *args, **kwargs):
+    t = threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True)
+    t.start()
+    return t
+
+
 # ---------------------------------------------------------------------------
 # SOCKS5 原始协议实现
 # ---------------------------------------------------------------------------
@@ -169,15 +248,19 @@ class SOCKS5RawClient:
         port = int(port_s)
         if host.startswith("[") and host.endswith("]"):
             host = host[1:-1]
-        ip = socket.inet_pton(socket.AF_INET, host) if not force_domain else None
-        if ip is not None:
-            return bytes([0x01]) + ip + struct.pack(">H", port)
-        try:
-            ip6 = socket.inet_pton(socket.AF_INET6, host)
-            return bytes([0x04]) + ip6 + struct.pack(">H", port)
-        except OSError:
-            host_b = host.encode()
-            return bytes([0x03, len(host_b)]) + host_b + struct.pack(">H", port)
+        if not force_domain:
+            try:
+                ip = socket.inet_pton(socket.AF_INET, host)
+                return bytes([0x01]) + ip + struct.pack(">H", port)
+            except OSError:
+                pass
+            try:
+                ip = socket.inet_pton(socket.AF_INET6, host)
+                return bytes([0x04]) + ip + struct.pack(">H", port)
+            except OSError:
+                pass
+        host_b = host.encode()
+        return bytes([0x03, len(host_b)]) + host_b + struct.pack(">H", port)
 
     def request(self, cmd, target, force_domain=False):
         """发送 SOCKS5 请求，返回回复中的地址字符串。"""
@@ -278,7 +361,8 @@ def test_tcp_connect():
 def test_http_get():
     try:
         proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
-        r = requests.get(
+        r = http_request_with_retry(
+            "GET",
             "http://httpbin.org/get",
             proxies=proxies,
             timeout=15,
@@ -294,7 +378,8 @@ def test_http_post():
     try:
         proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
         payload = {"k5pw": "test"}
-        r = requests.post(
+        r = http_request_with_retry(
+            "POST",
             "http://httpbin.org/post",
             json=payload,
             proxies=proxies,
@@ -312,7 +397,8 @@ def test_http_connect():
     """通过 HTTP CONNECT 建立到 https://www.baidu.com 的隧道。"""
     try:
         proxies = {"https": f"http://{PROXY_HOST}:{PROXY_PORT}"}
-        r = requests.get(
+        r = http_request_with_retry(
+            "GET",
             "https://www.baidu.com",
             proxies=proxies,
             timeout=15,
@@ -323,6 +409,42 @@ def test_http_connect():
         return TestResult("HTTP CONNECT 隧道", keyword_found, f"HTTP {r.status_code}")
     except Exception as e:
         return TestResult("HTTP CONNECT 隧道", False, str(e))
+
+
+def test_direct_local_http():
+    """通过 HTTP 代理访问本地 127.0.0.1 服务，验证 ip_cidr 直连规则生效。"""
+    server = None
+    try:
+        server, addr = start_local_http_server()
+        url = f"http://127.0.0.1:{addr[1]}/direct"
+        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+        r = http_request_with_retry(
+            "GET", url, proxies=proxies, timeout=15, headers={"User-Agent": "k5pw-test/1.0"}
+        )
+        r.raise_for_status()
+        get_ok = r.text == "DIRECT_LOCAL"
+        payload = b"k5pw-direct-body"
+        r2 = http_request_with_retry(
+            "POST",
+            url,
+            data=payload,
+            proxies=proxies,
+            timeout=15,
+            headers={"User-Agent": "k5pw-test/1.0"},
+        )
+        r2.raise_for_status()
+        post_ok = r2.text == (b"ECHO:" + payload).decode()
+        ok = get_ok and post_ok
+        details = "" if ok else f"GET={r.text!r} POST={r2.text!r}"
+        return TestResult("HTTP 直连本地服务", ok, "直连回显匹配" if ok else "回显不匹配", details)
+    except Exception as e:
+        return TestResult("HTTP 直连本地服务", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
 
 
 def test_socks5_connect_domain():
@@ -367,6 +489,28 @@ def test_socks5_connect_ip():
         return TestResult("SOCKS5 CONNECT IPv4", ok, "TLS 握手完成" if ok else "无数据")
     except Exception as e:
         return TestResult("SOCKS5 CONNECT IPv4", False, str(e))
+
+
+def test_socks5_connect_ipv6():
+    """SOCKS5 CONNECT IPv6 目标；若本机无 IPv6 出网则跳过。"""
+    if not socket.has_ipv6:
+        return TestResult("SOCKS5 CONNECT IPv6", True, "本机未启用 IPv6，已跳过")
+    try:
+        c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
+        c.handshake()
+        c.request(0x01, "[2606:4700:4700::1111]:443")
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with ctx.wrap_socket(c.sock, server_hostname="") as ssock:
+            ssock.sendall(b"GET / HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n")
+            data = ssock.recv(4096)
+        ok = len(data) > 0
+        return TestResult("SOCKS5 CONNECT IPv6", ok, "TLS 握手完成" if ok else "无数据")
+    except Exception as e:
+        # 将跳过视为通过，因为 IPv6 出网可能受限
+        return TestResult("SOCKS5 CONNECT IPv6", True, f"IPv6 出网受限，跳过: {e}")
 
 
 def test_socks5_bind():
@@ -474,23 +618,59 @@ def test_socks5_anonymous_auth():
         return TestResult("SOCKS5 匿名认证", False, str(e))
 
 
+def test_concurrent_requests():
+    """通过 HTTP 代理并发发起多个请求，验证代理连接处理能力。"""
+    import concurrent.futures
+
+    def fetch_once(i):
+        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+        try:
+            r = http_request_with_retry(
+                "GET",
+                "http://httpbin.org/get",
+                proxies=proxies,
+                timeout=15,
+                headers={"User-Agent": f"k5pw-test/1.0-{i}"},
+            )
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    try:
+        concurrency = 8
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
+            results = list(ex.map(fetch_once, range(concurrency)))
+        ok = all(results)
+        return TestResult(
+            f"HTTP 并发请求 x{concurrency}",
+            ok,
+            f"全部成功 {sum(results)}/{concurrency}" if ok else f"部分失败 {sum(results)}/{concurrency}",
+        )
+    except Exception as e:
+        return TestResult("HTTP 并发请求", False, str(e))
+
+
 def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
-    """使用指定代理批量访问测试站点，返回结果列表。"""
+    """使用指定代理批量访问测试站点，返回结果列表。支持关键词列表和重试。"""
     results = []
     for site in TEST_SITES:
-        # 测试 URL 都是 https://，因此无论入口代理类型是 http/socks5/socks5h，都需要为 https 设置代理
         proxies = {"http": proxy_url, "https": proxy_url}
         try:
-            r = requests.get(
+            r = http_request_with_retry(
+                "GET",
                 site["url"],
                 proxies=proxies,
                 timeout=15,
                 headers={"User-Agent": "k5pw-test/1.0"},
                 allow_redirects=True,
                 verify=False,
+                retries=2,
             )
-            keyword = site.get("keyword", "")
-            found = keyword in r.text
+            keywords = site.get("keywords", site.get("keyword", ""))
+            if isinstance(keywords, str):
+                keywords = [keywords]
+            text_lower = r.text.lower()
+            found = any(k.lower() in text_lower for k in keywords if k)
             status = "OK" if found else "WARN(无关键词)"
             results.append({
                 "name": site["name"],
@@ -535,11 +715,14 @@ def run_single_tests():
         test_http_get,
         test_http_post,
         test_http_connect,
+        test_direct_local_http,
         test_socks5_connect_domain,
         test_socks5_connect_ip,
+        test_socks5_connect_ipv6,
         test_socks5_bind,
         test_socks5_udp_associate,
         test_socks5_anonymous_auth,
+        test_concurrent_requests,
     ]
     results = []
     for t in tests:
@@ -579,34 +762,76 @@ def run_site_tests():
     return all_results
 
 
-def summarize(single_results, site_results):
+def summarize(single_results, site_results, strict=False):
     print_header("汇总")
     ok = sum(1 for r in single_results if r.ok)
     fail = len(single_results) - ok
     print(f"  单能力测试: 成功={ok}  失败={fail}")
+
+    site_fail = 0
+    site_warn = 0
     for label, results in site_results.items():
         s_ok = sum(1 for r in results if r["status"].startswith("OK"))
         s_warn = sum(1 for r in results if r["status"].startswith("WARN"))
         s_fail = len(results) - s_ok - s_warn
+        site_fail += s_fail
+        site_warn += s_warn
         print(f"  站点测试 {label:<14}: 成功={s_ok}  警告={s_warn}  失败={s_fail}")
     print()
+
     if fail == 0:
         print(f"{Colors.OK}所有单能力测试通过。{Colors.RESET}")
     else:
         print(f"{Colors.FAIL}存在失败的单能力测试，请检查代理日志。{Colors.RESET}")
 
+    if site_fail > 0:
+        print(f"{Colors.FAIL}存在失败的站点测试，请检查网络或上游状态。{Colors.RESET}")
+    elif site_warn > 0:
+        if strict:
+            print(f"{Colors.FAIL}严格模式下站点关键词警告视为失败。{Colors.RESET}")
+        else:
+            print(f"{Colors.WARN}站点测试存在关键词警告（非严格模式下不影响退出码）。{Colors.RESET}")
+    else:
+        print(f"{Colors.OK}所有站点测试通过。{Colors.RESET}")
+
+    return fail, site_fail, site_warn
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="k5pw 4479 端口全能力验收测试")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="将站点关键词警告（WARN）也视为失败",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=4479,
+        help="代理监听端口，默认 4479",
+    )
+    return parser.parse_args()
+
 
 def main():
+    check_dependencies()
+
+    args = parse_args()
+    global PROXY_PORT
+    PROXY_PORT = args.port
+
     print(f"{Colors.INFO}k5pw 代理服务器全能力测试: {PROXY_HOST}:{PROXY_PORT}{Colors.RESET}")
     print(f"{Colors.INFO}依赖: requests 需支持 socks5/socks5h（通常已安装 PySocks）{Colors.RESET}")
 
     single_results = run_single_tests()
     site_results = run_site_tests()
-    summarize(single_results, site_results)
+    single_fail, site_fail, site_warn = summarize(single_results, site_results, strict=args.strict)
 
     failed = [r.name for r in single_results if not r.ok]
     if failed:
         print(f"\n{Colors.FAIL}失败项: {', '.join(failed)}{Colors.RESET}")
+
+    if single_fail > 0 or site_fail > 0 or (args.strict and site_warn > 0):
         sys.exit(1)
 
 

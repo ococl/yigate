@@ -73,8 +73,14 @@ cd src && go test ./...
 # 开发环境联调（需先启动 4479 端口代理）
 python3 pyscripts/test_proxy_4479.py
 
+# 严格模式：站点关键词缺失也视为失败
+python3 pyscripts/test_proxy_4479.py --strict
+
 # 生产环境联调（需先启动 8891 端口代理）
 python3 pyscripts/test_proxy_8891.py
+
+# 自定义端口测试
+python3 pyscripts/test_proxy_4479.py --port 8891
 ```
 
 ## 配置示例
