@@ -236,7 +236,7 @@ curl -x socks5://username:your-password@127.0.0.1:4479 https://www.example.com
 ## 注意
 
 - 本项目仅用于学习、测试或内部网络管理，请勿用于非法用途。
-- 已实现 SOCKS5 CONNECT、BIND 和 UDP ASSOCIATE；BIND 与 UDP ASSOCIATE 目前仅支持本地直连，暂未通过上游代理级联。
+- 已实现 SOCKS5 CONNECT、BIND 和 UDP ASSOCIATE；BIND 与 UDP ASSOCIATE 支持通过 SOCKS5 上游级联，级联失败时自动回退本地直连。
 - 普通 HTTP 请求默认缓冲最多 1 MiB 请求体以支持重试；chunked 编码或超过 1 MiB 的请求体会改为直接透传，透传时无法重试。
 - `GEOSITE:CN` 是域名分流，不需要提前 DNS 解析；GEOIP 暂未实现。
 - 监听地址变更后保存配置即可热加载，无需重启服务。

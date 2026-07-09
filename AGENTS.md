@@ -136,8 +136,8 @@ python3 pyscripts/test_proxy_8891.py
 
 ### SOCKS5 BIND 与 UDP ASSOCIATE
 
-- `BIND`（`proxy/socks_bind.go`）：服务器监听一个随机端口，等待目标连接，建立后进入双向转发。
-- `UDP ASSOCIATE`（`proxy/socks_bind.go`）：服务器监听一个 UDP 端口，接收客户端的 SOCKS5 UDP 数据报，去掉头部后转发到目标，并将目标回复加上 SOCKS5 UDP 头部返回客户端。不支持分片（FRAG > 0）。
+- `BIND`（`proxy/socks_bind.go`）：优先通过 SOCKS5 上游级联；失败时自动回退到本地监听，等待目标连接后进入双向转发。
+- `UDP ASSOCIATE`（`proxy/socks_bind.go`）：优先通过 SOCKS5 上游级联；失败时自动回退到本地 UDP 中继。接收客户端的 SOCKS5 UDP 数据报，去掉头部后转发到目标，并将目标回复加上 SOCKS5 UDP 头部返回客户端。不支持分片（FRAG > 0）。HTTP/HTTPS 上游不支持 BIND 与 UDP ASSOCIATE。
 
 ### socks5h 重定向
 
@@ -166,5 +166,5 @@ python3 pyscripts/test_proxy_8891.py
 
 ## 已知限制
 
-- `SOCKS5 BIND` 和 `UDP ASSOCIATE` 仅支持本地直连场景，暂未通过上游代理级联。
+- `SOCKS5 BIND` 和 `UDP ASSOCIATE` 支持通过 SOCKS5 上游级联，失败时自动回退本地直连；HTTP/HTTPS 上游暂不支持这两种命令。
 - 监听地址变更后保存配置即可热加载，无需重启服务（端口切换期间会短暂中断连接）。

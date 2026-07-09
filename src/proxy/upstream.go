@@ -603,6 +603,109 @@ func (u *Upstream) DialSOCKS5H(target string) (net.Conn, error) {
 	return u.dialSOCKS5(target)
 }
 
+// DialSOCKS5Bind 通过 SOCKS5 上游建立 BIND 请求，返回到上游的 TCP 连接和上游监听地址。
+func (u *Upstream) DialSOCKS5Bind(target string) (net.Conn, string, error) {
+	if !u.isSocks5() {
+		return nil, "", fmt.Errorf("upstream %q is not socks5", u.Name)
+	}
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), ProxyDialTimeout())
+	if err != nil {
+		return nil, "", err
+	}
+	if err := setConnDeadline(conn, ProxyHandshakeTimeout()); err != nil {
+		conn.Close()
+		return nil, "", err
+	}
+	if err := socks5ClientHandshake(conn, u); err != nil {
+		conn.Close()
+		return nil, "", err
+	}
+	listenAddr, err := socks5SendRequest(conn, 0x02, target)
+	if err != nil {
+		conn.Close()
+		return nil, "", err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, listenAddr, nil
+}
+
+// DialSOCKS5UDP 通过 SOCKS5 上游建立 UDP ASSOCIATE 请求，返回到上游的 TCP 控制连接和上游 UDP 监听地址。
+func (u *Upstream) DialSOCKS5UDP(target string) (net.Conn, *net.UDPAddr, error) {
+	if !u.isSocks5() {
+		return nil, nil, fmt.Errorf("upstream %q is not socks5", u.Name)
+	}
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), ProxyDialTimeout())
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := setConnDeadline(conn, ProxyHandshakeTimeout()); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	if err := socks5ClientHandshake(conn, u); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	udpAddrStr, err := socks5SendRequest(conn, 0x03, target)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	udpAddr, err := net.ResolveUDPAddr("udp", udpAddrStr)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, udpAddr, nil
+}
+
+// DialSOCKS5Bind 按优先级选择 SOCKS5 上游建立 BIND，失败时尝试下一个，全部失败返回错误。
+func (m *UpstreamManager) DialSOCKS5Bind(target string, names []string) (net.Conn, string, *Upstream, error) {
+	attempts := m.Socks5AttemptCount(names)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		up := m.SelectSocks5For(names)
+		if up == nil {
+			break
+		}
+		conn, addr, err := up.DialSOCKS5Bind(target)
+		if err == nil {
+			return conn, addr, up, nil
+		}
+		lastErr = err
+		log.Printf("upstream %s bind %s failed: %v", up.Name, target, err)
+		m.markDead(up)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no available socks5 upstream")
+	}
+	return nil, "", nil, lastErr
+}
+
+// DialSOCKS5UDP 按优先级选择 SOCKS5 上游建立 UDP ASSOCIATE，失败时尝试下一个，全部失败返回错误。
+func (m *UpstreamManager) DialSOCKS5UDP(target string, names []string) (net.Conn, *net.UDPAddr, *Upstream, error) {
+	attempts := m.Socks5AttemptCount(names)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		up := m.SelectSocks5For(names)
+		if up == nil {
+			break
+		}
+		conn, addr, err := up.DialSOCKS5UDP(target)
+		if err == nil {
+			return conn, addr, up, nil
+		}
+		lastErr = err
+		log.Printf("upstream %s udp associate %s failed: %v", up.Name, target, err)
+		m.markDead(up)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no available socks5 upstream")
+	}
+	return nil, nil, nil, lastErr
+}
+
 // dialHTTP 通过 HTTP/HTTPS 代理的 CONNECT 建立隧道
 func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
 	conn, err := dialProxyConn(u.urlForType(u.primaryProxyType()), ProxyDialTimeout())
@@ -709,96 +812,11 @@ func (u *Upstream) dialSOCKS5(target string) (net.Conn, error) {
 		conn.Close()
 		return nil, err
 	}
-
-	user := ""
-	pass := ""
-	if u.URL != nil && u.URL.User != nil {
-		user = u.URL.User.Username()
-		pass, _ = u.URL.User.Password()
-	}
-	methods := []byte{0x00}
-	if user != "" || pass != "" {
-		if len(user) > 255 || len(pass) > 255 {
-			conn.Close()
-			return nil, errors.New("socks5 credentials too long")
-		}
-		methods = append(methods, 0x02)
-	}
-	greeting := []byte{0x05, byte(len(methods))}
-	greeting = append(greeting, methods...)
-	if _, err := conn.Write(greeting); err != nil {
+	if err := socks5ClientHandshake(conn, u); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	var methodResp [2]byte
-	if _, err := io.ReadFull(conn, methodResp[:]); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if methodResp[0] != 0x05 || methodResp[1] == 0xff {
-		conn.Close()
-		return nil, errors.New("socks5 auth method rejected")
-	}
-	if methodResp[1] == 0x02 {
-		auth := []byte{0x01, byte(len(user))}
-		auth = append(auth, []byte(user)...)
-		auth = append(auth, byte(len(pass)))
-		auth = append(auth, []byte(pass)...)
-		if _, err := conn.Write(auth); err != nil {
-			conn.Close()
-			return nil, err
-		}
-		var authResp [2]byte
-		if _, err := io.ReadFull(conn, authResp[:]); err != nil {
-			conn.Close()
-			return nil, err
-		}
-		if authResp[0] != 0x01 || authResp[1] != 0x00 {
-			conn.Close()
-			return nil, errors.New("socks5 authentication failed")
-		}
-	}
-
-	host, portStr, err := net.SplitHostPort(target)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port < 0 || port > 65535 {
-		conn.Close()
-		return nil, fmt.Errorf("invalid target port %q", portStr)
-	}
-	addr, err := socks5AddressBytes(host)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	packet := []byte{0x05, 0x01, 0x00}
-	packet = append(packet, addr...)
-	packet = append(packet, byte(port>>8), byte(port))
-	if _, err := conn.Write(packet); err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	var reply [4]byte
-	if _, err := io.ReadFull(conn, reply[:]); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if reply[0] != 0x05 || reply[1] != 0x00 {
-		conn.Close()
-		if reply[0] == 0x05 && reply[1] >= 0x01 && reply[1] <= 0x06 {
-			return nil, fmt.Errorf("socks5 target unreachable: 0x%02x", reply[1])
-		}
-		return nil, fmt.Errorf("socks5 upstream protocol failed: 0x%02x", reply[1])
-	}
-	if _, err := readSOCKS5AddressValue(conn, reply[3]); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if _, err := readSOCKS5PortValue(conn); err != nil {
+	if _, err := socks5SendRequest(conn, 0x01, target); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -826,6 +844,84 @@ func socks5Auth(conn net.Conn, username, password string) error {
 		return errors.New("socks5 auth failed")
 	}
 	return nil
+}
+
+// socks5ClientHandshake 完成 SOCKS5 方法协商与用户名密码认证。
+func socks5ClientHandshake(conn net.Conn, u *Upstream) error {
+	user := ""
+	pass := ""
+	if u.URL != nil && u.URL.User != nil {
+		user = u.URL.User.Username()
+		pass, _ = u.URL.User.Password()
+	}
+	methods := []byte{0x00}
+	if user != "" || pass != "" {
+		if len(user) > 255 || len(pass) > 255 {
+			return errors.New("socks5 credentials too long")
+		}
+		methods = append(methods, 0x02)
+	}
+	greeting := []byte{0x05, byte(len(methods))}
+	greeting = append(greeting, methods...)
+	if _, err := conn.Write(greeting); err != nil {
+		return err
+	}
+	var methodResp [2]byte
+	if _, err := io.ReadFull(conn, methodResp[:]); err != nil {
+		return err
+	}
+	if methodResp[0] != 0x05 || methodResp[1] == 0xff {
+		return errors.New("socks5 auth method rejected")
+	}
+	if methodResp[1] == 0x02 {
+		if err := socks5Auth(conn, user, pass); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// socks5SendRequest 向已认证连接的 SOCKS5 服务器发送 cmd 请求并读取第一次回复。
+// 返回回复中的地址字符串以及错误。
+func socks5SendRequest(conn net.Conn, cmd byte, target string) (string, error) {
+	host, portStr, err := net.SplitHostPort(target)
+	if err != nil {
+		return "", err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 0 || port > 65535 {
+		return "", fmt.Errorf("invalid target port %q", portStr)
+	}
+	addr, err := socks5AddressBytes(host)
+	if err != nil {
+		return "", err
+	}
+	packet := []byte{0x05, cmd, 0x00}
+	packet = append(packet, addr...)
+	packet = append(packet, byte(port>>8), byte(port))
+	if _, err := conn.Write(packet); err != nil {
+		return "", err
+	}
+
+	var reply [4]byte
+	if _, err := io.ReadFull(conn, reply[:]); err != nil {
+		return "", err
+	}
+	if reply[0] != 0x05 || reply[1] != 0x00 {
+		if reply[0] == 0x05 && reply[1] >= 0x01 && reply[1] <= 0x06 {
+			return "", fmt.Errorf("socks5 target unreachable: 0x%02x", reply[1])
+		}
+		return "", fmt.Errorf("socks5 upstream protocol failed: 0x%02x", reply[1])
+	}
+	replyHost, err := readSOCKS5AddressValue(conn, reply[3])
+	if err != nil {
+		return "", err
+	}
+	replyPort, err := readSOCKS5PortValue(conn)
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(replyHost, strconv.Itoa(replyPort)), nil
 }
 
 // DialTarget 直接连接到目标

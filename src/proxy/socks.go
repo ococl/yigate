@@ -33,9 +33,9 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 	case 0x01: // CONNECT
 		handleSOCKS5Connect(client, clientReader, target, mgr, router)
 	case 0x02: // BIND
-		handleSOCKS5Bind(client, target)
+		handleSOCKS5Bind(client, target, mgr, router)
 	case 0x03: // UDP ASSOCIATE
-		handleSOCKS5UDPAssociate(client, clientReader, target)
+		handleSOCKS5UDPAssociate(client, clientReader, target, mgr, router)
 	default:
 		log.Printf("socks5 unsupported command %d", cmd)
 		socks5Reply(client, 0x07)
