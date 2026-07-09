@@ -23,6 +23,31 @@ func TestUpstreamHealthCheck(t *testing.T) {
 	}
 }
 
+func TestUpstreamHealthStatusMetric(t *testing.T) {
+	proxyAddr := startMockSocks5Proxy(t)
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "alive", URL: "socks5://" + proxyAddr},
+		{Name: "dead", URL: "socks5://127.0.0.1:1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	MetricSet("k5pw_upstream_health_status", -1, "upstream=alive")
+	MetricSet("k5pw_upstream_health_status", -1, "upstream=dead")
+
+	mgr.checkAll()
+
+	if got := MetricValue("k5pw_upstream_health_status", "upstream=alive"); got != 1 {
+		t.Fatalf("alive health metric = %v, want 1", got)
+	}
+	if got := MetricValue("k5pw_upstream_health_status", "upstream=dead"); got != 0 {
+		t.Fatalf("dead health metric = %v, want 0", got)
+	}
+	if up := mgr.byName["dead"]; up == nil || !up.dead {
+		t.Fatal("expected dead upstream marked dead")
+	}
+}
+
 func TestCheckHTTPProtocol(t *testing.T) {
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer ln.Close()

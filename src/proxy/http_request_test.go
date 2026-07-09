@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +68,58 @@ func TestRequestAutoDirectFirst(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "auto" {
 		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestRequestViaProxyRetriesBufferedBody(t *testing.T) {
+	badLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badLn.Close()
+	go func() {
+		conn, err := badLn.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+	badProxy := badLn.Addr().String()
+	goodProxy := startMockHTTPProxy(t)
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "bad", URL: "http://" + badProxy, Priority: 1},
+		{Name: "good", URL: "http://" + goodProxy, Priority: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.StartHealthCheck(3600)
+	defer mgr.StopHealthCheck()
+	router, _ := NewRouter(RoutingConfig{Final: ActionProxy})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "retry-body" {
+			t.Fatalf("body = %q, want retry-body", body)
+		}
+		w.Write([]byte("retried"))
+	}))
+	defer ts.Close()
+
+	bodyBytes := []byte("retry-body")
+	req := httptest.NewRequest("POST", ts.URL+"/path", strings.NewReader(string(bodyBytes)))
+	resetBody := func() {
+		req.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
+		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(string(bodyBytes))), nil }
+		req.ContentLength = int64(len(bodyBytes))
+	}
+	resp, err := requestViaProxy(req, mgr, router, nil, resetBody)
+	if err != nil {
+		t.Fatalf("requestViaProxy: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "retried" {
+		t.Fatalf("response body = %q", body)
 	}
 }
 

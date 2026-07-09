@@ -3,6 +3,7 @@ package proxy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,6 +58,51 @@ func TestInitLoggerFile(t *testing.T) {
 	SyncLogger()
 	if _, err := os.Stat(logPath); err != nil {
 		t.Fatalf("log file not created: %v", err)
+	}
+}
+
+func TestInitLoggerSizeRotationBackupAndCompress(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "size.log")
+	if err := InitLogger(LogConfig{
+		Level:      "info",
+		Output:     "file",
+		File:       logPath,
+		Rotation:   "size",
+		MaxSize:    1,
+		MaxBackups: 1,
+		Compress:   true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 256*1024)
+	for i := range payload {
+		payload[i] = 'x'
+	}
+	for i := 0; i < 12; i++ {
+		Logger().Info(string(payload))
+	}
+	SyncLogger()
+	if err := InitLogger(LogConfig{Level: "info", Output: "stdout"}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupCount := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "size.log" {
+			continue
+		}
+		if strings.HasPrefix(name, "size-") || strings.HasPrefix(name, "size.log.") {
+			backupCount++
+		}
+	}
+	if backupCount == 0 {
+		t.Fatalf("expected size-rotated backup, entries=%v", entries)
 	}
 }
 

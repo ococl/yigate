@@ -80,7 +80,9 @@ func dialProxyConn(u *url.URL, timeout time.Duration) (net.Conn, error) {
 	return dialer.Dial("tcp", addr)
 }
 
-func tlsConfigForHost(addr string) *tls.Config {
+var tlsConfigForHost = defaultTLSConfigForHost
+
+func defaultTLSConfigForHost(addr string) *tls.Config {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr

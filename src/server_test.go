@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"k5pw/proxy"
 )
 
 func writeTestConfig(t *testing.T, dir string, content string) string {
@@ -463,5 +465,125 @@ log:
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("pprof status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestServerLoadAndApplyManagementPortChange(t *testing.T) {
+	dir := t.TempDir()
+	mgmtLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgmtAddr := mgmtLn.Addr().String()
+	mgmtLn.Close()
+	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: `+mgmtAddr+`
+management_auth_token: token
+log:
+  level: warn
+  output: stdout
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer s.Stop()
+	oldAddr := s.mgmt.Addr()
+	if oldAddr == "" {
+		t.Fatal("management server not ready")
+	}
+
+	_ = writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: token
+log:
+  level: warn
+  output: stdout
+`)
+	if err := s.LoadAndApply(); err != nil {
+		t.Fatalf("LoadAndApply: %v", err)
+	}
+	newAddr := s.mgmt.Addr()
+	if newAddr == "" || newAddr == oldAddr {
+		t.Fatalf("management addr = %q, old = %q", newAddr, oldAddr)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://"+newAddr+"/health", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("new management health: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestServerLoadAndApplyRuntimeComponents(t *testing.T) {
+	dir := t.TempDir()
+	oldLog := filepath.Join(dir, "old.log")
+	newLog := filepath.Join(dir, "new.log")
+	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
+log:
+  level: warn
+  output: file
+  file: `+oldLog+`
+routing:
+  final: direct
+timeouts:
+  dial: 1s
+access_control:
+  allowed_clients:
+    - 127.0.0.1/32
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer s.Stop()
+
+	_ = writeTestConfig(t, dir, `listen: 127.0.0.1:0
+log:
+  level: warn
+  output: file
+  file: `+newLog+`
+upstreams:
+  - name: up1
+    url: http://127.0.0.1:1
+routing:
+  final: proxy
+timeouts:
+  dial: 2s
+access_control:
+  allowed_clients:
+    - 10.0.0.0/8
+`)
+	if err := s.LoadAndApply(); err != nil {
+		t.Fatalf("LoadAndApply: %v", err)
+	}
+	if len(s.Config().Upstreams) != 1 || s.Manager().SelectFor([]string{"up1"}) == nil {
+		t.Fatal("expected upstream manager reloaded")
+	}
+	if got := s.Router().Decide("example.com:80").Action; got != "proxy" {
+		t.Fatalf("routing final = %q, want proxy", got)
+	}
+	if proxy.ProxyDialTimeout() != 2*time.Second {
+		t.Fatalf("dial timeout = %v, want 2s", proxy.ProxyDialTimeout())
+	}
+	if s.access.IsAllowedIP(&net.TCPAddr{IP: net.ParseIP("127.0.0.1")}) {
+		t.Fatal("expected reloaded access control to deny 127.0.0.1")
+	}
+	proxy.Logger().Warn("new logger active")
+	proxy.SyncLogger()
+	if _, err := os.Stat(newLog); err != nil {
+		t.Fatalf("expected new log file: %v", err)
 	}
 }

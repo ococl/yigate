@@ -143,3 +143,67 @@ func TestHandleHTTPSocks5HRequest(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 }
+
+func TestHandleHTTPLargeRequestBodyStreamed(t *testing.T) {
+	origin := startMockHTTPOrigin(t)
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
+
+	c1, c2 := net.Pipe()
+	go func() {
+		defer c2.Close()
+		HandleHTTP(c2, bufio.NewReader(c2), nil, mgr, router, nil)
+	}()
+
+	body := strings.Repeat("x", maxBufferedRequestBody+1024)
+	req := "POST http://" + origin + "/ HTTP/1.1\r\n" +
+		"Host: " + origin + "\r\n" +
+		"Content-Length: " + itoa(len(body)) + "\r\n" +
+		"\r\n" + body
+	c1.Write([]byte(req))
+	br := bufio.NewReader(c1)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if len(got) != len(body) || string(got[:16]) != body[:16] {
+		t.Fatalf("large streamed body len = %d, want %d", len(got), len(body))
+	}
+}
+
+func TestHandleHTTPSocks5HFailureFallsBackToRouting(t *testing.T) {
+	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "bad-socks", URL: "socks5://127.0.0.1:1"}})
+	router, _ := NewRouter(RoutingConfig{
+		Final:           ActionDirect,
+		Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"bad-socks"}},
+	})
+
+	origin := startMockHTTPOrigin(t)
+	c1, c2 := net.Pipe()
+	go func() {
+		defer c2.Close()
+		HandleHTTP(c2, bufio.NewReader(c2), nil, mgr, router, nil)
+	}()
+
+	req := "POST http://" + origin + "/ HTTP/1.1\r\n" +
+		"Host: " + origin + "\r\n" +
+		"Content-Length: 8\r\n" +
+		"\r\n" +
+		"fallback"
+	c1.Write([]byte(req))
+	br := bufio.NewReader(c1)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "fallback" {
+		t.Fatalf("status/body = %d/%q", resp.StatusCode, body)
+	}
+}
