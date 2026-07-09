@@ -15,119 +15,138 @@
 ## 目录结构
 
 ```
-/export/app/k5pw/
-├── main.go                  # CLI 入口、服务管理命令
-├── config.go                # YAML 配置加载、默认值与校验
-├── config_test.go           # 配置相关测试
-├── server.go                # 统一 TCP 监听、协议识别、配置热加载
-├── service.go               # 系统服务注册/启停
-├── go.mod
-├── go.sum
-├── config.yml               # 运行时配置文件
-├── README.md                # 用户文档
+k5pw/
+├── .gitignore
 ├── AGENTS.md                # 本文件：面向维护者/Agent 的项目说明
-└── proxy/                   # 代理协议与路由核心
-    ├── auth.go              # HTTP Basic / SOCKS5 用户名密码认证
-    ├── upstream.go          # 上游管理、优先级、加权轮询、健康检查、级联 Dial
-    ├── upstream_test.go
-    ├── upstream_probe.go        # （已移除）上游协议异步探测与缓存
-    ├── upstream_probe_test.go
-    ├── router.go            # 路由规则、auto 模式、分流决策
-    ├── router_test.go
-    ├── route_cache.go       # 直连/代理决策缓存
-    ├── route_cache_test.go
-    ├── http.go              # HTTP/HTTPS 代理处理
-    ├── socks.go             # SOCKS5 代理处理
-    ├── socks_sniff.go       # SOCKS5 连接 TLS SNI / HTTP Host 嗅探与域名重写
-    ├── socks_sniff_test.go
-    ├── socks_addr.go        # SOCKS5 地址编码/解码
-    ├── socks5h.go           # socks5h 重定向逻辑
-    ├── geosite.go           # geosite.dat 解析与匹配
-    ├── geosite_test.go
-    ├── geosite_update.go    # geosite.dat 自动下载与更新
-    ├── geosite_update_test.go
-    └── timeout.go           # 超时与连接空闲控制
+├── README.md                # 用户文档
+├── docs/                    # 文档目录（可扩展）
+├── dist/                    # 生产环境（已加入 .gitignore）
+│   ├── docker-compose.yml   # Docker 生产部署编排
+│   └── k5/                  # 挂载给容器的配置、geosite.dat、日志
+│       ├── config.yml       # 生产配置（端口 8891）
+│       ├── geosite.dat
+│       └── logs/            # 运行时日志
+├── pyscripts/               # 测试脚本（已加入 .gitignore）
+│   ├── test_proxy_4479.py   # 开发环境测试脚本（端口 4479）
+│   └── test_proxy_8891.py   # 生产环境测试脚本（端口 8891）
+└── src/                     # 源码目录
+    ├── go.mod
+    ├── go.sum
+    ├── Dockerfile           # 多阶段构建 Dockerfile
+    ├── main.go              # CLI 入口、服务管理命令
+    ├── config.go            # YAML 配置加载、默认值与校验
+    ├── config_test.go       # 配置相关测试
+    ├── config.yml           # 开发环境配置（端口 4479）
+    ├── server.go            # 统一 TCP 监听、协议识别、配置热加载
+    ├── service.go           # 系统服务注册/启停
+    └── proxy/               # 代理协议与路由核心
+        ├── auth.go
+        ├── upstream.go
+        ├── upstream_test.go
+        ├── router.go
+        ├── router_test.go
+        ├── route_cache.go
+        ├── route_cache_test.go
+        ├── http.go
+        ├── socks.go
+        ├── socks_sniff.go
+        ├── socks_sniff_test.go
+        ├── socks_addr.go
+        ├── socks5h.go
+        ├── geosite.go
+        ├── geosite_test.go
+        ├── geosite_update.go
+        ├── geosite_update_test.go
+        └── timeout.go
 ```
 
 ## 构建与运行
 
+本地二进制（开发环境）：
+
 ```bash
-cd /export/app/k5pw
+cd src
 go build -o k5pw
 ./k5pw -config config.yml
 ```
 
-默认监听 `127.0.0.1:8891`，可用 `-config` 指定其他配置文件。
+默认监听 `0.0.0.0:4479`（开发配置），可用 `-config` 指定其他配置文件。
 
-## 配置说明
+生产环境（Docker，当前环境可能因镜像拉取受限而无法使用）：
 
-```yaml
-listen: "127.0.0.1:8891"
-users: {}
-upstreams:
-  - url: "socks5://10.2.3.150:7897"
-    types: ["socks5", "socks5h"]
-    priority: 1
-    weight: 5
-routing:
-  final: auto
-  geosite:
-    path: "geosite.dat"
-    auto_update: true
-  auto:
-    mode: direct_first
-    direct_timeout: 1500ms
-    cache_ttl: 1h
-  socks5h_redirect:
-    enabled: true
-  rules:
-    - type: geosite
-      values: ["CN"]
-      action: direct
-timeouts:
-  dial: 10s
-  handshake: 10s
-  http_exchange: 60s
-  tunnel_idle: 5m
-check_interval: 30
-max_connections: 1024
+```bash
+cd dist
+docker compose up --build
 ```
 
-- `listen`：监听地址，例如 `127.0.0.1:8891`。
-- `users`：用户名密码映射。空对象或省略表示匿名。
-- `upstreams`：上游代理列表。
-  - `url`：支持 `http://`、`https://`、`socks5://`、`socks5h://`。
-  - `types`：显式指定上游支持的协议类型，省略时使用 `url` 的 scheme。
-  - `priority`：数值越小优先级越高。
-  - `weight`：同优先级下的权重，越大被选中的概率越高。
-- `routing`：路由规则与分流策略配置。
-- `timeouts`：超时配置。
-  - `dial`：拨号超时。
-  - `handshake`：协议握手超时。
-  - `http_exchange`：普通 HTTP 请求交换超时。
-  - `tunnel_idle`：隧道空闲超时。
-- `check_interval`：健康检查周期，单位秒，默认 30；设置为 0 禁用健康检查。
-- `max_connections`：最大并发连接数，默认 1024；设置为负数会拒绝启动。
+Docker 模式下构建上下文为 `../src`，配置与数据挂载到 `dist/k5`，日志写入 `dist/k5/logs/k5pw.log`。
 
-## 核心逻辑
+## 测试
 
-- **统一端口**：监听单个 TCP 端口，首字节为 `0x05` 时识别为 SOCKS5，否则按 HTTP 处理。
-- **级联选择**：
-  - `UpstreamManager.Select()` 按优先级分组，同优先级加权轮询选择可用上游。
-  - `UpstreamManager.Dial(target)` 在单个上游 Dial 失败时临时标记为 dead，并尝试下一个；全部失败后回退到自身直连。
-- **HTTP 代理**：
-  - `CONNECT` 方法建立隧道，用于 HTTPS。
-  - 普通 HTTP 请求支持上游转发，失败时同样会回退直连。
-  - 普通 HTTP 请求会缓冲最多 32MiB 请求体以支持上游失败重试。
-- **SOCKS5 代理**：仅实现 `CONNECT` 命令。
-- **SOCKS5 域名嗅探**：当客户端发送 IP 目标且 `socks5h_redirect` 开启时，先回复连接成功，再嗅探客户端首包 TLS SNI 或 HTTP Host，恢复域名后重新按域名路由。
-- **路由规则**：支持 `domain`、`domain_suffix`、`domain_keyword`、`domain_regex`、`ip_cidr`、`geosite`、`match` 等类型。
-- **Auto 缓存**：`auto` 模式会缓存站点的直连或具体上游结果，下次访问优先复用。
+```bash
+# 全量测试
+cd src && go test ./...
+
+# 运行开发环境联调测试（需先启动 4479 端口代理）
+python3 pyscripts/test_proxy_4479.py
+
+# 运行生产环境联调测试（需先启动 8891 端口代理）
+python3 pyscripts/test_proxy_8891.py
+```
+
+## 核心架构
+
+`k5pw` 的核心是一个单进程 TCP 代理服务器，通过首字节识别协议类型，将连接分派给 HTTP 或 SOCKS5 处理器，再由路由器和上游管理器决定如何建立到目标站点的连接。
+
+### 连接入口与协议识别
+
+`Server`（`server.go`）监听单个 TCP 端口，每个连接到来时先设置握手超时，然后使用 `bufio.Reader.Peek(1)` 预读第一个字节。首字节为 `0x05` 时识别为 SOCKS5，否则按 HTTP 处理。这种设计让 HTTP/HTTPS/SOCKS5 三种下游协议可以共用同一个端口。`Server` 还维护活跃连接计数，通过原子操作实现最大并发限制，并支持优雅停止。
+
+### 配置热加载
+
+`Server` 使用 `fsnotify` 监视配置文件所在目录。当配置文件被写入、创建或重命名时，会触发 300ms 防抖，然后调用 `LoadAndApply` 重新加载并应用新配置。配置热加载会替换上游管理器、路由器和 `geosite.dat` 更新器，但监听地址变更不会自动生效，需要重启服务。
+
+### 配置与默认值
+
+`Config`（`config.go`）定义了整个代理的运行时配置。`LoadConfig` 先填充默认值，再解析 YAML 覆盖，并相对配置文件目录解析 `geosite.dat` 路径。`validateConfig` 校验监听地址、上游 URL、权重范围等。
+
+### 上游管理
+
+`UpstreamManager`（`proxy/upstream.go`）负责管理所有上游代理。它将上游按 `priority` 分组，同优先级内使用平滑加权轮询选择。每个上游都有 `dead` 标记，当某个上游 Dial 失败时会被临时标记为 dead；健康检查会定期 TCP 拨号，发现上游恢复后重新加入候选池。`UpstreamManager.Dial(target)` 会尝试所有可用上游，全部失败后再回退到自身直连。路由规则可以通过 `upstreams` 字段限定可选上游白名单。
+
+### 路由决策
+
+`Router`（`proxy/router.go`）按顺序匹配规则，命中第一条即返回决策。支持的规则类型包括 `domain`、`domain_suffix`、`domain_keyword`、`domain_regex`、`ip_cidr`、`geosite` 和 `match`。动作包括 `direct`（直连）、`proxy`（走上游）和 `auto`（自动选择）。`auto` 模式会根据 `direct_first` 或 `proxy_first` 策略先尝试一种方式，成功后把结果缓存到 `RouteCache` 中，后续连接优先复用缓存决策。`geosite` 规则会惰性加载 `geosite.dat` 中实际被引用的 code 集合，减少内存占用。
+
+### 连接建立
+
+`Router.Dial` 根据决策结果选择建立连接的方式：
+
+- `direct`：直接 `net.DialTimeout` 到目标。
+- `proxy`：通过 `UpstreamManager.DialProxy` 选择限定上游，失败时尝试下一个。
+- `auto`：根据 `auto.mode` 选择先直连还是先代理，成功则缓存。
+
+### HTTP/HTTPS 代理处理
+
+`HandleHTTP`（`proxy/http.go`）处理下游 HTTP 请求。`CONNECT` 方法用于建立 HTTPS 隧道，会返回 `200 Connection Established` 后进入 `Tunnel` 双向转发。普通 HTTP 请求会缓冲最多 1 MiB 请求体以支持上游失败重试，超过则返回 413。普通请求会根据路由决策选择直连、代理或 auto，并支持 `socks5h_redirect` 模式下的优先 socks5h 转发。
+
+### SOCKS5 代理处理
+
+`HandleSOCKS5`（`proxy/socks.go`）处理 SOCKS5 协商。支持匿名和用户名密码认证，仅实现 `CONNECT` 命令。当目标为 IP 且开启 `socks5h_redirect` 时，会先回复连接成功，然后由 `socks_sniff.go` 嗅探客户端首包的 TLS SNI 或 HTTP Host，恢复域名后重新按域名路由。
+
+### socks5h 重定向
+
+`socks5h_redirect` 开启后，k5pw 在内部优先使用 SOCKS5/socks5h 上游的域名地址类型转发目标连接，让域名在上游侧解析。如果没有可用的 SOCKS5 上游或连接失败，会自动回退到原有规则分流逻辑。该模式会缓存每个目标站点成功使用的 SOCKS5 上游。
+
+### 数据转发
+
+`Tunnel`（`proxy/upstream.go`）在客户端与目标连接之间双向转发数据，使用 `deadlineReader`/`deadlineWriter` 根据 `tunnel_idle` 超时控制空闲连接，支持 `CloseWrite`/`CloseRead` 优雅半关闭。
 
 ## 常见任务
 
-- 修改默认端口：改 `config.yml` 中的 `listen`。
-- 添加上游：在 `config.yml` 的 `upstreams` 列表中增加条目。
+- 修改开发端口：改 `src/config.yml` 中的 `listen`。
+- 修改生产端口：改 `dist/k5/config.yml` 中的 `listen`，并同步调整 `dist/docker-compose.yml` 的 `ports` 映射。
+- 添加上游：在对应 `config.yml` 的 `upstreams` 列表中增加条目。
 - 切换上游协议：修改 `url` 的 scheme，或在 `types` 中显式指定。
 - 调试：查看日志中的 `upstream ... dead` / `upstream ... recovered`。
 
@@ -135,9 +154,10 @@ max_connections: 1024
 
 - 上游不可达时，代理会自动回退到自身直连。
 - 通过 HTTP/HTTPS 上游建立 CONNECT 隧道时，仅读取响应头，不再消费隧道数据，避免隧道建立后阻塞。
-- 普通 HTTP 请求会缓冲最多 32MiB 请求体以支持上游失败重试，超限返回 413。
+- 普通 HTTP 请求会缓冲最多 1 MiB 请求体以支持上游失败重试，超限返回 413。
 - 健康检查为简单 TCP 拨号，频率由 `check_interval` 控制。
 - 监听地址变更后需要重启服务才能生效。
+- 当前 Docker 镜像拉取可能受网络环境限制，建议优先使用本地二进制测试。
 
 ## 已知限制
 

@@ -14,32 +14,83 @@
 - **优先级与权重**：同一批候选上游内，优先使用 `priority` 更小的组，组内按 `weight` 平滑加权轮询。
 - **账号密码**：默认匿名，配置 `users` 后启用 HTTP Basic 认证与 SOCKS5 用户名密码认证。
 - **健康检查**：定时探测上游可用性，故障自动剔除，恢复自动加入。
+- **配置热加载**：通过 `fsnotify` 监视配置文件，保存后自动重载。
+
+## 目录结构
+
+```
+k5pw/
+├── src/              # Go 源码与开发配置
+│   ├── config.yml    # 开发环境配置（默认端口 4479）
+│   ├── main.go
+│   ├── config.go
+│   ├── server.go
+│   ├── service.go
+│   ├── proxy/        # 代理协议与路由核心
+│   └── Dockerfile
+├── dist/             # 生产环境（已加入 .gitignore）
+│   ├── docker-compose.yml
+│   └── k5/           # 配置、geosite.dat、日志挂载目录
+│       ├── config.yml
+│       ├── geosite.dat
+│       └── logs/
+├── pyscripts/        # 测试脚本（已加入 .gitignore）
+│   ├── test_proxy_4479.py
+│   └── test_proxy_8891.py
+├── docs/             # 文档目录
+├── README.md
+└── AGENTS.md
+```
 
 ## 快速开始
 
+本地二进制（开发环境）：
+
 ```bash
-cd /export/app/k5pw
+cd src
 go build -o k5pw
 ./k5pw -config config.yml
 ```
 
-默认监听 `127.0.0.1:8891`，可修改 `config.yml` 调整配置。
+默认监听 `0.0.0.0:4479`，可修改 `src/config.yml` 调整配置。
+
+生产环境（Docker，当前环境可能因镜像拉取受限而无法使用）：
+
+```bash
+cd dist
+docker compose up --build
+```
+
+生产配置在 `dist/k5/config.yml`，默认监听 `0.0.0.0:8891`，日志写入 `dist/k5/logs/k5pw.log`。
+
+## 测试
+
+```bash
+# 全量 Go 测试
+cd src && go test ./...
+
+# 开发环境联调（需先启动 4479 端口代理）
+python3 pyscripts/test_proxy_4479.py
+
+# 生产环境联调（需先启动 8891 端口代理）
+python3 pyscripts/test_proxy_8891.py
+```
 
 ## 配置示例
 
 ```yaml
-listen: "0.0.0.0:8891"
+listen: "0.0.0.0:4479"
 users:
-  admin: "admin123"
+  username: "your-password"
 
 upstreams:
   - name: "hk"
-    url: "socks5://10.2.3.150:7897"
+    url: "socks5://your-upstream-ip:port"
     types: ["socks5", "socks5h"]
     priority: 1
     weight: 5
   - name: "sg"
-    url: "socks5://user:pass@192.168.1.11:1080"
+    url: "socks5://user:pass@your-upstream-ip:port"
     # 未写 types 时，使用 url 的 scheme 作为默认类型
     priority: 1
     weight: 3
@@ -91,7 +142,7 @@ max_connections: 1024
 
 ## 配置说明
 
-- `listen`：监听地址，例如 `127.0.0.1:8891`；如需对外提供服务，可绑定 `0.0.0.0:8891`。
+- `listen`：监听地址，例如 `127.0.0.1:4479`；如需对外提供服务，可绑定 `0.0.0.0:4479`。
 - `users`：用户名密码映射。留空或删除表示匿名。
 - `upstreams`：上游代理列表。
   - `name`：上游名称，可被路由规则的 `upstreams` 引用；不写会自动生成 `upstream-1`、`upstream-2`。
@@ -173,18 +224,20 @@ routing:
 ### HTTP 代理
 
 ```bash
-curl -x http://admin:admin123@127.0.0.1:8891 https://www.example.com
+curl -x http://username:your-password@127.0.0.1:4479 https://www.example.com
 ```
 
 ### SOCKS5 代理
 
 ```bash
-curl -x socks5://admin:admin123@127.0.0.1:8891 https://www.example.com
+curl -x socks5://username:your-password@127.0.0.1:4479 https://www.example.com
 ```
 
 ## 注意
 
 - 本项目仅用于学习、测试或内部网络管理，请勿用于非法用途。
 - 仅实现了 SOCKS5 的 CONNECT 命令，暂不支持 BIND 与 UDP ASSOCIATE。
-- 普通 HTTP 请求会缓冲最多 32MiB 请求体以支持重试，超限返回 413。
+- 普通 HTTP 请求会缓冲最多 1 MiB 请求体以支持重试，超限返回 413。
 - `GEOSITE:CN` 是域名分流，不需要提前 DNS 解析；GEOIP 暂未实现。
+- 监听地址变更后需要重启服务才能生效。
+- 当前 Docker 镜像拉取可能受网络环境限制，建议优先使用本地二进制测试。
