@@ -34,7 +34,8 @@ tmp/
 
 # Test artifacts
 .last_proxy_test_summary
-pyscripts/
+pyscripts/test_proxy_7897.py
+__pycache__/
 
 # Local dev config
 src/config.yml
