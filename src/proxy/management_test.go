@@ -104,6 +104,26 @@ func TestManagementServerPprof(t *testing.T) {
 	}
 }
 
+func TestManagementServerPprofDisabled(t *testing.T) {
+	m := NewManagementServer(nil, false)
+	if m.PprofEnabled() {
+		t.Fatal("expected pprof disabled")
+	}
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
+	if err != nil {
+		t.Fatalf("pprof disabled request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		t.Fatal("expected disabled pprof endpoint to return non-200")
+	}
+}
+
 func TestManagementServerStartEmptyAddr(t *testing.T) {
 	m := NewManagementServer(nil, false)
 	if err := m.Start(""); err != nil {
@@ -226,7 +246,18 @@ func TestManagementServerAuthToken(t *testing.T) {
 		t.Fatalf("health without token = %d, want 401", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("wrong token health: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("health with wrong token = %d, want 401", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

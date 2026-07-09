@@ -38,7 +38,18 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM golang:1.21-alpine AS builder", "FROM alpine:3.20", "USER k5pw", "ENTRYPOINT"} {
+	for _, want := range []string{
+		"FROM golang:1.21-alpine AS builder",
+		"FROM alpine:3.20",
+		"go mod download",
+		"CGO_ENABLED=0 GOOS=linux go build",
+		"adduser -D -u 1000 k5pw",
+		"COPY --from=builder /build/k5pw /usr/local/bin/k5pw",
+		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
+		"USER k5pw",
+		"EXPOSE 8891",
+		"ENTRYPOINT",
+	} {
 		if !bytes.Contains(dockerfile, []byte(want)) {
 			t.Fatalf("Dockerfile missing %q", want)
 		}
@@ -48,7 +59,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"services:", "k5pw:", "build:", "ports:", "volumes:"} {
+	for _, want := range []string{"services:", "k5pw:", "build:", "context: ../src", "dockerfile: Dockerfile", "ports:", `"8891:8891"`, "volumes:", "restart: unless-stopped"} {
 		if !bytes.Contains(compose, []byte(want)) {
 			t.Fatalf("docker-compose.yml missing %q", want)
 		}
@@ -58,7 +69,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[Unit]", "ExecStart=/usr/local/bin/k5pw -config /etc/k5pw/config.yml", "User=k5pw", "WantedBy=multi-user.target"} {
+	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/k5pw -config /etc/k5pw/config.yml", "Restart=on-failure", "RestartSec=5", "User=k5pw", "Group=k5pw", "WantedBy=multi-user.target"} {
 		if !bytes.Contains(serviceUnit, []byte(want)) {
 			t.Fatalf("k5pw.service missing %q", want)
 		}
@@ -68,7 +79,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"PLATFORMS=(", "linux/amd64", "darwin/arm64", "windows/amd64", "-X main.version", "git -C"} {
+	for _, want := range []string{"set -euo pipefail", "PLATFORMS=(", "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "freebsd/amd64", "-X main.version", "-X main.commit", "-X main.buildTime", "go build -trimpath", "git -C"} {
 		if !bytes.Contains(release, []byte(want)) {
 			t.Fatalf("release.sh missing %q", want)
 		}
