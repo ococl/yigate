@@ -201,3 +201,29 @@ func TestUpstreamManagerDialAndFallback(t *testing.T) {
 		t.Fatalf("echo failed: %v, %q", err, buf[:n])
 	}
 }
+
+func TestUpstreamManagerDialFallsBackToDirectAfterUpstreamFailure(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "bad", URL: "http://127.0.0.1:1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	MetricSet("k5pw_upstream_dial_failures_total", 0, "upstream=bad")
+	target := startMockTarget(t)
+	conn, err := mgr.Dial(target)
+	if err != nil {
+		t.Fatalf("dial fallback: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("fallback")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := conn.Read(buf)
+	if err != nil || string(buf[:n]) != "fallback" {
+		t.Fatalf("echo failed: %v, %q", err, buf[:n])
+	}
+	if got := MetricValue("k5pw_upstream_dial_failures_total", "upstream=bad"); got < 1 {
+		t.Fatalf("expected upstream failure metric, got %v", got)
+	}
+}

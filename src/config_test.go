@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"k5pw/proxy"
 )
@@ -254,5 +255,74 @@ upstreams:
 `), 0644)
 	if _, err := LoadConfig(path); err == nil {
 		t.Fatal("expected error for missing upstream env")
+	}
+}
+
+func TestLoadConfigRejectsEmptySensitiveEnv(t *testing.T) {
+	t.Setenv("EMPTY_TOKEN", "")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+management_auth_token: "${EMPTY_TOKEN}"
+`), 0644)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for empty management token env")
+	}
+}
+
+func TestLoadConfigRejectsUnknownField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+unknown_field: true
+`), 0644)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for unknown YAML field")
+	}
+}
+
+func TestLoadConfigParsesDurationsAndResolvesRelativePaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+timeouts:
+  dial: 2s
+  handshake: 3
+  http_exchange: 4s
+  tunnel_idle: 5
+routing:
+  geosite:
+    path: data/geosite.dat
+`), 0644)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Timeouts.Dial != proxy.Duration(2*time.Second) {
+		t.Fatalf("dial timeout = %v", time.Duration(cfg.Timeouts.Dial))
+	}
+	if cfg.Timeouts.Handshake != proxy.Duration(3*time.Second) {
+		t.Fatalf("handshake timeout = %v", time.Duration(cfg.Timeouts.Handshake))
+	}
+	if cfg.Timeouts.HTTPExchange != proxy.Duration(4*time.Second) {
+		t.Fatalf("http timeout = %v", time.Duration(cfg.Timeouts.HTTPExchange))
+	}
+	if cfg.Timeouts.TunnelIdle != proxy.Duration(5*time.Second) {
+		t.Fatalf("tunnel timeout = %v", time.Duration(cfg.Timeouts.TunnelIdle))
+	}
+	wantPath := filepath.Join(dir, "data", "geosite.dat")
+	if cfg.Routing.GeoSite.Path != wantPath {
+		t.Fatalf("geosite path = %q, want %q", cfg.Routing.GeoSite.Path, wantPath)
+	}
+}
+
+func TestValidateConfigRejectsDuplicateUpstreamNames(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Upstreams = []proxy.UpstreamConfig{
+		{Name: "same", URL: "http://127.0.0.1:8080"},
+		{Name: "same", URL: "http://127.0.0.1:8081"},
+	}
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("expected duplicate upstream name error")
 	}
 }

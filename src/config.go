@@ -199,6 +199,9 @@ func validateConfig(cfg *Config) error {
 		if name == "" {
 			name = fmt.Sprintf("upstream-%d", i+1)
 		}
+		if _, exists := upstreamNames[name]; exists {
+			return fmt.Errorf("upstreams[%d].name duplicates upstream %q", i, name)
+		}
 		upstreamNames[name] = struct{}{}
 	}
 

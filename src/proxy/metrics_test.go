@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"bytes"
+	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMetricsIncAddSetValue(t *testing.T) {
@@ -57,5 +59,54 @@ func TestMatchingKeys(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("matching keys = %#v", keys)
+	}
+}
+
+func TestTunnelMetrics(t *testing.T) {
+	MetricSet("k5pw_tunnel_transferred_bytes_total", 0, "direction=client_to_target")
+	MetricSet("k5pw_tunnel_transferred_bytes_total", 0, "direction=target_to_client")
+	MetricSet("k5pw_tunnel_packets_total", 0, "direction=client_to_target")
+	MetricSet("k5pw_tunnel_packets_total", 0, "direction=target_to_client")
+
+	client, proxySide := net.Pipe()
+	targetSide, target := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		Tunnel(proxySide, nil, targetSide)
+		close(done)
+	}()
+
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 16)
+	target.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := target.Read(buf)
+	if err != nil || string(buf[:n]) != "ping" {
+		t.Fatalf("target read = %q, %v", buf[:n], err)
+	}
+	if _, err := target.Write([]byte("pong")); err != nil {
+		t.Fatal(err)
+	}
+	client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err = client.Read(buf)
+	if err != nil || string(buf[:n]) != "pong" {
+		t.Fatalf("client read = %q, %v", buf[:n], err)
+	}
+	client.Close()
+	target.Close()
+	<-done
+
+	if got := MetricValue("k5pw_tunnel_transferred_bytes_total", "direction=client_to_target"); got < 4 {
+		t.Fatalf("client_to_target bytes = %v, want >= 4", got)
+	}
+	if got := MetricValue("k5pw_tunnel_transferred_bytes_total", "direction=target_to_client"); got < 4 {
+		t.Fatalf("target_to_client bytes = %v, want >= 4", got)
+	}
+	if got := MetricValue("k5pw_tunnel_packets_total", "direction=client_to_target"); got < 1 {
+		t.Fatalf("client_to_target packets = %v, want >= 1", got)
+	}
+	if got := MetricValue("k5pw_tunnel_packets_total", "direction=target_to_client"); got < 1 {
+		t.Fatalf("target_to_client packets = %v, want >= 1", got)
 	}
 }

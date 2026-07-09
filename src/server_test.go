@@ -405,3 +405,63 @@ log:
 		t.Fatalf("expected config listen 0.0.0.0:0, got %q", s.Config().Listen)
 	}
 }
+
+func TestServerLoadAndApplyManagementAuthAndPprofChange(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: old-token
+enable_pprof: false
+log:
+  level: warn
+  output: stdout
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer s.Stop()
+	oldAddr := s.mgmt.Addr()
+	if oldAddr == "" {
+		t.Fatal("management server not ready")
+	}
+	if s.mgmt.AuthToken() != "old-token" || s.mgmt.PprofEnabled() {
+		t.Fatal("unexpected initial management state")
+	}
+
+	_ = writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: new-token
+enable_pprof: true
+log:
+  level: warn
+  output: stdout
+`)
+	if err := s.LoadAndApply(); err != nil {
+		t.Fatalf("LoadAndApply: %v", err)
+	}
+	newAddr := s.mgmt.Addr()
+	if newAddr == "" {
+		t.Fatal("management server not restarted")
+	}
+	if s.mgmt.AuthToken() != "new-token" {
+		t.Fatalf("auth token = %q, want new-token", s.mgmt.AuthToken())
+	}
+	if !s.mgmt.PprofEnabled() {
+		t.Fatal("expected pprof enabled after reload")
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://"+newAddr+"/debug/pprof/", nil)
+	req.Header.Set("Authorization", "Bearer new-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("pprof request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pprof status = %d, want 200", resp.StatusCode)
+	}
+}
