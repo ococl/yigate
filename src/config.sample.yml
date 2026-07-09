@@ -46,5 +46,15 @@ timeouts:
   handshake: 10s
   http_exchange: 60s
   tunnel_idle: 5m
+log:
+  level: info
+  format: json
+  output: file
+  file: "logs/k5pw.log"
+  rotation: size
+  max_size: 100
+  max_age: 7
+  max_backups: 10
+  compress: true
 check_interval: 30
 max_connections: 1024

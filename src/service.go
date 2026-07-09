@@ -1,9 +1,11 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"os"
 
 	"github.com/kardianos/service"
+	"k5pw/proxy"
 )
 
 type program struct {
@@ -16,14 +18,19 @@ func (p *program) Start(s service.Service) error {
 	if err != nil {
 		return err
 	}
+	if err := proxy.InitLogger(cfg.Log); err != nil {
+		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
+		return err
+	}
 	srv, err := NewServer(p.cfgPath, cfg)
 	if err != nil {
+		proxy.Logger().Errorw("create server failed", "error", err)
 		return err
 	}
 	p.server = srv
 	go func() {
 		if err := srv.Start(); err != nil {
-			log.Printf("server error: %v", err)
+			proxy.Logger().Errorw("server error", "error", err)
 		}
 	}()
 	return nil
@@ -46,7 +53,8 @@ func newService(cfgPath string) service.Service {
 	}
 	s, err := service.New(prg, svcConfig)
 	if err != nil {
-		log.Fatalf("create service: %v", err)
+		fmt.Fprintf(os.Stderr, "create service: %v\n", err)
+		os.Exit(1)
 	}
 	return s
 }

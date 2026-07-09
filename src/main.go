@@ -3,11 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"k5pw/proxy"
 )
 
 func main() {
@@ -33,7 +34,8 @@ func main() {
 
 	cfgPath, err := filepath.Abs(*configPath)
 	if err != nil {
-		log.Fatalf("resolve config path: %v", err)
+		fmt.Fprintf(os.Stderr, "resolve config path: %v\n", err)
+		os.Exit(1)
 	}
 
 	switch cmd {
@@ -52,32 +54,39 @@ func main() {
 func runForeground(cfgPath string) {
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := proxy.InitLogger(cfg.Log); err != nil {
+		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
+		os.Exit(1)
 	}
 	srv, err := NewServer(cfgPath, cfg)
 	if err != nil {
-		log.Fatalf("create server: %v", err)
+		proxy.Logger().Fatalw("create server failed", "error", err)
 	}
 	go func() {
 		if err := srv.Start(); err != nil {
-			log.Fatalf("server: %v", err)
+			proxy.Logger().Fatalw("server error", "error", err)
 		}
 	}()
 
-	log.Printf("k5pw proxy started on %s", cfg.Listen)
+	proxy.Logger().Infow("k5pw proxy started", "listen", cfg.Listen)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	srv.Stop()
-	log.Println("k5pw proxy stopped")
+	proxy.Logger().Infow("k5pw proxy stopped")
+	proxy.SyncLogger()
 }
 
 func runService(cfgPath string) {
 	s := newService(cfgPath)
 	if err := s.Run(); err != nil {
-		log.Fatalf("service run: %v", err)
+		fmt.Fprintf(os.Stderr, "service run: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -97,7 +106,8 @@ func controlService(cfgPath, action string) {
 		err = s.Restart()
 	}
 	if err != nil {
-		log.Fatalf("service %s: %v", action, err)
+		fmt.Fprintf(os.Stderr, "service %s: %v\n", action, err)
+		os.Exit(1)
 	}
-	log.Printf("service %s succeeded", action)
+	fmt.Fprintf(os.Stderr, "service %s succeeded\n", action)
 }

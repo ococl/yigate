@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
+	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -21,9 +21,9 @@ func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, rout
 			if err := relaySOCKS5Bind(client, upConn, listenAddr); err == nil {
 				return
 			}
-			log.Printf("socks5 bind upstream relay failed: %v", err)
+			Logger().Warnw("socks5 bind upstream relay failed", "error", err)
 		} else {
-			log.Printf("socks5 bind upstream failed: %v", err)
+			Logger().Warnw("socks5 bind upstream failed", "target", target, "error", err)
 		}
 	}
 	// 回退：本地 BIND
@@ -37,8 +37,7 @@ func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string) error {
 	}
 
 	// 读取上游第二次回复（包含目标地址）并转发给客户端
-	upReader := bufio.NewReader(upConn)
-	reply, err := readSOCKS5Reply(upReader)
+	reply, err := readSOCKS5Reply(upConn)
 	if err != nil {
 		return fmt.Errorf("read second bind reply from upstream: %w", err)
 	}
@@ -65,7 +64,7 @@ func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string) error {
 func localSOCKS5Bind(client net.Conn, target string) {
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
-		log.Printf("socks5 bind listen: %v", err)
+		Logger().Warnw("socks5 bind listen failed", "error", err)
 		socks5Reply(client, 0x01)
 		return
 	}
@@ -77,14 +76,14 @@ func localSOCKS5Bind(client net.Conn, target string) {
 
 	expectedHost, _, _ := net.SplitHostPort(target)
 	if err := ln.(*net.TCPListener).SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		log.Printf("socks5 bind set deadline: %v", err)
+		Logger().Warnw("socks5 bind set deadline failed", "error", err)
 		socks5Reply(client, 0x01)
 		return
 	}
 
 	incoming, err := ln.Accept()
 	if err != nil {
-		log.Printf("socks5 bind accept: %v", err)
+		Logger().Warnw("socks5 bind accept failed", "error", err)
 		socks5Reply(client, 0x01)
 		return
 	}
@@ -92,7 +91,7 @@ func localSOCKS5Bind(client net.Conn, target string) {
 
 	if expectedHost != "" {
 		if host, _, _ := net.SplitHostPort(incoming.RemoteAddr().String()); host != expectedHost {
-			log.Printf("socks5 bind connection from %s rejected, expected %s", host, expectedHost)
+			Logger().Warnw("socks5 bind connection rejected", "from", host, "expected", expectedHost)
 			socks5Reply(client, 0x02)
 			return
 		}
@@ -103,11 +102,11 @@ func localSOCKS5Bind(client net.Conn, target string) {
 	}
 
 	if err := setConnDeadline(client, TunnelIdleTimeout()); err != nil {
-		log.Printf("set socks5 bind client deadline: %v", err)
+		Logger().Warnw("set socks5 bind client deadline failed", "error", err)
 		return
 	}
 	if err := setConnDeadline(incoming, TunnelIdleTimeout()); err != nil {
-		log.Printf("set socks5 bind incoming deadline: %v", err)
+		Logger().Warnw("set socks5 bind incoming deadline failed", "error", err)
 		return
 	}
 
@@ -119,14 +118,14 @@ func localSOCKS5Bind(client net.Conn, target string) {
 func handleSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router) {
 	if mgr != nil && mgr.Socks5AttemptCount(nil) > 0 {
 		upConn, upUDPAddr, _, err := mgr.DialSOCKS5UDP(target, nil)
-    if err == nil {
-      if err := relaySOCKS5UDPAssociate(client, clientReader, upConn, upUDPAddr); err == nil {
-        return
-      }
-      log.Printf("socks5 udp associate upstream relay failed: %v", err)
-      upConn.Close()
-    } else {
-			log.Printf("socks5 udp associate upstream failed: %v", err)
+		if err == nil {
+			if err := relaySOCKS5UDPAssociate(client, clientReader, upConn, upUDPAddr); err == nil {
+				return
+			}
+			Logger().Warnw("socks5 udp associate upstream relay failed", "error", err)
+			upConn.Close()
+		} else {
+			Logger().Warnw("socks5 udp associate upstream failed", "target", target, "error", err)
 		}
 	}
 	// 回退：本地 UDP 中继
@@ -154,13 +153,13 @@ func relaySOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, upConn
 	defer upPacketConn.Close()
 
 	relay := &udpRelay{
-		clientConn:    client,
-		ln:            ln,
-		upConn:        upConn,
-		upPacketConn:  upPacketConn,
-		useUpstream:   true,
-		sessions:      make(map[string]*udpSession),
-		quit:          make(chan struct{}),
+		clientConn:   client,
+		ln:           ln,
+		upConn:       upConn,
+		upPacketConn: upPacketConn,
+		useUpstream:  true,
+		sessions:     make(map[string]*udpSession),
+		quit:         make(chan struct{}),
 	}
 	relay.run(clientReader)
 	return nil
@@ -180,7 +179,7 @@ func localSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, target
 
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		log.Printf("socks5 udp associate listen: %v", err)
+		Logger().Warnw("socks5 udp associate listen failed", "error", err)
 		socks5Reply(client, 0x01)
 		return
 	}
@@ -191,11 +190,11 @@ func localSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, target
 	}
 
 	relay := &udpRelay{
-		clientConn:   client,
-		ln:           conn,
-		useUpstream:  false,
-		sessions:     make(map[string]*udpSession),
-		quit:         make(chan struct{}),
+		clientConn:  client,
+		ln:          conn,
+		useUpstream: false,
+		sessions:    make(map[string]*udpSession),
+		quit:        make(chan struct{}),
 	}
 	relay.run(clientReader)
 }
@@ -291,9 +290,9 @@ type socks5ReplyPacket struct {
 }
 
 // readSOCKS5Reply 从连接读取完整的 SOCKS5 回复。
-func readSOCKS5Reply(r *bufio.Reader) (*socks5ReplyPacket, error) {
+func readSOCKS5Reply(r io.Reader) (*socks5ReplyPacket, error) {
 	header := make([]byte, 4)
-	if _, err := r.Read(header); err != nil {
+	if _, err := io.ReadFull(r, header); err != nil {
 		return nil, err
 	}
 	if header[0] != 0x05 {
@@ -335,8 +334,8 @@ type udpRelay struct {
 	clientConn    net.Conn
 	clientUDPAddr *net.UDPAddr
 	ln            *net.UDPConn
-	upConn        net.Conn        // 上游 TCP 控制连接（级联模式）
-	upPacketConn  *net.UDPConn    // 上游 UDP 连接（级联模式）
+	upConn        net.Conn     // 上游 TCP 控制连接（级联模式）
+	upPacketConn  *net.UDPConn // 上游 UDP 连接（级联模式）
 	useUpstream   bool
 	sessions      map[string]*udpSession
 	mu            sync.Mutex
@@ -379,7 +378,7 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 	buf := make([]byte, 65535)
 	for {
 		if err := r.ln.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-			log.Printf("udp relay set read deadline: %v", err)
+			Logger().Warnw("udp relay set read deadline failed", "error", err)
 			r.closeSessions()
 			return
 		}
@@ -393,7 +392,7 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				log.Printf("udp relay read: %v", err)
+				Logger().Warnw("udp relay read failed", "error", err)
 				r.closeSessions()
 				return
 			}
@@ -402,17 +401,17 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 		if r.clientUDPAddr == nil {
 			r.clientUDPAddr = srcAddr
 		} else if r.clientUDPAddr.IP.String() != srcAddr.IP.String() {
-			log.Printf("udp relay ignore packet from %s, expected %s", srcAddr, r.clientUDPAddr)
+			Logger().Warnw("udp relay ignore packet", "from", srcAddr, "expected", r.clientUDPAddr)
 			continue
 		}
 
 		target, frag, dataOff, ok := readSOCKS5UDPHeader(buf[:n])
 		if !ok {
-			log.Printf("udp relay invalid header from %s", srcAddr)
+			Logger().Warnw("udp relay invalid header", "from", srcAddr)
 			continue
 		}
 		if frag != 0 {
-			log.Printf("udp relay fragment %d not supported", frag)
+			Logger().Warnw("udp relay fragment not supported", "frag", frag)
 			continue
 		}
 		data := buf[dataOff:n]
@@ -420,13 +419,13 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 		if r.useUpstream && r.upPacketConn != nil {
 			packet := append(buf[:dataOff], data...)
 			if _, err := r.upPacketConn.Write(packet); err != nil {
-				log.Printf("udp relay write to upstream: %v", err)
+				Logger().Warnw("udp relay write to upstream failed", "error", err)
 			}
 			continue
 		}
 
 		if err := r.forwardToTarget(target, data); err != nil {
-			log.Printf("udp relay forward to %s: %v", target, err)
+			Logger().Warnw("udp relay forward to target failed", "target", target, "error", err)
 		}
 	}
 }
@@ -461,12 +460,12 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 	buf := make([]byte, 65535)
 	header, err := buildSOCKS5UDPHeader(sess.targetAddr.String())
 	if err != nil {
-		log.Printf("udp relay build header: %v", err)
+		Logger().Warnw("udp relay build header failed", "error", err)
 		return
 	}
 	for {
 		if err := sess.conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-			log.Printf("udp session set read deadline: %v", err)
+			Logger().Warnw("udp session set read deadline failed", "error", err)
 			return
 		}
 		n, err := sess.conn.Read(buf)
@@ -478,7 +477,7 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				log.Printf("udp session read: %v", err)
+				Logger().Warnw("udp session read failed", "error", err)
 				return
 			}
 		}
@@ -487,7 +486,7 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 		}
 		packet := append(header, buf[:n]...)
 		if _, err := r.ln.WriteToUDP(packet, r.clientUDPAddr); err != nil {
-			log.Printf("udp relay write back to client: %v", err)
+			Logger().Warnw("udp relay write back to client failed", "error", err)
 			return
 		}
 		sess.lastUsed = time.Now()
@@ -498,7 +497,7 @@ func (r *udpRelay) readFromUpstream() {
 	buf := make([]byte, 65535)
 	for {
 		if err := r.upPacketConn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-			log.Printf("udp upstream set read deadline: %v", err)
+			Logger().Warnw("udp upstream set read deadline failed", "error", err)
 			return
 		}
 		n, err := r.upPacketConn.Read(buf)
@@ -510,7 +509,7 @@ func (r *udpRelay) readFromUpstream() {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				log.Printf("udp upstream read: %v", err)
+				Logger().Warnw("udp upstream read failed", "error", err)
 				return
 			}
 		}
@@ -518,7 +517,7 @@ func (r *udpRelay) readFromUpstream() {
 			continue
 		}
 		if _, err := r.ln.WriteToUDP(buf[:n], r.clientUDPAddr); err != nil {
-			log.Printf("udp relay write back to client: %v", err)
+			Logger().Warnw("udp relay write back to client failed", "error", err)
 			return
 		}
 	}

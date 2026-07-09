@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -417,12 +416,13 @@ func (m *UpstreamManager) checkAll() {
 			alive := m.check(u)
 			m.mu.Lock()
 			if u.dead && alive {
-				log.Printf("upstream %s recovered", u.URL.Host)
+				Logger().Infow("upstream recovered", "upstream", u.URL.Host, "name", u.Name)
 			} else if !u.dead && !alive {
-				log.Printf("upstream %s dead", u.URL.Host)
+				Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
 			}
 			u.dead = !alive
 			m.mu.Unlock()
+
 		}(u)
 	}
 	wg.Wait()
@@ -539,7 +539,7 @@ func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *U
 			return conn, up, nil
 		}
 		lastErr = err
-		log.Printf("upstream %s dial %s failed: %v", up.Name, target, err)
+		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
 		m.markDead(up)
 	}
 	if lastErr == nil {
@@ -560,7 +560,7 @@ func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, err
 	}
 	conn, err := up.Dial(target)
 	if err != nil {
-		log.Printf("upstream %s dial %s failed: %v", up.Name, target, err)
+		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
 		m.markDead(up)
 		return nil, nil, err
 	}
@@ -674,7 +674,7 @@ func (m *UpstreamManager) DialSOCKS5Bind(target string, names []string) (net.Con
 			return conn, addr, up, nil
 		}
 		lastErr = err
-		log.Printf("upstream %s bind %s failed: %v", up.Name, target, err)
+		Logger().Warnw("upstream bind failed", "upstream", up.Name, "target", target, "error", err)
 		m.markDead(up)
 	}
 	if lastErr == nil {
@@ -697,7 +697,7 @@ func (m *UpstreamManager) DialSOCKS5UDP(target string, names []string) (net.Conn
 			return conn, addr, up, nil
 		}
 		lastErr = err
-		log.Printf("upstream %s udp associate %s failed: %v", up.Name, target, err)
+		Logger().Warnw("upstream udp associate failed", "upstream", up.Name, "target", target, "error", err)
 		m.markDead(up)
 	}
 	if lastErr == nil {

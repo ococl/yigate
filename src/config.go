@@ -18,6 +18,7 @@ type Config struct {
 	Upstreams      []proxy.UpstreamConfig `yaml:"upstreams"`
 	Routing        proxy.RoutingConfig    `yaml:"routing"`
 	Timeouts       proxy.TimeoutConfig    `yaml:"timeouts"`
+	Log            proxy.LogConfig        `yaml:"log"`
 	CheckInterval  int                    `yaml:"check_interval"`
 	MaxConnections int                    `yaml:"max_connections"`
 }
@@ -46,6 +47,7 @@ func defaultConfig() *Config {
 			},
 			Socks5HRedirect: proxy.Socks5HConfig{Enabled: true},
 		},
+		Log:            proxy.DefaultLogConfig(),
 		CheckInterval:  30,
 		MaxConnections: defaultMaxConnections,
 	}
@@ -78,6 +80,7 @@ func LoadConfig(path string) (*Config, error) {
 	baseDir := filepath.Dir(path)
 	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
 	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
+	proxy.NormalizeLogConfig(&cfg.Log)
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -93,6 +96,9 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.MaxConnections < 0 {
 		return fmt.Errorf("max_connections must be >= 0")
+	}
+	if err := proxy.ValidateLogConfig(cfg.Log); err != nil {
+		return fmt.Errorf("log: %w", err)
 	}
 	for i, up := range cfg.Upstreams {
 		if strings.TrimSpace(up.URL) == "" {

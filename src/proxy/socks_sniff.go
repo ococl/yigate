@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"net"
 	"strings"
 	"time"
@@ -34,18 +33,18 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 	}
 	initial := readInitialClientBytes(client)
 	rewritten := rewriteSOCKS5TargetFromInitial(target, initial)
-	log.Printf("[socks5] target=%s rewritten=%s initial=%d", target, rewritten, len(initial))
+	Logger().Infow("socks5 sniff target", "target", target, "rewritten", rewritten, "initial_bytes", len(initial))
 	remote, err := dialSOCKS5RecoveredTarget(rewritten, target, mgr, router)
 	if err != nil {
-		log.Printf("[socks5] connect to %s failed: %v", rewritten, err)
+		Logger().Warnw("socks5 connect failed", "target", rewritten, "error", err)
 		client.Close()
 		return
 	}
 	defer remote.Close()
-	log.Printf("[socks5] connected to %s", rewritten)
+	Logger().Infow("socks5 connected", "target", rewritten)
 	if len(initial) > 0 {
 		if _, err := remote.Write(initial); err != nil {
-			log.Printf("[socks5] write initial to %s failed: %v", rewritten, err)
+			Logger().Warnw("socks5 write initial failed", "target", rewritten, "error", err)
 			client.Close()
 			return
 		}
@@ -58,12 +57,12 @@ func dialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamM
 		// 优先使用域名本身走路由（socks5h / domain_suffix 规则），避免本地 DNS 污染
 		// 导致解析到虚假 IP 后 TCP 握手成功但无响应。
 		if conn, err := dialTargetForRequest(rewritten, mgr, router); err == nil {
-			log.Printf("[socks5] dial domain %s succeeded", rewritten)
+			Logger().Infow("socks5 dial domain succeeded", "target", rewritten)
 			return conn, nil
 		}
 		// 域名路由失败后再尝试本地解析兜底。
 		if conn, err := dialLocalResolvedTarget(rewritten, mgr, router); err == nil {
-			log.Printf("[socks5] local re-resolve %s succeeded", rewritten)
+			Logger().Infow("socks5 local re-resolve succeeded", "target", rewritten)
 			return conn, nil
 		}
 	}
@@ -82,20 +81,20 @@ func dialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router
 	defer cancel()
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
-		log.Printf("[socks5] local resolve %s failed: %v", host, err)
+		Logger().Warnw("socks5 local resolve failed", "host", host, "error", err)
 		return nil, err
 	}
-	log.Printf("[socks5] local resolve %s addrs=%v", host, addrs)
+	Logger().Infow("socks5 local resolve succeeded", "host", host, "addrs", addrs)
 	var lastErr error
 	for _, ip := range preferIPv4(addrs) {
 		dialTarget := net.JoinHostPort(ip.String(), port)
 		conn, err := dialTargetForRequest(dialTarget, mgr, router)
 		if err == nil {
-			log.Printf("[socks5] dial %s succeeded", dialTarget)
+			Logger().Infow("socks5 dial succeeded", "target", dialTarget)
 			return conn, nil
 		}
 		lastErr = err
-		log.Printf("[socks5] dial %s failed: %v", dialTarget, err)
+		Logger().Warnw("socks5 dial failed", "target", dialTarget, "error", err)
 	}
 	if lastErr == nil {
 		lastErr = &net.DNSError{Err: "no addresses", Name: host}

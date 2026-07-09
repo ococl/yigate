@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -85,7 +84,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		// 仅在 geosite 文件不存在时同步下载，避免每次启动/重载都阻塞。
 		if _, err := os.Stat(cfg.Routing.GeoSite.Path); os.IsNotExist(err) {
 			if err := updater.UpdateOnce(); err != nil {
-				log.Printf("initial geosite update failed: %v", err)
+				proxy.Logger().Warnw("initial geosite update failed", "error", err)
 			}
 		}
 	}
@@ -103,13 +102,14 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	updater.Start(func() {
 		cfg, err := LoadConfig(s.cfgPath)
 		if err != nil {
-			log.Printf("load after geosite update: %v", err)
+			proxy.Logger().Warnw("load config after geosite update failed", "error", err)
 			return
 		}
 		if err := s.applyConfig(cfg, false); err != nil {
-			log.Printf("reload after geosite update: %v", err)
+			proxy.Logger().Warnw("reload config after geosite update failed", "error", err)
 		}
 	})
+	proxy.InitLogger(cfg.Log)
 	s.maxConns.Store(int64(cfg.MaxConnections))
 	proxy.SetTimeouts(cfg.Timeouts)
 	s.config.Store(cfg)
@@ -126,7 +126,7 @@ func (s *Server) LoadAndApply() error {
 		return err
 	}
 	if old := s.Config(); old != nil && old.Listen != cfg.Listen {
-		log.Printf("config listen changed from %s to %s, switching listener", old.Listen, cfg.Listen)
+		proxy.Logger().Infow("config listen changed, switching listener", "old", old.Listen, "new", cfg.Listen)
 		newLn, err := net.Listen("tcp", cfg.Listen)
 		if err != nil {
 			return fmt.Errorf("switch listener to %s: %w", cfg.Listen, err)
@@ -163,10 +163,10 @@ func (s *Server) Start() error {
 		s.ln = ln
 	}
 	s.lnMu.Unlock()
-	log.Printf("k5pw listening on %s", cfg.Listen)
+	proxy.Logger().Infow("k5pw listening", "address", cfg.Listen)
 
 	if err := s.watchConfig(); err != nil {
-		log.Printf("watch config: %v", err)
+		proxy.Logger().Warnw("watch config failed", "error", err)
 	}
 
 	for {
@@ -178,7 +178,7 @@ func (s *Server) Start() error {
 			case <-s.quit:
 				return nil
 			default:
-				log.Printf("listener is nil, waiting for new listener")
+				proxy.Logger().Warnw("listener is nil, waiting for new listener")
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
@@ -197,7 +197,7 @@ func (s *Server) Start() error {
 				if newLn != curLn {
 					continue
 				}
-				log.Printf("accept error: %v", err)
+				proxy.Logger().Warnw("accept error", "error", err)
 				continue
 			}
 		}
@@ -221,7 +221,7 @@ func (s *Server) acquireConnSlot(conn net.Conn) bool {
 	for {
 		cur := s.connCount.Load()
 		if cur >= max {
-			log.Printf("connection limit reached, closing %s", conn.RemoteAddr())
+			proxy.Logger().Warnw("connection limit reached, closing connection", "remote", conn.RemoteAddr(), "active", cur, "max", max)
 			conn.Close()
 			return false
 		}
@@ -325,18 +325,18 @@ func (s *Server) watchLoop(w *fsnotify.Watcher) {
 		case <-debounce.C:
 			if pending {
 				pending = false
-				log.Println("config changed, reloading...")
+				proxy.Logger().Infow("config changed, reloading")
 				if err := s.LoadAndApply(); err != nil {
-					log.Printf("reload config: %v", err)
+					proxy.Logger().Errorw("reload config failed", "error", err)
 				} else {
-					log.Printf("config reloaded: %d upstream(s)", len(s.Config().Upstreams))
+					proxy.Logger().Infow("config reloaded", "upstream_count", len(s.Config().Upstreams))
 				}
 			}
 		case err, ok := <-w.Errors:
 			if !ok {
 				return
 			}
-			log.Printf("config watcher error: %v", err)
+			proxy.Logger().Warnw("config watcher error", "error", err)
 		}
 	}
 }
@@ -352,7 +352,7 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(proxy.ProxyHandshakeTimeout())); err != nil {
-		log.Printf("set handshake deadline: %v", err)
+		proxy.Logger().Warnw("set handshake deadline failed", "error", err)
 		conn.Close()
 		return
 	}

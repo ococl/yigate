@@ -1,0 +1,17 @@
+services:
+  k5pw:
+    build:
+      context: ../src
+      dockerfile: Dockerfile
+    image: k5pw:latest
+    container_name: k5pw
+    ports:
+      - "8891:8891"
+    volumes:
+      - ./k5:/k5
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "mkdir -p /k5/logs && exec k5pw -config /k5/config.yml"
+
+    restart: unless-stopped

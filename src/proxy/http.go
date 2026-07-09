@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -35,7 +34,7 @@ func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]st
 
 	req, err := http.ReadRequest(clientReader)
 	if err != nil {
-		log.Printf("http read request: %v", err)
+		Logger().Warnw("http read request failed", "error", err)
 		return
 	}
 	defer req.Body.Close()
@@ -46,7 +45,7 @@ func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]st
 	}
 
 	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
-		log.Printf("set http deadline: %v", err)
+		Logger().Warnw("set http deadline failed", "error", err)
 		return
 	}
 
@@ -61,17 +60,17 @@ func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]st
 func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager, router *Router) {
 	targetConn, err := dialTargetForRequest(target, mgr, router)
 	if err != nil {
-		log.Printf("connect to %s failed: %v", target, err)
+		Logger().Warnw("connect failed", "target", target, "error", err)
 		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
 	if err := setConnDeadline(client, TunnelIdleTimeout()); err != nil {
-		log.Printf("set connect client deadline: %v", err)
+		Logger().Warnw("set connect client deadline failed", "error", err)
 		targetConn.Close()
 		return
 	}
 	if err := setConnDeadline(targetConn, TunnelIdleTimeout()); err != nil {
-		log.Printf("set connect target deadline: %v", err)
+		Logger().Warnw("set connect target deadline failed", "error", err)
 		targetConn.Close()
 		return
 	}
@@ -85,7 +84,7 @@ func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router) (
 		if err == nil {
 			return conn, nil
 		}
-		log.Printf("socks5h redirect to %s failed, fallback to routing: %v", target, err)
+		Logger().Warnw("socks5h redirect failed, fallback to routing", "target", target, "error", err)
 	}
 	return router.Dial(target, mgr)
 }
@@ -104,12 +103,12 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		var err error
 		bodyBytes, err = io.ReadAll(io.LimitReader(req.Body, maxBufferedRequestBody+1))
 		if err != nil {
-			log.Printf("read request body: %v", err)
+			Logger().Warnw("read request body failed", "error", err)
 			writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 			return
 		}
 		if len(bodyBytes) > maxBufferedRequestBody {
-			log.Printf("request body too large: %d bytes", len(bodyBytes))
+			Logger().Warnw("request body too large", "size", len(bodyBytes), "max", maxBufferedRequestBody)
 			writeResponse(client, "HTTP/1.1 413 Payload Too Large\r\n\r\n")
 			return
 		}
@@ -135,15 +134,15 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		if err == nil {
 			defer resp.Body.Close()
 			if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
-				log.Printf("set response deadline: %v", err)
+				Logger().Warnw("set response deadline failed", "error", err)
 				return
 			}
 			if err := resp.Write(client); err != nil {
-				log.Printf("write response to client: %v", err)
+				Logger().Warnw("write response to client failed", "error", err)
 			}
 			return
 		}
-		log.Printf("socks5h request failed, fallback to routing: %v", err)
+		Logger().Warnw("socks5h request failed, fallback to routing", "error", err)
 	}
 	decision := router.Decide(targetHost(req))
 	switch decision.Action {
@@ -156,17 +155,17 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		resp, err = requestAuto(req, mgr, router, resetBody)
 	}
 	if err != nil {
-		log.Printf("forward request: %v", err)
+		Logger().Warnw("forward request failed", "target", targetHost(req), "error", err)
 		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
 	defer resp.Body.Close()
 	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
-		log.Printf("set response deadline: %v", err)
+		Logger().Warnw("set response deadline failed", "error", err)
 		return
 	}
 	if err := resp.Write(client); err != nil {
-		log.Printf("write response to client: %v", err)
+		Logger().Warnw("write response to client failed", "error", err)
 	}
 }
 
@@ -188,15 +187,15 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 		if err == nil {
 			defer resp.Body.Close()
 			if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
-				log.Printf("set streamed response deadline: %v", err)
+				Logger().Warnw("set streamed response deadline failed", "error", err)
 				return
 			}
 			if err := resp.Write(client); err != nil {
-				log.Printf("write streamed response to client: %v", err)
+				Logger().Warnw("write streamed response to client failed", "error", err)
 			}
 			return
 		}
-		log.Printf("socks5h streamed request failed, fallback to routing: %v", err)
+		Logger().Warnw("socks5h streamed request failed, fallback to routing", "error", err)
 	}
 
 	decision := router.Decide(targetHost(req))
@@ -212,17 +211,17 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 		}
 	}
 	if err != nil {
-		log.Printf("forward streamed request: %v", err)
+		Logger().Warnw("forward streamed request failed", "target", targetHost(req), "error", err)
 		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
 	defer resp.Body.Close()
 	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
-		log.Printf("set streamed response deadline: %v", err)
+		Logger().Warnw("set streamed response deadline failed", "error", err)
 		return
 	}
 	if err := resp.Write(client); err != nil {
-		log.Printf("write streamed response to client: %v", err)
+		Logger().Warnw("write streamed response to client failed", "error", err)
 	}
 }
 
@@ -322,7 +321,7 @@ func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, na
 			return resp, nil
 		}
 		lastErr = err
-		log.Printf("forward via upstream %s failed: %v", up.Name, err)
+		Logger().Warnw("forward via upstream failed", "upstream", up.Name, "target", targetHost(req), "error", err)
 		if !isTargetError(err) {
 			mgr.markDead(up)
 		}
@@ -478,6 +477,6 @@ func writeHTTPRequest(w io.Writer, req *http.Request, viaUpstream bool, up *Upst
 
 func writeResponse(w io.Writer, statusLine string) {
 	if _, err := w.Write([]byte(statusLine)); err != nil {
-		log.Printf("write response: %v", err)
+		Logger().Warnw("write response failed", "error", err)
 	}
 }

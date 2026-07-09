@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 )
@@ -15,13 +14,13 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 	defer client.Close()
 
 	if err := socks5NegotiateAuth(client, clientReader, users); err != nil {
-		log.Printf("socks5 auth: %v", err)
+		Logger().Warnw("socks5 auth failed", "error", err)
 		return
 	}
 
 	cmd, target, rep, err := socks5ReadRequest(clientReader)
 	if err != nil {
-		log.Printf("socks5 request: %v", err)
+		Logger().Warnw("socks5 request failed", "error", err)
 		if rep == 0 {
 			rep = 0x01
 		}
@@ -37,7 +36,7 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 	case 0x03: // UDP ASSOCIATE
 		handleSOCKS5UDPAssociate(client, clientReader, target, mgr, router)
 	default:
-		log.Printf("socks5 unsupported command %d", cmd)
+		Logger().Warnw("socks5 unsupported command", "command", cmd)
 		socks5Reply(client, 0x07)
 	}
 }
@@ -45,24 +44,24 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router) {
 	host, _, err := net.SplitHostPort(target)
 	if router != nil && router.Socks5HEnabled() && err == nil && net.ParseIP(host) != nil {
-		log.Printf("socks5 ip target %s will be handled with sniff/rewrite", target)
+		Logger().Infow("socks5 ip target will be handled with sniff/rewrite", "target", target)
 		handleSOCKS5ConnectWithSniff(client, target, mgr, router)
 		return
 	}
 
 	targetConn, err := dialTargetForRequest(target, mgr, router)
 	if err != nil {
-		log.Printf("socks5 connect to %s failed: %v", target, err)
+		Logger().Warnw("socks5 connect failed", "target", target, "error", err)
 		socks5Reply(client, 0x01)
 		return
 	}
 	if err := setConnDeadline(client, TunnelIdleTimeout()); err != nil {
-		log.Printf("set socks5 client deadline: %v", err)
+		Logger().Warnw("set socks5 client deadline failed", "error", err)
 		targetConn.Close()
 		return
 	}
 	if err := setConnDeadline(targetConn, TunnelIdleTimeout()); err != nil {
-		log.Printf("set socks5 target deadline: %v", err)
+		Logger().Warnw("set socks5 target deadline failed", "error", err)
 		targetConn.Close()
 		return
 	}
@@ -223,7 +222,7 @@ func socks5ReplyWithAddr(client net.Conn, rep byte, addr string) bool {
 	}
 	reply = append(reply, byte(port>>8), byte(port))
 	if _, err := client.Write(reply); err != nil {
-		log.Printf("write socks5 reply: %v", err)
+		Logger().Warnw("write socks5 reply failed", "error", err)
 		return false
 	}
 	return true

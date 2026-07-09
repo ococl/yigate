@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -75,10 +74,10 @@ func (u *GeoSiteUpdater) loop(onUpdated func()) {
 
 func (u *GeoSiteUpdater) update(onUpdated func()) {
 	if err := u.UpdateOnce(); err != nil {
-		log.Printf("update geosite dat: %v", err)
+		Logger().Warnw("update geosite dat failed", "error", err)
 		return
 	}
-	log.Printf("geosite dat updated: %s", u.cfg.Path)
+	Logger().Infow("geosite dat updated", "path", u.cfg.Path)
 	if onUpdated != nil {
 		onUpdated()
 	}
@@ -133,7 +132,7 @@ func (u *GeoSiteUpdater) requestViaAutoProxy(req *http.Request) (*http.Response,
 			return resp, nil
 		}
 		lastErr = err
-		log.Printf("download geosite via upstream %s failed: %v", up.Name, err)
+		Logger().Warnw("download geosite via upstream failed", "upstream", up.Name, "error", err)
 		// 下载 geosite 失败不应影响上游健康状态，可能是目标 URL 不可达
 	}
 	if lastErr == nil {

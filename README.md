@@ -14,6 +14,7 @@
 - **优先级与权重**：同一批候选上游内，优先使用 `priority` 更小的组，组内按 `weight` 平滑加权轮询。
 - **账号密码**：默认匿名，配置 `users` 后启用 HTTP Basic 认证与 SOCKS5 用户名密码认证。
 - **健康检查**：定时探测上游可用性，故障自动剔除，恢复自动加入。
+- **结构化日志**：使用 `zap` 输出 JSON/Console 结构化日志，支持文件滚动、归档压缩和日志级别调整。
 - **配置热加载**：通过 `fsnotify` 监视配置文件，保存后自动重载。
 
 ## 目录结构
@@ -136,6 +137,17 @@ timeouts:
   http_exchange: 60s
   tunnel_idle: 5m
 
+log:
+  level: info
+  format: json
+  output: file
+  file: "logs/k5pw.log"
+  rotation: size
+  max_size: 100
+  max_age: 7
+  max_backups: 10
+  compress: true
+
 check_interval: 30
 max_connections: 1024
 ```
@@ -165,6 +177,16 @@ max_connections: 1024
 - `timeouts.handshake`：协议握手超时，默认 `10s`。
 - `timeouts.http_exchange`：普通 HTTP 请求交换超时，默认 `60s`。
 - `timeouts.tunnel_idle`：隧道空闲超时，默认 `5m`。
+- `log`：日志输出规则。
+  - `level`：日志级别，支持 `debug`、`info`、`warn`、`error`、`fatal`、`panic`，默认 `info`。
+  - `format`：输出格式，`json` 或 `console`，默认 `json`。
+  - `output`：输出目标，`stdout`、`stderr` 或 `file`，默认 `stdout`。
+  - `file`：文件路径，`output: file` 时必填。
+  - `rotation`：滚动模式，`size`（按大小分包）或 `daily`（按自然日滚动），默认 `size`。
+  - `max_size`：`size` 模式下单个文件大小上限（MB），默认 `100`。
+  - `max_age`：历史日志保留天数，默认 `7`；过期日志自动删除。
+  - `max_backups`：`size` 模式下最多保留的滚动文件数，默认 `10`。
+  - `compress`：是否对历史日志进行 gzip 压缩，默认 `true`。
 - `check_interval`：健康检查周期，单位秒，默认 30；设置为 0 禁用健康检查。健康检查会向上游发送最小协议握手（HTTP/SOCKS5），只有协议层响应正常才视为可用。
 - `max_connections`：最大并发连接数，默认 1024；设置为负数会拒绝启动。
 

@@ -1,0 +1,60 @@
+listen: "0.0.0.0:8891"
+users: {}
+upstreams:
+  - name: "default"
+    url: "socks5h://10.2.3.150:7897"
+    types: ["http", "https", "socks5", "socks5h"]
+    priority: 1
+    weight: 5
+routing:
+  final: auto
+  geosite:
+    path: "geosite.dat"
+    auto_update: true
+    update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+    update_interval: 24h
+  auto:
+    mode: direct_first
+    direct_timeout: 1500ms
+    cache_ttl: 1h
+  socks5h_redirect:
+    enabled: true
+  rules:
+    - type: geosite
+      values: ["CN"]
+      action: direct
+    - type: ip_cidr
+      values:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+        - "127.0.0.0/8"
+        - "100.64.0.0/10"
+      action: direct
+    - type: domain_suffix
+      values:
+        - "github.com"
+        - "githubusercontent.com"
+        - "githubassets.com"
+        - "google.com"
+        - "gstatic.com"
+        - "docker.io"
+        - "docker.com"
+      action: proxy
+timeouts:
+  dial: 10s
+  handshake: 10s
+  http_exchange: 60s
+  tunnel_idle: 5m
+log:
+  level: info
+  format: json
+  output: file
+  file: "/k5/logs/k5pw.log"
+  rotation: size
+  max_size: 100
+  max_age: 7
+  max_backups: 10
+  compress: true
+check_interval: 30
+max_connections: 1024
