@@ -146,7 +146,7 @@ max_connections: 1024
 - `users`：用户名密码映射。留空或删除表示匿名。
 - `upstreams`：上游代理列表。
   - `name`：上游名称，可被路由规则的 `upstreams` 引用；不写会自动生成 `upstream-1`、`upstream-2`。
-  - `url`：上游地址，认证信息可写在 URL 中；未配置 `types` 时默认使用 URL scheme 作为初始类型。
+  - `url`：上游地址，认证信息可写在 URL 中，也支持通过环境变量注入（例如 `socks5://${UPSTREAM_USER}:${UPSTREAM_PASS}@host:port`）；未配置 `types` 时默认使用 URL scheme 作为初始类型。
   - `types`：可选的代理类型数组，支持 `http`、`https`、`socks5`、`socks5h` 任意组合；用于补充 URL scheme 之外的可用协议。
   - `priority`：数值越小优先级越高。
   - `weight`：同优先级下的权重，越大被选中的概率越高。
@@ -165,7 +165,7 @@ max_connections: 1024
 - `timeouts.handshake`：协议握手超时，默认 `10s`。
 - `timeouts.http_exchange`：普通 HTTP 请求交换超时，默认 `60s`。
 - `timeouts.tunnel_idle`：隧道空闲超时，默认 `5m`。
-- `check_interval`：健康检查周期，单位秒，默认 30；设置为 0 禁用健康检查。
+- `check_interval`：健康检查周期，单位秒，默认 30；设置为 0 禁用健康检查。健康检查会向上游发送最小协议握手（HTTP/SOCKS5），只有协议层响应正常才视为可用。
 - `max_connections`：最大并发连接数，默认 1024；设置为负数会拒绝启动。
 
 ## 路由规则
@@ -236,8 +236,8 @@ curl -x socks5://username:your-password@127.0.0.1:4479 https://www.example.com
 ## 注意
 
 - 本项目仅用于学习、测试或内部网络管理，请勿用于非法用途。
-- 仅实现了 SOCKS5 的 CONNECT 命令，暂不支持 BIND 与 UDP ASSOCIATE。
-- 普通 HTTP 请求会缓冲最多 1 MiB 请求体以支持重试，超限返回 413。
+- 仅实现了 SOCKS5 的 CONNECT 命令，暂不支持 BIND 与 UDP ASSOCIATE；收到这些命令会返回标准错误码 `0x07`。
+- 普通 HTTP 请求默认缓冲最多 1 MiB 请求体以支持重试；chunked 编码或超过 1 MiB 的请求体会改为直接透传，透传时无法重试。
 - `GEOSITE:CN` 是域名分流，不需要提前 DNS 解析；GEOIP 暂未实现。
-- 监听地址变更后需要重启服务才能生效。
+- 监听地址变更后保存配置即可热加载，无需重启服务。
 - 当前 Docker 镜像拉取可能受网络环境限制，建议优先使用本地二进制测试。

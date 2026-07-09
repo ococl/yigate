@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -125,7 +126,18 @@ func (s *Server) LoadAndApply() error {
 		return err
 	}
 	if old := s.Config(); old != nil && old.Listen != cfg.Listen {
-		log.Printf("config listen changed from %s to %s, restart required to apply", old.Listen, cfg.Listen)
+		log.Printf("config listen changed from %s to %s, switching listener", old.Listen, cfg.Listen)
+		newLn, err := net.Listen("tcp", cfg.Listen)
+		if err != nil {
+			return fmt.Errorf("switch listener to %s: %w", cfg.Listen, err)
+		}
+		s.lnMu.Lock()
+		oldLn := s.ln
+		s.ln = newLn
+		s.lnMu.Unlock()
+		if oldLn != nil {
+			oldLn.Close()
+		}
 	}
 	return s.applyConfig(cfg, false)
 }
@@ -158,12 +170,33 @@ func (s *Server) Start() error {
 	}
 
 	for {
-		conn, err := ln.Accept()
+		s.lnMu.Lock()
+		curLn := s.ln
+		s.lnMu.Unlock()
+		if curLn == nil {
+			select {
+			case <-s.quit:
+				return nil
+			default:
+				log.Printf("listener is nil, waiting for new listener")
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+		}
+
+		conn, err := curLn.Accept()
 		if err != nil {
 			select {
 			case <-s.quit:
 				return nil
 			default:
+				// 监听地址可能被切换，检查是否已替换 listener
+				s.lnMu.Lock()
+				newLn := s.ln
+				s.lnMu.Unlock()
+				if newLn != curLn {
+					continue
+				}
 				log.Printf("accept error: %v", err)
 				continue
 			}

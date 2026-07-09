@@ -94,7 +94,11 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 
-	// 普通 HTTP 请求可能需要根据规则重试，先缓存请求体以便重放。
+	// Chunked 或超大请求体无法缓冲重试，直接透传。
+	if isChunkedRequest(req) || req.ContentLength < 0 || req.ContentLength > maxBufferedRequestBody {
+		handleStreamedRequest(client, req, mgr, router)
+		return
+	}
 	var bodyBytes []byte
 	if req.Body != nil {
 		var err error
@@ -164,6 +168,74 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 	if err := resp.Write(client); err != nil {
 		log.Printf("write response to client: %v", err)
 	}
+}
+
+func isChunkedRequest(req *http.Request) bool {
+	for _, enc := range req.TransferEncoding {
+		if strings.EqualFold(enc, "chunked") {
+			return true
+		}
+	}
+	return false
+}
+
+// 处理无法缓冲重试的流式请求（chunked 或超大请求体）。
+func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) {
+	var resp *http.Response
+	var err error
+	if router.Socks5HEnabled() {
+		resp, err = requestViaSocks5H(req, mgr, router, func() {})
+		if err == nil {
+			defer resp.Body.Close()
+			if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
+				log.Printf("set streamed response deadline: %v", err)
+				return
+			}
+			if err := resp.Write(client); err != nil {
+				log.Printf("write streamed response to client: %v", err)
+			}
+			return
+		}
+		log.Printf("socks5h streamed request failed, fallback to routing: %v", err)
+	}
+
+	decision := router.Decide(targetHost(req))
+	switch decision.Action {
+	case ActionDirect:
+		resp, err = directRequest(req)
+	case ActionProxy:
+		resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams)
+	default:
+		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout)
+		if err != nil {
+			resp, err = requestViaProxyNoRetry(req, mgr, router, nil)
+		}
+	}
+	if err != nil {
+		log.Printf("forward streamed request: %v", err)
+		writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+		return
+	}
+	defer resp.Body.Close()
+	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
+		log.Printf("set streamed response deadline: %v", err)
+		return
+	}
+	if err := resp.Write(client); err != nil {
+		log.Printf("write streamed response to client: %v", err)
+	}
+}
+
+func requestViaProxyNoRetry(req *http.Request, mgr *UpstreamManager, router *Router, names []string) (*http.Response, error) {
+	up := mgr.SelectFor(names)
+	if up == nil {
+		return nil, errors.New("no available upstream")
+	}
+	resp, err := forwardRequest(req, up)
+	if err == nil {
+		router.cache.SetProxy(routeCacheKey(targetHost(req)), up.Name, router.auto.CacheTTL)
+	}
+	return resp, err
 }
 
 func requestViaSocks5H(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func()) (*http.Response, error) {

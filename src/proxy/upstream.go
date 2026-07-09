@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -192,7 +193,8 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if c.URL == "" {
 			continue
 		}
-		u, err := url.Parse(c.URL)
+		expandedURL := os.ExpandEnv(c.URL)
+		u, err := url.Parse(expandedURL)
 		if err != nil {
 			return nil, fmt.Errorf("parse upstream %q: %w", c.URL, err)
 		}
@@ -431,8 +433,69 @@ func (m *UpstreamManager) check(u *Upstream) bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
-	return true
+	defer conn.Close()
+
+	switch u.primaryProxyType() {
+	case ProxyTypeHTTP, ProxyTypeHTTPS:
+		return checkHTTPProtocol(conn, u)
+	case ProxyTypeSocks5, ProxyTypeSocks5H:
+		return checkSOCKS5Protocol(conn, u)
+	default:
+		return true
+	}
+}
+
+func checkHTTPProtocol(conn net.Conn, up *Upstream) bool {
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return false
+	}
+	defer conn.SetDeadline(time.Time{})
+
+	creds := proxyCredentials(up)
+	auth := ""
+	if creds != "" {
+		auth = "Proxy-Authorization: Basic " + creds + "\r\n"
+	}
+	req := fmt.Sprintf("OPTIONS * HTTP/1.1\r\nHost: %s\r\n%s\r\n", up.URL.Host, auth)
+	if _, err := conn.Write([]byte(req)); err != nil {
+		return false
+	}
+
+	br := bufio.NewReader(conn)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(line, "HTTP/1.")
+}
+
+func checkSOCKS5Protocol(conn net.Conn, up *Upstream) bool {
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return false
+	}
+	defer conn.SetDeadline(time.Time{})
+
+	user, pass := "", ""
+	if up.URL != nil && up.URL.User != nil {
+		user = up.URL.User.Username()
+		pass, _ = up.URL.User.Password()
+	}
+
+	methods := []byte{0x00}
+	if user != "" || pass != "" {
+		methods = append(methods, 0x02)
+	}
+	greeting := []byte{0x05, byte(len(methods))}
+	greeting = append(greeting, methods...)
+	if _, err := conn.Write(greeting); err != nil {
+		return false
+	}
+
+	var resp [2]byte
+	if _, err := io.ReadFull(conn, resp[:]); err != nil {
+		return false
+	}
+	return resp[0] == 0x05 && resp[1] != 0xff
 }
 
 // Dial 通过该上游连接到目标地址 target（host:port）
