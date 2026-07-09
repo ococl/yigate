@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"encoding/binary"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 )
 
-func startTestSOCKS5Server(t *testing.T) (string, func()) {
+func startTestSOCKS5Server(t *testing.T, router *Router) (string, func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -28,7 +29,7 @@ func startTestSOCKS5Server(t *testing.T) (string, func()) {
 			}
 			go func(c net.Conn) {
 				br := bufio.NewReader(c)
-				HandleSOCKS5(c, br, nil, nil, nil)
+				HandleSOCKS5(c, br, nil, nil, router, nil)
 			}(conn)
 		}
 	}()
@@ -70,7 +71,7 @@ func startTestProxyWithUpstream(t *testing.T, upstreamAddr string) (string, func
 			}
 			go func(c net.Conn) {
 				br := bufio.NewReader(c)
-				HandleSOCKS5(c, br, nil, mgr, router)
+				HandleSOCKS5(c, br, nil, mgr, router, nil)
 			}(conn)
 		}
 	}()
@@ -80,8 +81,79 @@ func startTestProxyWithUpstream(t *testing.T, upstreamAddr string) (string, func
 	}
 }
 
+func TestSOCKS5Connect(t *testing.T) {
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	addr, stop := startTestSOCKS5Server(t, router)
+	defer stop()
+
+	client, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial server: %v", err)
+	}
+	defer client.Close()
+
+	if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatalf("write auth greeting: %v", err)
+	}
+	var authResp [2]byte
+	if _, err := client.Read(authResp[:]); err != nil {
+		t.Fatalf("read auth response: %v", err)
+	}
+	if authResp[0] != 0x05 || authResp[1] != 0x00 {
+		t.Fatalf("auth response = %#v", authResp)
+	}
+
+	// Start a target echo server
+	echoLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen echo: %v", err)
+	}
+	defer echoLn.Close()
+	go func() {
+		c, err := echoLn.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		buf := make([]byte, 64)
+		n, _ := c.Read(buf)
+		c.Write(buf[:n])
+	}()
+
+	target := echoLn.Addr().String()
+	host, port, _ := net.SplitHostPort(target)
+	portNum, _ := strconv.Atoi(port)
+	req := []byte{0x05, 0x01, 0x00, 0x01}
+	req = append(req, net.ParseIP(host).To4()...)
+	req = append(req, byte(portNum>>8), byte(portNum))
+	if _, err := client.Write(req); err != nil {
+		t.Fatalf("write connect request: %v", err)
+	}
+
+	reply := make([]byte, 10)
+	if _, err := client.Read(reply); err != nil {
+		t.Fatalf("read connect reply: %v", err)
+	}
+	if reply[0] != 0x05 || reply[1] != 0x00 {
+		t.Fatalf("connect reply = %#v", reply)
+	}
+
+	if _, err := client.Write([]byte("hello")); err != nil {
+		t.Fatalf("write data: %v", err)
+	}
+	buf := make([]byte, 64)
+	client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatalf("read data: %v", err)
+	}
+	if got := string(buf[:n]); got != "hello" {
+		t.Fatalf("tunneled data = %q, want %q", got, "hello")
+	}
+}
+
 func TestSOCKS5Bind(t *testing.T) {
-	addr, stop := startTestSOCKS5Server(t)
+	addr, stop := startTestSOCKS5Server(t, nil)
 	defer stop()
 
 	client, err := net.Dial("tcp", addr)
@@ -157,7 +229,7 @@ func TestSOCKS5Bind(t *testing.T) {
 }
 
 func TestSOCKS5BindViaUpstream(t *testing.T) {
-	upstreamAddr, stopUpstream := startTestSOCKS5Server(t)
+	upstreamAddr, stopUpstream := startTestSOCKS5Server(t, nil)
 	defer stopUpstream()
 
 	proxyAddr, stopProxy := startTestProxyWithUpstream(t, upstreamAddr)
@@ -232,7 +304,7 @@ func TestSOCKS5BindViaUpstream(t *testing.T) {
 }
 
 func TestSOCKS5UDPAssociate(t *testing.T) {
-	addr, stop := startTestSOCKS5Server(t)
+	addr, stop := startTestSOCKS5Server(t, nil)
 	defer stop()
 
 	client, err := net.Dial("tcp", addr)
@@ -324,7 +396,7 @@ func TestSOCKS5UDPAssociate(t *testing.T) {
 }
 
 func TestSOCKS5UDPAssociateViaUpstream(t *testing.T) {
-	upstreamAddr, stopUpstream := startTestSOCKS5Server(t)
+	upstreamAddr, stopUpstream := startTestSOCKS5Server(t, nil)
 	defer stopUpstream()
 
 	proxyAddr, stopProxy := startTestProxyWithUpstream(t, upstreamAddr)

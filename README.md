@@ -12,9 +12,11 @@
 - **Socks5h 重定向**：可开启全量下游请求优先走 SOCKS5 上游远端解析，失败时自动回退原有分流。
 - **Auto 缓存**：auto 模式会缓存站点的直连或具体上游结果，下次访问优先复用。
 - **优先级与权重**：同一批候选上游内，优先使用 `priority` 更小的组，组内按 `weight` 平滑加权轮询。
-- **账号密码**：默认匿名，配置 `users` 后启用 HTTP Basic 认证与 SOCKS5 用户名密码认证。
-- **健康检查**：定时探测上游可用性，故障自动剔除，恢复自动加入。
+- **访问控制**：支持 `allowed_clients` CIDR 白名单、单 IP 速率限制、单用户并发连接数限制。
+- **管理端口**：可选独立管理端口，提供 `/health`（健康检查）与 `/metrics`（Prometheus 指标）。
+- **pprof 调试**：管理端口可选启用 `/debug/pprof` 用于线上 CPU/内存/协程分析。
 - **结构化日志**：使用 `zap` 输出 JSON/Console 结构化日志，支持文件滚动、归档压缩和日志级别调整。
+- **版本信息**：`-version` 可输出版本号、commit、构建时间。
 - **配置热加载**：通过 `fsnotify` 监视配置文件，保存后自动重载。
 
 ## 目录结构
@@ -38,9 +40,13 @@ k5pw/
 ├── pyscripts/        # 测试脚本（已加入 .gitignore）
 │   ├── test_proxy_4479.py
 │   └── test_proxy_8891.py
-├── docs/             # 文档目录
-├── README.md
-└── AGENTS.md
+├── docs/                    # 文档目录
+│   ├── config_schema.md     # 完整配置字段说明
+│   ├── troubleshooting.md   # 故障排查手册
+│   └── remediation_plan.md  # 产品化修复计划
+├── CHANGELOG.md             # 版本变更日志
+├── README.md                # 用户文档
+├── AGENTS.md                # 面向维护者/Agent 的项目说明
 ```
 
 ## 快速开始
@@ -54,6 +60,14 @@ go build -o k5pw
 ```
 
 默认监听 `0.0.0.0:4479`，可修改 `src/config.yml` 调整配置。
+
+### 多平台 release 构建
+
+```bash
+./scripts/release.sh 1.2.0
+```
+
+脚本会在 `build/` 目录生成 Linux、Darwin、Windows、FreeBSD 多架构二进制，并自动创建 Git tag `v1.2.0`。推送到远程后，GitHub Actions（`.github/workflows/release.yml`）会自动上传产物到 Release 页面。
 
 生产环境（Docker，当前环境可能因镜像拉取受限而无法使用）：
 
@@ -97,7 +111,7 @@ upstreams:
     priority: 1
     weight: 5
   - name: "sg"
-    url: "socks5://user:pass@your-upstream-ip:port"
+    url: "socks5://${UPSTREAM_USER}:${UPSTREAM_PASS}@your-upstream-ip:port"
     # 未写 types 时，使用 url 的 scheme 作为默认类型
     priority: 1
     weight: 3
@@ -161,10 +175,16 @@ max_connections: 1024
 ## 配置说明
 
 - `listen`：监听地址，例如 `127.0.0.1:4479`；如需对外提供服务，可绑定 `0.0.0.0:4479`。
+- `management`：可选管理端口监听地址，例如 `127.0.0.1:8892`。配置后提供：
+  - `/health`：进程健康检查，组件未就绪时返回 503。
+  - `/metrics`：Prometheus 格式监控指标。
+  - `GET /api/v1/status`：进程运行摘要（监听地址、上游数量、组件就绪状态等）。
+  - `POST /api/v1/reload`：手动触发热加载。
+- `enable_pprof`：是否在管理端口注册 `/debug/pprof` 系列路由，默认 `false`。
 - `users`：用户名密码映射。留空或删除表示匿名。
 - `upstreams`：上游代理列表。
   - `name`：上游名称，可被路由规则的 `upstreams` 引用；不写会自动生成 `upstream-1`、`upstream-2`。
-  - `url`：上游地址，认证信息可写在 URL 中，也支持通过环境变量注入（例如 `socks5://${UPSTREAM_USER}:${UPSTREAM_PASS}@host:port`）；未配置 `types` 时默认使用 URL scheme 作为初始类型。
+  - `url`：上游地址。认证信息**强烈建议**通过环境变量注入，例如 `socks5://${UPSTREAM_USER}:${UPSTREAM_PASS}@host:port`；k5pw 会在加载配置时使用 `os.ExpandEnv` 替换 URL 中的环境变量。未配置 `types` 时默认使用 URL scheme 作为初始类型。
   - `types`：可选的代理类型数组，支持 `http`、`https`、`socks5`、`socks5h` 任意组合；用于补充 URL scheme 之外的可用协议。
   - `priority`：数值越小优先级越高。
   - `weight`：同优先级下的权重，越大被选中的概率越高。
@@ -193,8 +213,33 @@ max_connections: 1024
   - `max_age`：历史日志保留天数，默认 `7`；过期日志自动删除。
   - `max_backups`：`size` 模式下最多保留的滚动文件数，默认 `10`。
   - `compress`：是否对历史日志进行 gzip 压缩，默认 `true`。
+- `access_control`：访问控制。
+  - `allowed_clients`：客户端 CIDR 白名单，空表示允许所有。
+  - `rate_limit.connections_per_second`：单个 IP 每秒新建连接数，`0` 表示不限速。
+  - `rate_limit.burst`：令牌桶突发容量，`0` 时使用 `connections_per_second`。
+  - `max_conns_per_user`：单个认证用户最大并发连接数，`0` 表示不限制。
 - `check_interval`：健康检查周期，单位秒，默认 30；设置为 0 禁用健康检查。健康检查会向上游发送最小协议握手（HTTP/SOCKS5），只有协议层响应正常才视为可用。
 - `max_connections`：最大并发连接数，默认 1024；设置为负数会拒绝启动。
+
+## 环境变量注入上游凭据
+
+为避免将上游代理的用户名、密码明文写入配置文件，k5pw 支持在 `upstreams[].url` 中使用 `${ENV_NAME}` 语法引用环境变量。启动前设置对应环境变量即可：
+
+```bash
+export UPSTREAM_USER="your-username"
+export UPSTREAM_PASS="your-password"
+./k5pw -config config.yml
+```
+
+配置文件中写法：
+
+```yaml
+upstreams:
+  - name: "sg"
+    url: "socks5://${UPSTREAM_USER}:${UPSTREAM_PASS}@your-upstream-ip:port"
+```
+
+> 注意：环境变量名可自定义，只要与配置文件中 `${}` 内的名称一致即可。
 
 ## 路由规则
 
@@ -264,8 +309,16 @@ curl -x socks5://username:your-password@127.0.0.1:4479 https://www.example.com
 ## 注意
 
 - 本项目仅用于学习、测试或内部网络管理，请勿用于非法用途。
+- 上游代理的认证信息建议通过环境变量注入，避免明文写入配置文件或提交到版本仓库。
 - 已实现 SOCKS5 CONNECT、BIND 和 UDP ASSOCIATE；BIND 与 UDP ASSOCIATE 支持通过 SOCKS5 上游级联，级联失败时自动回退本地直连。
 - 普通 HTTP 请求默认缓冲最多 1 MiB 请求体以支持重试；chunked 编码或超过 1 MiB 的请求体会改为直接透传，透传时无法重试。
 - `GEOSITE:CN` 是域名分流，不需要提前 DNS 解析；GEOIP 暂未实现。
 - 监听地址变更后保存配置即可热加载，无需重启服务。
 - 当前 Docker 镜像拉取可能受网络环境限制，建议优先使用本地二进制测试。
+
+## 相关文档
+
+- [`docs/config_schema.md`](docs/config_schema.md)：完整配置字段说明。
+- [`docs/troubleshooting.md`](docs/troubleshooting.md)：故障排查手册。
+- [`CHANGELOG.md`](CHANGELOG.md)：版本变更日志。
+- [`AGENTS.md`](AGENTS.md)：面向维护者/Agent 的项目说明。

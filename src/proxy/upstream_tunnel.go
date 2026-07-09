@@ -1,0 +1,83 @@
+package proxy
+
+import (
+	"bufio"
+	"io"
+	"net"
+	"sync"
+)
+
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	return c.r.Read(p)
+}
+
+func (c *bufferedConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
+func (c *bufferedConn) CloseRead() error {
+	if cr, ok := c.Conn.(interface{ CloseRead() error }); ok {
+		return cr.CloseRead()
+	}
+	return nil
+}
+
+// Tunnel 在客户端与目标连接之间双向转发数据
+// clientReader 使用 bufio.Reader 是为了保留已经预读的字节
+func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn) {
+	defer targetConn.Close()
+	defer clientConn.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		var src io.Reader
+		if clientReader != nil {
+			src = clientReader
+		} else {
+			src = clientConn
+		}
+		dr := &deadlineReader{r: src, conn: clientConn, timeout: TunnelIdleTimeout(), metricDirection: "client_to_target"}
+		dst := &deadlineWriter{w: targetConn, conn: targetConn, timeout: TunnelIdleTimeout()}
+		_, _ = io.Copy(dst, dr)
+		closeWrite(targetConn)
+		closeRead(clientConn)
+	}()
+
+	go func() {
+		defer wg.Done()
+		src := &deadlineReader{r: targetConn, conn: targetConn, timeout: TunnelIdleTimeout(), metricDirection: "target_to_client"}
+		dst := &deadlineWriter{w: clientConn, conn: clientConn, timeout: TunnelIdleTimeout()}
+		_, _ = io.Copy(dst, src)
+		closeWrite(clientConn)
+		closeRead(targetConn)
+	}()
+
+	wg.Wait()
+}
+
+func closeWrite(conn net.Conn) {
+	if c, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = c.CloseWrite()
+		return
+	}
+	_ = conn.Close()
+}
+
+func closeRead(conn net.Conn) {
+	if c, ok := conn.(interface{ CloseRead() error }); ok {
+		_ = c.CloseRead()
+		return
+	}
+	_ = conn.Close()
+}

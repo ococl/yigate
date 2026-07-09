@@ -33,18 +33,22 @@ func NewRouteCacheWithCap(cap int) *RouteCache {
 
 func (c *RouteCache) Get(key string) (RouteCacheEntry, bool) {
 	if c == nil || key == "" {
+		MetricInc("k5pw_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
 	if !ok {
+		MetricInc("k5pw_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
 	if !entry.ExpiresAt.IsZero() && time.Now().After(entry.ExpiresAt) {
 		c.Delete(key)
+		MetricInc("k5pw_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
+	MetricInc("k5pw_cache_hits_total")
 	return entry, true
 }
 

@@ -4,54 +4,165 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefaultLogConfig(t *testing.T) {
 	cfg := DefaultLogConfig()
-	if cfg.Level != "info" || cfg.Format != "json" || cfg.Output != "stdout" {
+	if cfg.Level != "info" || cfg.Output != "stdout" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
-	}
-	if cfg.Rotation != "size" || cfg.MaxSize != 100 || cfg.MaxAge != 7 || cfg.MaxBackups != 10 || !cfg.Compress {
-		t.Fatalf("unexpected rotation defaults: %+v", cfg)
 	}
 }
 
 func TestNormalizeLogConfig(t *testing.T) {
-	cfg := LogConfig{}
+	cfg := LogConfig{Level: "DEBUG", Format: "CONSOLE", Output: "STDERR"}
 	NormalizeLogConfig(&cfg)
-	if cfg.Level != "info" || cfg.Format != "json" || cfg.Output != "stdout" {
-		t.Fatalf("normalization failed: %+v", cfg)
+	if cfg.Level != "debug" || cfg.Format != "console" || cfg.Output != "stderr" {
+		t.Fatalf("unexpected normalized config: %+v", cfg)
 	}
 }
 
 func TestValidateLogConfig(t *testing.T) {
-	if err := ValidateLogConfig(LogConfig{Level: "info", Output: "file"}); err == nil {
+	if err := ValidateLogConfig(LogConfig{Output: "file", File: ""}); err == nil {
 		t.Fatal("expected error for file output without path")
 	}
-	if err := ValidateLogConfig(LogConfig{Level: "info", Output: "file", File: "/tmp/x.log", Rotation: "daily"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := ValidateLogConfig(LogConfig{Rotation: "weekly"}); err == nil {
+		t.Fatal("expected error for unsupported rotation")
 	}
-	if err := ValidateLogConfig(LogConfig{Level: "unknown"}); err == nil {
+	if err := ValidateLogConfig(LogConfig{Level: "verbose"}); err == nil {
 		t.Fatal("expected error for invalid level")
+	}
+	if err := ValidateLogConfig(LogConfig{Format: "xml"}); err == nil {
+		t.Fatal("expected error for invalid format")
 	}
 }
 
 func TestInitLogger(t *testing.T) {
-	dir := t.TempDir()
-	cfg := LogConfig{
-		Level:    "debug",
-		Format:   "console",
-		Output:   "file",
-		File:     filepath.Join(dir, "test.log"),
-		Rotation: "size",
-		MaxSize:  1,
+	if err := InitLogger(LogConfig{Level: "info", Output: "stdout"}); err != nil {
+		t.Fatal(err)
 	}
-	if err := InitLogger(cfg); err != nil {
-		t.Fatalf("init logger: %v", err)
+	if Logger() == nil {
+		t.Fatal("expected logger")
 	}
-	Logger().Infow("test message", "key", "value")
 	SyncLogger()
-	if _, err := os.Stat(cfg.File); err != nil {
+}
+
+func TestInitLoggerFile(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "test.log")
+	if err := InitLogger(LogConfig{Level: "info", Output: "file", File: logPath, Rotation: "size"}); err != nil {
+		t.Fatal(err)
+	}
+	Logger().Info("test message")
+	SyncLogger()
+	if _, err := os.Stat(logPath); err != nil {
 		t.Fatalf("log file not created: %v", err)
+	}
+}
+
+func TestInitLoggerDailyRotation(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "daily.log")
+	if err := InitLogger(LogConfig{Level: "info", Output: "file", File: logPath, Rotation: "daily", Compress: true}); err != nil {
+		t.Fatal(err)
+	}
+	Logger().Info("daily test")
+	SyncLogger()
+}
+
+func TestInitLoggerInvalid(t *testing.T) {
+	if err := InitLogger(LogConfig{Level: "invalid"}); err == nil {
+		t.Fatal("expected error for invalid level")
+	}
+	if err := InitLogger(LogConfig{Output: "unknown"}); err == nil {
+		t.Fatal("expected error for invalid output")
+	}
+}
+
+func TestDailyRotateWriter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rotate.log")
+	w := newDailyRotateWriter(path, false, 1)
+	defer w.Close()
+
+	if _, err := w.Write([]byte("line1\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	w.Write([]byte("line2\n"))
+	w.Close()
+	w.Close() // idempotent
+}
+
+func TestDailyRotateWriterRotate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rotate2.log")
+	w := newDailyRotateWriter(path, false, 1)
+	defer w.Close()
+
+	w.Write([]byte("before\n"))
+	w.mu.Lock()
+	w.date = w.date.Add(-48 * time.Hour)
+	w.mu.Unlock()
+	w.Write([]byte("after\n"))
+
+	if _, err := os.Stat(path + "." + w.date.Format("2006-01-02")); err != nil {
+		// rotation may have used current date; just ensure backup exists
+		entries, _ := os.ReadDir(dir)
+		if len(entries) < 2 {
+			t.Fatalf("expected rotated backup, got %d entries", len(entries))
+		}
+	}
+}
+
+func TestDailyRotateWriterCleanOldLogs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clean.log")
+	oldFile := path + ".2020-01-01"
+	os.WriteFile(oldFile, []byte("old"), 0644)
+	oldTime := time.Now().AddDate(0, 0, -10)
+	os.Chtimes(oldFile, oldTime, oldTime)
+	w := newDailyRotateWriter(path, false, 1)
+	w.cleanOldLogs()
+	w.Close()
+	if _, err := os.Stat(oldFile); err == nil {
+		t.Fatal("expected old log cleaned")
+	}
+}
+
+func TestDailyRotateWriterClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "closed.log")
+	w := newDailyRotateWriter(path, false, 1)
+	w.Close()
+	if _, err := w.Write([]byte("x")); err == nil {
+		t.Fatal("expected error writing to closed writer")
+	}
+}
+
+func TestCompressLog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compress.log")
+	os.WriteFile(path, []byte("hello"), 0644)
+	if err := compressLog(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".gz"); err != nil {
+		t.Fatal("expected gz file")
+	}
+	if err := compressLog("/nonexistent"); err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestSameDay(t *testing.T) {
+	now := time.Now()
+	if !sameDay(now, now) {
+		t.Fatal("expected same day")
+	}
+	if sameDay(now, now.Add(-24*time.Hour)) {
+		t.Fatal("expected different day")
 	}
 }

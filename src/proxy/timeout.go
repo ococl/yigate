@@ -80,16 +80,22 @@ func HTTPExchangeTimeout() time.Duration { return timeouts.Load().(timeoutConfig
 func TunnelIdleTimeout() time.Duration { return timeouts.Load().(timeoutConfig).tunnel }
 
 type deadlineReader struct {
-	r       io.Reader
-	conn    net.Conn
-	timeout time.Duration
+	r               io.Reader
+	conn            net.Conn
+	timeout         time.Duration
+	metricDirection string
 }
 
 func (r *deadlineReader) Read(p []byte) (int, error) {
 	if r.timeout > 0 {
 		_ = r.conn.SetReadDeadline(time.Now().Add(r.timeout))
 	}
-	return r.r.Read(p)
+	n, err := r.r.Read(p)
+	if n > 0 && r.metricDirection != "" {
+		MetricAdd("k5pw_tunnel_transferred_bytes_total", float64(n), "direction="+r.metricDirection)
+		MetricInc("k5pw_tunnel_packets_total", "direction="+r.metricDirection)
+	}
+	return n, err
 }
 
 type deadlineWriter struct {

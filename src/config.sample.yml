@@ -1,4 +1,5 @@
 listen: "0.0.0.0:4479"
+# management: "127.0.0.1:8892"  # 可选管理端口，提供 /health 与 /metrics
 users: {}
 upstreams:
   - name: "default"
@@ -41,6 +42,13 @@ routing:
         - "docker.io"
         - "docker.com"
       action: proxy
+access_control:
+  # allowed_clients 为空时不限制客户端来源
+  allowed_clients: []
+  rate_limit:
+    connections_per_second: 0  # 为 0 时不限速
+    burst: 0
+  max_conns_per_user: 0  # 为 0 时不限制单用户并发
 timeouts:
   dial: 10s
   handshake: 10s

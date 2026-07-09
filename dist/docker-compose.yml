@@ -9,9 +9,4 @@ services:
       - "8891:8891"
     volumes:
       - ./k5:/k5
-    entrypoint:
-      - "/bin/sh"
-      - "-c"
-      - "mkdir -p /k5/logs && exec k5pw -config /k5/config.yml"
-
     restart: unless-stopped

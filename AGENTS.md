@@ -33,31 +33,73 @@ k5pw/
     ├── go.mod
     ├── go.sum
     ├── Dockerfile           # 多阶段构建 Dockerfile
-    ├── main.go              # CLI 入口、服务管理命令
+    ├── entrypoint.sh        # 容器启动脚本
+    ├── main.go              # CLI 入口、服务管理命令、版本信息
     ├── config.go            # YAML 配置加载、默认值与校验
     ├── config_test.go       # 配置相关测试
     ├── config.yml           # 开发环境配置（端口 4479）
-    ├── server.go            # 统一 TCP 监听、协议识别、配置热加载
+    ├── server.go            # 统一 TCP 监听、协议识别、配置热加载、访问控制
+    ├── server_test.go       # Server 测试
     ├── service.go           # 系统服务注册/启停
+    ├── service_test.go      # 服务生命周期测试
     └── proxy/               # 代理协议与路由核心
-        ├── auth.go
-        ├── upstream.go
-        ├── upstream_test.go
-        ├── router.go
-        ├── router_test.go
-        ├── route_cache.go
-        ├── route_cache_test.go
-        ├── http.go
-        ├── socks.go
-        ├── socks_sniff.go
-        ├── socks_sniff_test.go
-        ├── socks_addr.go
-        ├── socks5h.go
-        ├── geosite.go
+        ├── access.go        # IP 白名单、速率限制、用户并发限制
+        ├── access_test.go
+        ├── auth.go          # 认证信息处理
+        ├── auth_test.go
+        ├── errors.go        # 统一错误类型与错误码
+        ├── errors_test.go
+        ├── geosite.go       # GEOSITE 数据加载与匹配
         ├── geosite_test.go
-        ├── geosite_update.go
+        ├── geosite_update.go # GEOSITE 自动更新
         ├── geosite_update_test.go
-        └── timeout.go
+        ├── geosite_load_test.go
+        ├── http.go            # HTTP 入口分发
+        ├── http_test.go
+        ├── http_forward.go    # HTTP 转发逻辑（直连/上游）
+        ├── http_forward_test.go
+        ├── http_request.go    # 普通 HTTP 请求处理（重试、缓冲、chunked）
+        ├── http_request_test.go
+        ├── http_integration_test.go
+        ├── logging.go         # 结构化日志与热加载安全
+        ├── logging_test.go
+        ├── management.go      # 管理接口：/health、/metrics、/debug/pprof
+        ├── management_test.go
+        ├── metrics.go         # Prometheus 指标注册与暴露
+        ├── metrics_test.go
+        ├── route_cache.go     # auto 路由缓存
+        ├── route_cache_test.go
+        ├── router.go          # 路由规则编译与匹配
+        ├── router_test.go
+        ├── router_internal_test.go
+        ├── socks.go           # SOCKS5 入口
+        ├── socks_addr.go      # SOCKS5 地址解析
+        ├── socks_addr_test.go
+        ├── socks_auth.go      # SOCKS5 认证
+        ├── socks_bind.go      # SOCKS5 BIND / UDP ASSOCIATE
+        ├── socks_bind_test.go
+        ├── socks_integration_test.go
+        ├── socks_reply.go     # SOCKS5 回复构造
+        ├── socks_reply_reader.go
+        ├── socks_request.go
+        ├── socks_sniff.go     # TLS SNI / HTTP Host 嗅探
+        ├── socks_sniff_test.go
+        ├── socks_udp.go
+        ├── socks5h.go         # socks5h 重定向
+        ├── socks5h_test.go
+        ├── timeout.go         # 超时参数管理
+        ├── timeout_test.go
+        ├── upstream.go        # 上游管理器核心
+        ├── upstream_test.go
+        ├── upstream_dial.go   # 上游拨号与回退
+        ├── upstream_dial_test.go
+        ├── upstream_health.go # 上游健康检查
+        ├── upstream_health_test.go
+        ├── upstream_http.go   # HTTP/HTTPS 上游 CONNECT
+        ├── upstream_internal_test.go
+        ├── upstream_socks5.go # SOCKS5 上游 CONNECT
+        ├── upstream_tunnel.go # 双向隧道转发
+        └── upstream_utils.go
 ```
 
 ## 构建与运行
@@ -102,13 +144,21 @@ python3 pyscripts/test_proxy_8891.py
 
 `Server`（`server.go`）监听单个 TCP 端口，每个连接到来时先设置握手超时，然后使用 `bufio.Reader.Peek(1)` 预读第一个字节。首字节为 `0x05` 时识别为 SOCKS5，否则按 HTTP 处理。这种设计让 HTTP/HTTPS/SOCKS5 三种下游协议可以共用同一个端口。`Server` 还维护活跃连接计数，通过原子操作实现最大并发限制，并支持优雅停止。
 
+### 访问控制
+
+每个新连接进入 `Server.handle` 后，会先由 `AccessController`（`proxy/access.go`）检查：① 来源 IP 是否在 `allowed_clients` CIDR 白名单内；② 是否触发单 IP `rate_limit`；③ 认证用户是否超过 `max_conns_per_user`。任一检查失败都会立即关闭连接。
+
+### 错误处理
+
+`proxy/errors.go` 定义了带 `Code` 字段的统一错误类型，覆盖 DNS、连接被拒绝、超时、协议错误、访问拒绝等类别。这些错误码同时用于日志、SOCKS5/HTTP 回复码映射以及 metrics 标签，避免排障依赖字符串匹配。
+
 ### 配置热加载
 
-`Server` 使用 `fsnotify` 监视配置文件所在目录。当配置文件被写入、创建或重命名时，会触发 300ms 防抖，然后调用 `LoadAndApply` 重新加载并应用新配置。配置热加载会替换上游管理器、路由器和 `geosite.dat` 更新器，但监听地址变更不会自动生效，需要重启服务。
+`Server` 使用 `fsnotify` 监视配置文件所在目录。当配置文件被写入、创建或重命名时，会触发 300ms 防抖，然后调用 `LoadAndApply` 重新加载并应用新配置。配置热加载会原子替换上游管理器、路由器和 `geosite.dat` 更新器。`listen` 地址变更后也会重新创建监听，新连接使用新地址；切换期间旧连接会短暂中断。
 
 ### 配置与默认值
 
-`Config`（`config.go`）定义了整个代理的运行时配置。`LoadConfig` 先填充默认值，再解析 YAML 覆盖，并相对配置文件目录解析 `geosite.dat` 路径。`validateConfig` 校验监听地址、上游 URL、权重范围等。
+`Config`（`config.go`）定义了整个代理的运行时配置。`LoadConfig` 先填充默认值，再解析 YAML 覆盖，并相对配置文件目录解析 `geosite.dat` 路径。`validateConfig` 校验监听地址、上游 URL、权重范围、上游名引用是否存在等。
 
 ### 上游管理
 
@@ -143,6 +193,10 @@ python3 pyscripts/test_proxy_8891.py
 
 `socks5h_redirect` 开启后，k5pw 在内部优先使用 SOCKS5/socks5h 上游的域名地址类型转发目标连接，让域名在上游侧解析。如果没有可用的 SOCKS5 上游或连接失败，会自动回退到原有规则分流逻辑。该模式会缓存每个目标站点成功使用的 SOCKS5 上游。
 
+### 管理接口与指标
+
+`ManagementServer`（`proxy/management.go`）在独立地址上提供 `/health`（JSON 健康状态）、`/metrics`（Prometheus 文本格式）、`GET /api/v1/status`（运行摘要）和 `POST /api/v1/reload`（手动热加载）。`/health` 会在 `Router` 或 `UpstreamManager` 未就绪时返回 503。`enable_pprof: true` 时还会注册 `/debug/pprof` 系列路由，用于线上问题定位。`Metrics` 注册表（`proxy/metrics.go`）暴露连接数、请求数、路由决策、上游健康状态、管理接口请求、隧道流量与包数等核心指标。
+
 ### 数据转发
 
 `Tunnel`（`proxy/upstream.go`）在客户端与目标连接之间双向转发数据，使用 `deadlineReader`/`deadlineWriter` 根据 `tunnel_idle` 超时控制空闲连接，支持 `CloseWrite`/`CloseRead` 优雅半关闭。
@@ -151,7 +205,7 @@ python3 pyscripts/test_proxy_8891.py
 
 - 修改开发端口：改 `src/config.yml` 中的 `listen`。
 - 修改生产端口：改 `dist/k5/config.yml` 中的 `listen`，并同步调整 `dist/docker-compose.yml` 的 `ports` 映射。
-- 添加上游：在对应 `config.yml` 的 `upstreams` 列表中增加条目。
+- 添加上游：在对应 `config.yml` 的 `upstreams` 列表中增加条目；上游认证信息建议通过环境变量注入，如 `socks5://${UPSTREAM_USER}:${UPSTREAM_PASS}@host:port`。
 - 切换上游协议：修改 `url` 的 scheme，或在 `types` 中显式指定。
 - 调试：查看日志中的 `upstream ... dead` / `upstream ... recovered`。
 

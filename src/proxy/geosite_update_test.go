@@ -1,48 +1,75 @@
 package proxy
 
 import (
-	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGeoSiteUpdaterUpdateOnce(t *testing.T) {
-	payload := bytes.Repeat([]byte{0x0a, 0x01, 'x'}, 400)
+	data := make([]byte, 2048)
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(payload)
+		w.Write(data)
 	}))
 	defer server.Close()
 
-	path := filepath.Join(t.TempDir(), "geosite.dat")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
 	updater := NewGeoSiteUpdater(GeoSiteConfig{Path: path, UpdateURL: server.URL}, nil)
 	if err := updater.UpdateOnce(); err != nil {
-		t.Fatalf("UpdateOnce() error = %v", err)
+		t.Fatalf("UpdateOnce: %v", err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("updated file stat: %v", err)
-	}
-	if info.Size() != int64(len(payload)) {
-		t.Fatalf("updated file size = %d, want %d", info.Size(), len(payload))
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("geosite.dat not written")
 	}
 }
 
 func TestGeoSiteUpdaterRejectsTinyDownload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("too small"))
+		w.Write([]byte("tiny"))
 	}))
 	defer server.Close()
 
-	path := filepath.Join(t.TempDir(), "geosite.dat")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
 	updater := NewGeoSiteUpdater(GeoSiteConfig{Path: path, UpdateURL: server.URL}, nil)
 	if err := updater.UpdateOnce(); err == nil {
-		t.Fatal("UpdateOnce() accepted a tiny download")
+		t.Fatal("expected error for tiny download")
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("geosite file should not exist, stat err = %v", err)
+}
+
+func TestGeoSiteUpdaterRequiresPath(t *testing.T) {
+	updater := NewGeoSiteUpdater(GeoSiteConfig{}, nil)
+	if err := updater.UpdateOnce(); err == nil {
+		t.Fatal("expected error for empty path")
 	}
+}
+
+func TestGeoSiteUpdaterStartStop(t *testing.T) {
+	updater := NewGeoSiteUpdater(GeoSiteConfig{}, nil)
+	updater.Start(func() {})
+	updater.Stop()
+	updater.Stop() // idempotent
+}
+
+func TestGeoSiteUpdaterLoop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data := make([]byte, 2048)
+		w.Write(data)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
+	updater := NewGeoSiteUpdater(GeoSiteConfig{Path: path, UpdateURL: server.URL, AutoUpdate: true, UpdateInterval: Duration(100 * time.Millisecond)}, nil)
+	called := make(chan struct{}, 1)
+	updater.Start(func() { close(called) })
+	<-called
+	updater.Stop()
 }

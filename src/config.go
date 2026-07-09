@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,14 +14,17 @@ import (
 
 // Config 代理服务器配置
 type Config struct {
-	Listen         string                 `yaml:"listen"`
-	Users          map[string]string      `yaml:"users"`
-	Upstreams      []proxy.UpstreamConfig `yaml:"upstreams"`
-	Routing        proxy.RoutingConfig    `yaml:"routing"`
-	Timeouts       proxy.TimeoutConfig    `yaml:"timeouts"`
-	Log            proxy.LogConfig        `yaml:"log"`
-	CheckInterval  int                    `yaml:"check_interval"`
-	MaxConnections int                    `yaml:"max_connections"`
+	Listen         string                    `yaml:"listen"`
+	Management     string                    `yaml:"management"`
+	Users          map[string]string         `yaml:"users"`
+	Upstreams      []proxy.UpstreamConfig    `yaml:"upstreams"`
+	Routing        proxy.RoutingConfig       `yaml:"routing"`
+	Timeouts       proxy.TimeoutConfig       `yaml:"timeouts"`
+	Log            proxy.LogConfig           `yaml:"log"`
+	CheckInterval  int                       `yaml:"check_interval"`
+	MaxConnections int                       `yaml:"max_connections"`
+	AccessControl  proxy.AccessControlConfig `yaml:"access_control"`
+	EnablePprof    bool                      `yaml:"enable_pprof"`
 }
 
 const (
@@ -91,6 +95,9 @@ func validateConfig(cfg *Config) error {
 	if strings.TrimSpace(cfg.Listen) == "" {
 		return fmt.Errorf("listen must not be empty")
 	}
+	if _, err := net.ResolveTCPAddr("tcp", cfg.Listen); err != nil {
+		return fmt.Errorf("listen %q is not a valid TCP address: %w", cfg.Listen, err)
+	}
 	if cfg.CheckInterval < 0 {
 		return fmt.Errorf("check_interval must be >= 0")
 	}
@@ -114,5 +121,44 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("upstreams[%d].types: %w", i, err)
 		}
 	}
+
+	// 收集有效的上游名称（空名会按 NewUpstreamManager 规则生成 upstream-i）
+	upstreamNames := make(map[string]struct{}, len(cfg.Upstreams))
+	for i, up := range cfg.Upstreams {
+		name := strings.TrimSpace(up.Name)
+		if name == "" {
+			name = fmt.Sprintf("upstream-%d", i+1)
+		}
+		upstreamNames[name] = struct{}{}
+	}
+
+	// 校验路由规则引用的上游名是否存在
+	for i, rule := range cfg.Routing.Rules {
+		for j, name := range rule.Upstreams {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, ok := upstreamNames[name]; !ok {
+				return fmt.Errorf("routing.rules[%d].upstreams[%d] references unknown upstream %q", i, j, name)
+			}
+		}
+	}
+
+	// 校验 socks5h_redirect 白名单中的上游名是否存在
+	for i, name := range cfg.Routing.Socks5HRedirect.Upstreams {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := upstreamNames[name]; !ok {
+			return fmt.Errorf("routing.socks5h_redirect.upstreams[%d] references unknown upstream %q", i, name)
+		}
+	}
+
+	if _, err := proxy.NewAccessController(cfg.AccessControl); err != nil {
+		return fmt.Errorf("access_control: %w", err)
+	}
+
 	return nil
 }

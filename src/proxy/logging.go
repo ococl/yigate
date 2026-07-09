@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -76,10 +77,14 @@ func NormalizeLogConfig(cfg *LogConfig) {
 }
 
 var (
-	logger    *zap.SugaredLogger
-	logMu     sync.RWMutex
+	loggerVal atomic.Value // stores *zap.SugaredLogger
+	logMu     sync.Mutex
 	logWriter io.Closer
 )
+
+func init() {
+	loggerVal.Store(zap.NewNop().Sugar())
+}
 
 // ValidateLogConfig 校验日志配置项。
 func ValidateLogConfig(cfg LogConfig) error {
@@ -99,15 +104,14 @@ func ValidateLogConfig(cfg LogConfig) error {
 }
 
 func Logger() *zap.SugaredLogger {
-	logMu.RLock()
-	defer logMu.RUnlock()
-	if logger == nil {
-		return zap.NewNop().Sugar()
+	if l := loggerVal.Load(); l != nil {
+		return l.(*zap.SugaredLogger)
 	}
-	return logger
+	return zap.NewNop().Sugar()
 }
 
 // InitLogger 根据配置初始化/替换全局 logger。
+// 新 logger 构建完成后原子地切换，旧 logger 会先 Sync 再关闭其 writer，避免并发写入到已关闭的 writer。
 func InitLogger(cfg LogConfig) error {
 	NormalizeLogConfig(&cfg)
 
@@ -148,9 +152,9 @@ func InitLogger(cfg LogConfig) error {
 	newLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)).Sugar()
 
 	logMu.Lock()
-	oldLogger := logger
+	oldLogger := Logger()
 	oldWriter := logWriter
-	logger = newLogger
+	loggerVal.Store(newLogger)
 	logWriter = closer
 	logMu.Unlock()
 
@@ -165,10 +169,7 @@ func InitLogger(cfg LogConfig) error {
 
 // SyncLogger 刷新当前 logger 的缓冲。
 func SyncLogger() {
-	logMu.RLock()
-	l := logger
-	logMu.RUnlock()
-	if l != nil {
+	if l := Logger(); l != nil {
 		_ = l.Sync()
 	}
 }
@@ -308,7 +309,11 @@ func (w *dailyRotateWriter) rotateLocked() {
 	}
 	_ = os.Rename(w.path, oldPath)
 	if w.compress {
-		go compressLog(oldPath)
+		go func(old string) {
+			if err := compressLog(old); err != nil {
+				Logger().Errorw("compress log failed", "path", old, "error", err)
+			}
+		}(oldPath)
 	}
 	w.reopen()
 }
@@ -362,25 +367,25 @@ func sameDay(a, b time.Time) bool {
 	return y1 == y2 && m1 == m2 && d1 == d2
 }
 
-func compressLog(path string) {
+func compressLog(path string) error {
 	src, err := os.Open(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer src.Close()
 
 	gzPath := path + ".gz"
 	dst, err := os.Create(gzPath)
 	if err != nil {
-		return
+		return err
 	}
 	gw := gzip.NewWriter(dst)
 	_, err = io.Copy(gw, src)
 	_ = gw.Close()
 	_ = dst.Close()
 	if err == nil {
-		_ = os.Remove(path)
-	} else {
-		_ = os.Remove(gzPath)
+		return os.Remove(path)
 	}
+	_ = os.Remove(gzPath)
+	return err
 }

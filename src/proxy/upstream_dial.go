@@ -1,0 +1,193 @@
+package proxy
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"time"
+)
+
+// Dial 通过该上游连接到目标地址 target（host:port）
+func (u *Upstream) Dial(target string) (net.Conn, error) {
+	if u == nil {
+		return nil, errors.New("nil upstream")
+	}
+	switch u.primaryProxyType() {
+	case ProxyTypeHTTP, ProxyTypeHTTPS:
+		return u.dialHTTP(target)
+	case ProxyTypeSocks5, ProxyTypeSocks5H:
+		return u.dialSOCKS5(target)
+	}
+	return nil, fmt.Errorf("unsupported upstream type %q", u.primaryProxyType())
+}
+
+// Dial 尝试通过上游建立连接，单个上游失败时尝试下一个，全部失败后回退自身直连
+func (m *UpstreamManager) Dial(target string) (net.Conn, error) {
+	conn, _, err := m.DialProxy(target, nil)
+	if err == nil {
+		return conn, nil
+	}
+	return DialTarget(target)
+}
+
+// DialProxy 只通过上游建立连接，names 为空时使用全部上游。
+func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *Upstream, error) {
+	allowed := namesToSet(names)
+	attempts := len(m.upstreams)
+	if allowed != nil {
+		attempts = len(allowed)
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		up := m.selectFrom(allowed)
+		if up == nil {
+			break
+		}
+		conn, err := up.Dial(target)
+		if err == nil {
+			return conn, up, nil
+		}
+		lastErr = err
+		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
+		MetricInc("k5pw_upstream_dial_failures_total", "upstream="+up.Name)
+		m.markDead(up)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no available upstream")
+	}
+	return nil, nil, lastErr
+}
+
+func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, error) {
+	m.mu.Lock()
+	up := m.byName[name]
+	if up != nil && up.dead {
+		up = nil
+	}
+	m.mu.Unlock()
+	if up == nil {
+		return nil, nil, fmt.Errorf("upstream %q unavailable", name)
+	}
+	conn, err := up.Dial(target)
+	if err != nil {
+		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
+		m.markDead(up)
+		return nil, nil, err
+	}
+	return conn, up, nil
+}
+
+func (u *Upstream) isSocks5() bool {
+	return u != nil && u.supportsProxyType(ProxyTypeSocks5)
+}
+
+// DialSOCKS5H 通过 SOCKS5 上游以域名地址类型连接目标，避免本地 DNS 解析。
+func (u *Upstream) DialSOCKS5H(target string) (net.Conn, error) {
+	if !u.isSocks5() {
+		return nil, fmt.Errorf("upstream %q is not socks5", u.Name)
+	}
+	return u.dialSOCKS5(target)
+}
+
+// DialSOCKS5Bind 通过 SOCKS5 上游建立 BIND 请求，返回到上游的 TCP 连接和上游监听地址。
+func (u *Upstream) DialSOCKS5Bind(target string) (net.Conn, string, error) {
+	if !u.isSocks5() {
+		return nil, "", fmt.Errorf("upstream %q is not socks5", u.Name)
+	}
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), ProxyDialTimeout())
+	if err != nil {
+		return nil, "", err
+	}
+	if err := setConnDeadline(conn, ProxyHandshakeTimeout()); err != nil {
+		conn.Close()
+		return nil, "", err
+	}
+	if err := socks5ClientHandshake(conn, u); err != nil {
+		conn.Close()
+		return nil, "", err
+	}
+	listenAddr, err := socks5SendRequest(conn, 0x02, target)
+	if err != nil {
+		conn.Close()
+		return nil, "", err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, listenAddr, nil
+}
+
+// DialSOCKS5UDP 通过 SOCKS5 上游建立 UDP ASSOCIATE 请求，返回到上游的 TCP 控制连接和上游 UDP 监听地址。
+func (u *Upstream) DialSOCKS5UDP(target string) (net.Conn, *net.UDPAddr, error) {
+	if !u.isSocks5() {
+		return nil, nil, fmt.Errorf("upstream %q is not socks5", u.Name)
+	}
+	conn, err := net.DialTimeout("tcp", proxyAddress(u.urlForType(ProxyTypeSocks5)), ProxyDialTimeout())
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := setConnDeadline(conn, ProxyHandshakeTimeout()); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	if err := socks5ClientHandshake(conn, u); err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	udpAddrStr, err := socks5SendRequest(conn, 0x03, target)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	udpAddr, err := net.ResolveUDPAddr("udp", udpAddrStr)
+	if err != nil {
+		conn.Close()
+		return nil, nil, err
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, udpAddr, nil
+}
+
+// DialSOCKS5Bind 按优先级选择 SOCKS5 上游建立 BIND，失败时尝试下一个，全部失败返回错误。
+func (m *UpstreamManager) DialSOCKS5Bind(target string, names []string) (net.Conn, string, *Upstream, error) {
+	attempts := m.Socks5AttemptCount(names)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		up := m.SelectSocks5For(names)
+		if up == nil {
+			break
+		}
+		conn, addr, err := up.DialSOCKS5Bind(target)
+		if err == nil {
+			return conn, addr, up, nil
+		}
+		lastErr = err
+		Logger().Warnw("upstream bind failed", "upstream", up.Name, "target", target, "error", err)
+		m.markDead(up)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no available socks5 upstream")
+	}
+	return nil, "", nil, lastErr
+}
+
+// DialSOCKS5UDP 按优先级选择 SOCKS5 上游建立 UDP ASSOCIATE，失败时尝试下一个，全部失败返回错误。
+func (m *UpstreamManager) DialSOCKS5UDP(target string, names []string) (net.Conn, *net.UDPAddr, *Upstream, error) {
+	attempts := m.Socks5AttemptCount(names)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		up := m.SelectSocks5For(names)
+		if up == nil {
+			break
+		}
+		conn, addr, err := up.DialSOCKS5UDP(target)
+		if err == nil {
+			return conn, addr, up, nil
+		}
+		lastErr = err
+		Logger().Warnw("upstream udp associate failed", "upstream", up.Name, "target", target, "error", err)
+		m.markDead(up)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no available socks5 upstream")
+	}
+	return nil, nil, nil, lastErr
+}

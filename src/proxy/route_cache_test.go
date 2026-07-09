@@ -22,9 +22,35 @@ func TestTargetHostAddsDefaultHTTPPort(t *testing.T) {
 	}
 }
 
-func TestTargetHostKeepsExplicitPort(t *testing.T) {
-	req := httptest.NewRequest("GET", "http://example.com:8080/path", nil)
-	if got := targetHost(req); got != "example.com:8080" {
-		t.Fatalf("targetHost() = %q, want %q", got, "example.com:8080")
+func TestRouteCacheGetSetDelete(t *testing.T) {
+	cache := NewRouteCache()
+	if _, ok := cache.Get("missing"); ok {
+		t.Fatal("expected miss")
+	}
+	cache.SetDirect("d", time.Hour)
+	if entry, ok := cache.Get("d"); !ok || entry.Action != ActionDirect {
+		t.Fatal("expected direct hit")
+	}
+	cache.SetProxy("p", "up", time.Hour)
+	if entry, ok := cache.Get("p"); !ok || entry.Action != ActionProxy || entry.UpstreamName != "up" {
+		t.Fatal("expected proxy hit")
+	}
+	cache.SetProxy("empty", "", time.Hour)
+	if _, ok := cache.Get("empty"); ok {
+		t.Fatal("expected proxy with empty upstream not stored")
+	}
+	cache.Delete("d")
+	if _, ok := cache.Get("d"); ok {
+		t.Fatal("expected deleted")
+	}
+}
+
+func TestRouteCacheCapEviction(t *testing.T) {
+	cache := NewRouteCacheWithCap(2)
+	cache.SetDirect("a", time.Hour)
+	cache.SetDirect("b", time.Hour)
+	cache.SetDirect("c", time.Hour)
+	if _, ok := cache.Get("a"); ok {
+		t.Fatal("expected oldest evicted")
 	}
 }

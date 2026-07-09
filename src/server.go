@@ -21,7 +21,10 @@ type Server struct {
 	config      atomic.Value
 	mgr         atomic.Value
 	router      atomic.Value
+	access      *proxy.AccessController
 	geoUpdate   *proxy.GeoSiteUpdater
+	mgmt        *proxy.ManagementServer
+	mgmtAddr    string
 	lnMu        sync.Mutex
 	ln          net.Listener
 	quit        chan struct{}
@@ -38,11 +41,36 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 	s := &Server{
 		cfgPath: cfgPath,
 		quit:    make(chan struct{}),
+		mgmt:    proxy.NewManagementServer(nil, cfg.EnablePprof),
 	}
+	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
+	s.mgmt.SetReload(s.reloadConfig)
 	if err := s.ApplyConfig(cfg); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// statusSnapshot 返回当前进程运行摘要，供管理 API 使用。
+func (s *Server) statusSnapshot() proxy.StatusSnapshot {
+	cur := s.Config()
+	if cur == nil {
+		return proxy.StatusSnapshot{Status: "up", PprofEnabled: s.mgmt.PprofEnabled()}
+	}
+	return proxy.StatusSnapshot{
+		Status:        "up",
+		Listen:        cur.Listen,
+		Management:    cur.Management,
+		UpstreamCount: len(cur.Upstreams),
+		RouterReady:   s.Router() != nil,
+		ManagerReady:  s.Manager() != nil,
+		PprofEnabled:  s.mgmt.PprofEnabled(),
+	}
+}
+
+// reloadConfig 从磁盘重新加载并应用配置，供管理 API 使用。
+func (s *Server) reloadConfig() error {
+	return s.LoadAndApply()
 }
 
 // Config 返回当前生效的配置
@@ -79,6 +107,10 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	if err != nil {
 		return err
 	}
+	access, err := proxy.NewAccessController(cfg.AccessControl)
+	if err != nil {
+		return err
+	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
 	if initialLoad && cfg.Routing.GeoSite.AutoUpdate {
 		// 仅在 geosite 文件不存在时同步下载，避免每次启动/重载都阻塞。
@@ -92,12 +124,27 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	if err != nil {
 		return err
 	}
-	if oldUpdater := s.geoUpdate; oldUpdater != nil {
-		oldUpdater.Stop()
+
+	// 在替换全局引用前，先准备好日志和超时配置。
+	if err := proxy.InitLogger(cfg.Log); err != nil {
+		return err
 	}
-	if old := s.Manager(); old != nil {
-		old.StopHealthCheck()
-	}
+	s.maxConns.Store(int64(cfg.MaxConnections))
+	proxy.SetTimeouts(cfg.Timeouts)
+
+	// 记录旧组件，用于替换后优雅停止。
+	oldMgr := s.Manager()
+	oldRouter := s.Router()
+	oldUpdater := s.geoUpdate
+
+	// 原子替换：新连接立刻看到完整的新运行时上下文。
+	s.config.Store(cfg)
+	s.mgr.Store(mgr)
+	s.router.Store(router)
+	s.access = access
+	s.geoUpdate = updater
+
+	// 启动新组件的健康检查与 geosite 自动更新。
 	mgr.StartHealthCheck(cfg.CheckInterval)
 	updater.Start(func() {
 		cfg, err := LoadConfig(s.cfgPath)
@@ -109,13 +156,57 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 			proxy.Logger().Warnw("reload config after geosite update failed", "error", err)
 		}
 	})
-	proxy.InitLogger(cfg.Log)
-	s.maxConns.Store(int64(cfg.MaxConnections))
-	proxy.SetTimeouts(cfg.Timeouts)
-	s.config.Store(cfg)
-	s.mgr.Store(mgr)
-	s.router.Store(router)
-	s.geoUpdate = updater
+
+	// 停止旧组件，避免旧 manager 的健康检查继续占用资源。
+	if oldUpdater != nil {
+		oldUpdater.Stop()
+	}
+	if oldMgr != nil {
+		oldMgr.StopHealthCheck()
+	}
+	_ = oldRouter // 旧 router 无背景任务，直接由 GC 回收即可。
+
+	if s.mgmtAddr != cfg.Management || s.mgmt.PprofEnabled() != cfg.EnablePprof {
+		if s.mgmtAddr != "" {
+			s.mgmt.Stop()
+		}
+		// 重新创建管理服务器以切换 pprof 路由
+		s.mgmt = proxy.NewManagementServer(func() proxy.HealthStatus {
+			curCfg := s.Config()
+			if curCfg == nil {
+				return proxy.HealthStatus{Status: "up"}
+			}
+			return proxy.HealthStatus{
+				Status:        "up",
+				Listen:        curCfg.Listen,
+				UpstreamCount: len(curCfg.Upstreams),
+				ManagerReady:  s.Manager() != nil,
+				RouterReady:   s.Router() != nil,
+			}
+		}, cfg.EnablePprof)
+		if cfg.Management != "" {
+			if err := s.mgmt.Start(cfg.Management); err != nil {
+				proxy.Logger().Warnw("start management server failed", "address", cfg.Management, "error", err)
+			}
+		}
+		s.mgmtAddr = cfg.Management
+	} else {
+		s.mgmt.SetStatusGetter(func() proxy.HealthStatus {
+			curCfg := s.Config()
+			if curCfg == nil {
+				return proxy.HealthStatus{Status: "up"}
+			}
+			return proxy.HealthStatus{
+				Status:        "up",
+				Listen:        curCfg.Listen,
+				UpstreamCount: len(curCfg.Upstreams),
+				ManagerReady:  s.Manager() != nil,
+				RouterReady:   s.Router() != nil,
+			}
+		})
+	}
+	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
+	s.mgmt.SetReload(s.reloadConfig)
 	return nil
 }
 
@@ -226,6 +317,8 @@ func (s *Server) acquireConnSlot(conn net.Conn) bool {
 			return false
 		}
 		if s.connCount.CompareAndSwap(cur, cur+1) {
+			proxy.MetricSet("k5pw_connections_active", float64(cur+1))
+			proxy.MetricInc("k5pw_connections_total")
 			return true
 		}
 	}
@@ -239,9 +332,11 @@ func (s *Server) releaseConnSlot() {
 	for {
 		cur := s.connCount.Load()
 		if cur <= 0 {
+			proxy.MetricSet("k5pw_connections_active", 0)
 			return
 		}
 		if s.connCount.CompareAndSwap(cur, cur-1) {
+			proxy.MetricSet("k5pw_connections_active", float64(cur-1))
 			return
 		}
 	}
@@ -267,6 +362,9 @@ func (s *Server) Stop() {
 		}
 		if mgr := s.Manager(); mgr != nil {
 			mgr.StopHealthCheck()
+		}
+		if s.mgmt != nil {
+			s.mgmt.Stop()
 		}
 		s.activeConns.Wait()
 	})
@@ -346,9 +444,23 @@ func (s *Server) handle(conn net.Conn) {
 	cfg := s.Config()
 	mgr := s.Manager()
 	router := s.Router()
+	access := s.access
 	if cfg == nil || mgr == nil || router == nil {
 		conn.Close()
 		return
+	}
+
+	if access != nil {
+		if !access.IsAllowedIP(conn.RemoteAddr()) {
+			proxy.Logger().Warnw("connection denied by ACL", "remote", conn.RemoteAddr())
+			conn.Close()
+			return
+		}
+		if !access.AllowConn(conn.RemoteAddr()) {
+			proxy.Logger().Warnw("connection rate limited", "remote", conn.RemoteAddr())
+			conn.Close()
+			return
+		}
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(proxy.ProxyHandshakeTimeout())); err != nil {
@@ -365,8 +477,8 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	if b[0] == 0x05 {
-		proxy.HandleSOCKS(conn, br, cfg.Users, mgr, router)
+		proxy.HandleSOCKS(conn, br, cfg.Users, mgr, router, access)
 	} else {
-		proxy.HandleHTTP(conn, br, cfg.Users, mgr, router)
+		proxy.HandleHTTP(conn, br, cfg.Users, mgr, router, access)
 	}
 }

@@ -1,6 +1,9 @@
 package proxy
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestRouterDecideUsesFirstMatchingRule(t *testing.T) {
 	r, err := NewRouter(RoutingConfig{
@@ -31,6 +34,123 @@ func TestRouterDecideUsesFirstMatchingRule(t *testing.T) {
 	if decision.Action != ActionAuto {
 		t.Fatalf("final action = %q, want %q", decision.Action, ActionAuto)
 	}
+}
+
+func TestRouterDecideIPAndRegex(t *testing.T) {
+	r, err := NewRouter(RoutingConfig{
+		Final: ActionDirect,
+		Rules: []RouteRule{
+			{Type: "ip_cidr", Values: []string{"10.0.0.0/8"}, Action: ActionProxy},
+			{Type: "domain_regex", Values: []string{`.*\.cn$`}, Action: ActionDirect},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Decide("10.0.0.1:443"); got.Action != ActionProxy {
+		t.Fatalf("expected proxy for 10.0.0.1, got %s", got.Action)
+	}
+	if got := r.Decide("news.cn:80"); got.Action != ActionDirect {
+		t.Fatalf("expected direct for .cn, got %s", got.Action)
+	}
+	if got := r.Decide("other.com:443"); got.Action != ActionDirect {
+		t.Fatalf("expected final direct, got %s", got.Action)
+	}
+}
+
+func TestRouterNilDecide(t *testing.T) {
+	var r *Router
+	if got := r.Decide("example.com:80"); got.Action != ActionAuto {
+		t.Fatalf("expected auto for nil router, got %s", got.Action)
+	}
+}
+
+func TestCompileRouteRuleErrors(t *testing.T) {
+	if _, err := compileRouteRule(RouteRule{Type: ""}); err == nil {
+		t.Fatal("expected error for empty type")
+	}
+	if _, err := compileRouteRule(RouteRule{Type: "ip_cidr", Values: []string{"invalid"}}); err == nil {
+		t.Fatal("expected error for invalid cidr")
+	}
+	if _, err := compileRouteRule(RouteRule{Type: "domain_regex", Values: []string{"("}}); err == nil {
+		t.Fatal("expected error for invalid regex")
+	}
+	if _, err := compileRouteRule(RouteRule{Type: "unknown"}); err == nil {
+		t.Fatal("expected error for unknown type")
+	}
+}
+
+func TestNormalizeHelpers(t *testing.T) {
+	if normalizeRuleType("domain-keyword") != "domain_keyword" {
+		t.Fatal("normalizeRuleType failed")
+	}
+	if normalizeAction(" PROXY ") != "proxy" {
+		t.Fatal("normalizeAction failed")
+	}
+	if normalizeAutoMode("proxy_first") != "proxy_first" {
+		t.Fatal("normalizeAutoMode failed")
+	}
+	if normalizeAutoMode("direct_first") != "direct_first" {
+		t.Fatal("normalizeAutoMode default failed")
+	}
+	if normalizeDomainRuleValue("+.Example.COM.") != "example.com" {
+		t.Fatalf("normalizeDomainRuleValue failed: %q", normalizeDomainRuleValue("+.Example.COM."))
+	}
+	if normalizeGeoSiteCode(" geosite:cn ") != "CN" {
+		t.Fatalf("normalizeGeoSiteCode failed: %q", normalizeGeoSiteCode(" geosite:cn "))
+	}
+	if !validAction("direct") || !validAction("proxy") || !validAction("auto") || validAction("x") {
+		t.Fatal("validAction failed")
+	}
+}
+
+func TestRouterDialDirect(t *testing.T) {
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	target := startMockTarget(t)
+	conn, err := router.Dial(target, nil)
+	if err != nil {
+		t.Fatalf("dial direct: %v", err)
+	}
+	defer conn.Close()
+	conn.Write([]byte("hello"))
+	buf := make([]byte, 64)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _ := conn.Read(buf)
+	if string(buf[:n]) != "hello" {
+		t.Fatalf("unexpected response %q", buf[:n])
+	}
+}
+
+func TestRouterDialProxy(t *testing.T) {
+	router, _ := NewRouter(RoutingConfig{
+		Final: ActionDirect,
+		Rules: []RouteRule{{Type: "domain", Values: []string{"target.local"}, Action: ActionProxy, Upstreams: []string{"up"}}},
+	})
+	proxyAddr := startMockSocks5Proxy(t)
+	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "up", URL: "socks5://" + proxyAddr}})
+	target := startMockTarget(t)
+	conn, err := router.Dial(target, mgr)
+	if err != nil {
+		t.Fatalf("dial proxy: %v", err)
+	}
+	defer conn.Close()
+	conn.Write([]byte("hello"))
+	buf := make([]byte, 64)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _ := conn.Read(buf)
+	if string(buf[:n]) != "hello" {
+		t.Fatalf("unexpected response %q", buf[:n])
+	}
+}
+
+func TestRouterDialAutoDirect(t *testing.T) {
+	router, _ := NewRouter(RoutingConfig{Final: ActionAuto})
+	target := startMockTarget(t)
+	conn, err := router.Dial(target, nil)
+	if err != nil {
+		t.Fatalf("dial auto: %v", err)
+	}
+	defer conn.Close()
 }
 
 func TestSocks5HRedirectConfig(t *testing.T) {

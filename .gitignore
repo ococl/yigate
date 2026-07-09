@@ -2,6 +2,8 @@
 k5pw
 *.exe
 *.new
+*.out
+bin/
 
 # Logs
 *.log
@@ -14,8 +16,16 @@ upstream-types.txt
 # Go
 vendor/
 coverage.out
+coverage.*
+*.coverprofile
+*.prof
 *.test
-__debug_bin
+__debug_bin*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # IDEs
 .idea/
@@ -36,11 +46,13 @@ tmp/
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Test artifacts
 .last_proxy_test_summary
 pyscripts/test_proxy_7897.py
-__pycache__/
 
-# Local dev config
+# Local env/config
+.env
+.env.*
 src/config.yml

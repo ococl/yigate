@@ -24,17 +24,20 @@ func Authenticate(username, password string, users map[string]string) bool {
 	return subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1
 }
 
-// HTTPAuthOK 检查 HTTP 代理 Basic 认证
-func HTTPAuthOK(header http.Header, users map[string]string) bool {
+// HTTPAuthOK 检查 HTTP 代理 Basic 认证，返回认证通过的用户名。
+func HTTPAuthOK(header http.Header, users map[string]string) (string, bool) {
 	if !AuthRequired(users) {
-		return true
+		return "", true
 	}
 	ah := header.Get("Proxy-Authorization")
 	user, pass, ok := parseBasicAuth(ah)
 	if !ok {
-		return false
+		return "", false
 	}
-	return Authenticate(user, pass, users)
+	if !Authenticate(user, pass, users) {
+		return "", false
+	}
+	return user, true
 }
 
 func parseBasicAuth(header string) (user, pass string, ok bool) {

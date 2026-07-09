@@ -11,11 +11,11 @@ import (
 
 const socks5SniffTimeout = 2 * time.Second
 
-func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router) {
+func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router, access *AccessController) {
 	if !shouldSniffSOCKS5Target(target, mgr, router) {
 		remote, err := dialTargetForRequest(target, mgr, router)
 		if err != nil {
-			writeSOCKS5ConnectReply(client, 0x05)
+			writeSOCKS5ConnectReply(client, SOCKS5ReplyFromError(err))
 			return
 		}
 		defer remote.Close()

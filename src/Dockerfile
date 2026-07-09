@@ -7,10 +7,12 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o k5pw .
 
 # 运行阶段
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates su-exec && \
+    adduser -D -u 1000 k5pw
 WORKDIR /k5
 COPY --from=builder /build/k5pw /usr/local/bin/k5pw
+COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 8891
-ENTRYPOINT ["k5pw"]
-CMD ["-config", "/k5/config.yml"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

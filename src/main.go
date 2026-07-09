@@ -11,10 +11,17 @@ import (
 	"k5pw/proxy"
 )
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
 	configPath := flag.String("config", "config.yml", "path to config file")
+	showVersion := flag.Bool("version", false, "show version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: k5pw [-config <path>] <command>\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: k5pw [-version] [-config <path>] <command>\n\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  run       run in foreground (default)\n")
 		fmt.Fprintf(os.Stderr, "  service   run as system service (used by service manager)\n")
@@ -26,6 +33,11 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("k5pw version %s (commit %s, built %s)\n", version, commit, buildTime)
+		return
+	}
 
 	cmd := "run"
 	if flag.NArg() > 0 {
