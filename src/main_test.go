@@ -42,7 +42,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		"FROM golang:1.21-alpine AS builder",
 		"FROM alpine:3.20",
 		"go mod download",
-		"CGO_ENABLED=0 GOOS=linux go build",
+		"CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct go build",
 		"adduser -D -u 1000 k5pw",
 		"COPY --from=builder /build/k5pw /usr/local/bin/k5pw",
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",

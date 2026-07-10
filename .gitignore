@@ -6,6 +6,7 @@ k5pw
 bin/
 
 # Logs
+logs/
 *.log
 
 # Downloaded routing data

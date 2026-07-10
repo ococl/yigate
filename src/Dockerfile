@@ -2,9 +2,9 @@
 FROM golang:1.21-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
-RUN go mod download
+RUN GOPROXY=https://goproxy.cn,direct go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o k5pw .
+RUN CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct go build -o k5pw .
 
 # 运行阶段
 FROM alpine:3.20
