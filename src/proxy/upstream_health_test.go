@@ -35,7 +35,10 @@ func TestUpstreamHealthStatusMetric(t *testing.T) {
 	MetricSet("k5pw_upstream_health_status", -1, "upstream=alive")
 	MetricSet("k5pw_upstream_health_status", -1, "upstream=dead")
 
-	mgr.checkAll()
+	// 连续失败达到阈值才标记 dead。
+	for i := 0; i < deadFailureThreshold; i++ {
+		mgr.checkAll()
+	}
 
 	if got := MetricValue("k5pw_upstream_health_status", "upstream=alive"); got != 1 {
 		t.Fatalf("alive health metric = %v, want 1", got)

@@ -54,3 +54,40 @@ func TestDialSocks5HDisabled(t *testing.T) {
 		t.Fatal("expected error when disabled")
 	}
 }
+
+// TestSocks5HBreaker 验证无可用上游时触发熔断，后续请求直接短路返回。
+func TestSocks5HBreaker(t *testing.T) {
+	router, err := NewRouter(RoutingConfig{
+		Final: ActionAuto,
+		Socks5HRedirect: Socks5HConfig{
+			Enabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 无可用上游的 manager
+	mgr, err := NewUpstreamManager(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 第一次调用：尝试失败，触发熔断
+	_, err = router.DialSocks5H("example.com:80", mgr)
+	if err == nil {
+		t.Fatal("expected error with no upstreams")
+	}
+	// 第二次调用：应被熔断短路（无需等待上游探测）
+	before := time.Now()
+	_, err = router.DialSocks5H("example.com:80", mgr)
+	elapsed := time.Since(before)
+	if err == nil {
+		t.Fatal("expected circuit breaker error")
+	}
+	// 熔断短路应该立即返回，不经过上游超时等待
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("breaker short-circuit took too long: %v", elapsed)
+	}
+	if router.socks5hAvailable() {
+		t.Fatal("breaker should be open (unavailable) after trip")
+	}
+}

@@ -7,8 +7,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,6 +109,10 @@ type Router struct {
 	auto    autoRuntimeConfig
 	socks5h Socks5HConfig
 	cache   *RouteCache
+	sfGroup singleflight.Group
+
+	// socks5hBreaker 记录 socks5h 熔断到期时间（unix nano），0 表示未熔断。
+	socks5hBreaker atomic.Int64
 }
 
 type autoRuntimeConfig struct {
@@ -285,29 +291,63 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 		}
 	}
 
-	if r.auto.Mode == "proxy_first" {
-		if conn, up, err := r.dialProxy(target, mgr, nil); err == nil {
-			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
-			return conn, nil
+	// 缓存未命中：用 singleflight 合并对同一目标的探测决策，
+	// 避免高并发下每个请求都独立经历完整的直连超时 + 代理尝试。
+	result, err, _ := r.sfGroup.Do(key, func() (interface{}, error) {
+		// 再次检查缓存，可能在等待期间已被其他请求填充。
+		if entry, ok := r.cache.Get(key); ok {
+			return RouteCacheEntry{Action: entry.Action, UpstreamName: entry.UpstreamName}, nil
 		}
-		conn, err := DialTargetTimeout(target, r.auto.DirectTimeout)
-		if err == nil {
+		if r.auto.Mode == "proxy_first" {
+			conn, up, dialErr := r.dialProxy(target, mgr, nil)
+			if dialErr == nil {
+				r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
+				return cachedConn{conn: conn}, nil
+			}
+			conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
+			if directErr == nil {
+				r.cache.SetDirect(key, r.auto.CacheTTL)
+				return cachedConn{conn: conn}, nil
+			}
+			return nil, fmt.Errorf("proxy failed: %v; direct failed: %w", dialErr, directErr)
+		}
+		// direct_first（默认）
+		conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
+		if directErr == nil {
 			r.cache.SetDirect(key, r.auto.CacheTTL)
+			return cachedConn{conn: conn}, nil
 		}
-		return conn, err
+		conn, up, proxyErr := r.dialProxy(target, mgr, nil)
+		if proxyErr == nil {
+			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
+			return cachedConn{conn: conn}, nil
+		}
+		return nil, fmt.Errorf("direct failed: %v; proxy failed: %w", directErr, proxyErr)
+	})
+	if err != nil {
+		return nil, err
 	}
+	// 如果探测返回的是已建立的连接，直接复用。
+	if cc, ok := result.(cachedConn); ok {
+		return cc.conn, nil
+	}
+	// 探测期间缓存被填充（决策已知），按缓存决策建立新连接。
+	entry, _ := result.(RouteCacheEntry)
+	switch entry.Action {
+	case ActionDirect:
+		return DialTarget(target)
+	case ActionProxy:
+		if entry.UpstreamName != "" {
+			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName})
+			return conn, err
+		}
+	}
+	return DialTarget(target)
+}
 
-	conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
-	if directErr == nil {
-		r.cache.SetDirect(key, r.auto.CacheTTL)
-		return conn, nil
-	}
-	conn, up, proxyErr := r.dialProxy(target, mgr, nil)
-	if proxyErr == nil {
-		r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
-		return conn, nil
-	}
-	return nil, fmt.Errorf("direct failed: %v; proxy failed: %w", directErr, proxyErr)
+// cachedConn 包装探测阶段建立的连接，供 singleflight 共享。
+type cachedConn struct {
+	conn net.Conn
 }
 
 func (r *Router) dialProxy(target string, mgr *UpstreamManager, names []string) (net.Conn, *Upstream, error) {

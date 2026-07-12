@@ -207,6 +207,11 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
 	s.mgmt.SetReload(s.reloadConfig)
+
+	// 启动访问控制器的周期清理，防止 rateLimiters 内存无限增长。
+	if s.access != nil {
+		s.access.StartCleanup(5*time.Minute, 10*time.Minute)
+	}
 	return nil
 }
 

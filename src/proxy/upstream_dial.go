@@ -37,12 +37,15 @@ func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *U
 	if allowed != nil {
 		attempts = len(allowed)
 	}
+	// 在单次 DialProxy 调用中跟踪已尝试过的上游，避免重复选择同一失败上游。
+	tried := make(map[*Upstream]struct{})
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		up := m.selectFrom(allowed)
+		up := m.selectFromExcluding(allowed, tried)
 		if up == nil {
 			break
 		}
+		tried[up] = struct{}{}
 		conn, err := up.Dial(target)
 		if err == nil {
 			return conn, up, nil
@@ -161,7 +164,8 @@ func (m *UpstreamManager) DialSOCKS5Bind(target string, names []string) (net.Con
 		}
 		lastErr = err
 		Logger().Warnw("upstream bind failed", "upstream", up.Name, "target", target, "error", err)
-		m.markDead(up)
+		// BIND 是特殊命令，上游失败通常意味着不支持，立即标记 dead 避免后续请求挂起。
+		m.markDeadImmediate(up)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no available socks5 upstream")
@@ -184,7 +188,8 @@ func (m *UpstreamManager) DialSOCKS5UDP(target string, names []string) (net.Conn
 		}
 		lastErr = err
 		Logger().Warnw("upstream udp associate failed", "upstream", up.Name, "target", target, "error", err)
-		m.markDead(up)
+		// UDP ASSOCIATE 是特殊命令，上游失败通常意味着不支持，立即标记 dead 避免后续请求挂起。
+		m.markDeadImmediate(up)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no available socks5 upstream")

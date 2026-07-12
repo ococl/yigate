@@ -101,6 +101,29 @@ func TestRateLimiterRefill(t *testing.T) {
 }
 
 func TestCleanupStaleRateLimiters(t *testing.T) {
-	ac, _ := NewAccessController(AccessControlConfig{})
-	ac.CleanupStaleRateLimiters(time.Minute) // no-op, should not panic
+	cfg := AccessControlConfig{RateLimit: struct {
+		ConnectionsPerSecond int `yaml:"connections_per_second"`
+		Burst                int `yaml:"burst"`
+	}{ConnectionsPerSecond: 10, Burst: 5}}
+	ac, _ := NewAccessController(cfg)
+	addr := &net.TCPAddr{IP: net.ParseIP("1.2.3.4"), Port: 1234}
+	ac.AllowConn(addr)
+	ac.mu.Lock()
+	if len(ac.rateLimiters) != 1 {
+		ac.mu.Unlock()
+		t.Fatalf("expected 1 limiter, got %d", len(ac.rateLimiters))
+	}
+	for _, lim := range ac.rateLimiters {
+		lim.mu.Lock()
+		lim.lastUsed = time.Now().Add(-time.Hour)
+		lim.mu.Unlock()
+	}
+	ac.mu.Unlock()
+	ac.CleanupStaleRateLimiters(time.Minute)
+	ac.mu.Lock()
+	count := len(ac.rateLimiters)
+	ac.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("expected 0 stale limiters after cleanup, got %d", count)
+	}
 }

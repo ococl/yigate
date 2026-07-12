@@ -7,6 +7,16 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
+)
+
+const (
+	// deadFailureThreshold 是将上游标记为 dead 前所需的连续失败次数。
+	deadFailureThreshold = 3
+	// deadProbeBaseInterval 是 dead 上游恢复探测的初始间隔。
+	deadProbeBaseInterval = 2 * time.Second
+	// deadProbeMaxInterval 是 dead 上游恢复探测的最大间隔。
+	deadProbeMaxInterval = 30 * time.Second
 )
 
 const (
@@ -136,6 +146,12 @@ type Upstream struct {
 	typesMu sync.RWMutex
 	current int
 	dead    bool
+
+	// 失败计数与恢复探测相关字段，由 UpstreamManager.mu 保护。
+	failures        int       // 连续失败次数
+	deadSince       time.Time // 最近一次被标记 dead 的时间
+	nextProbeAt     time.Time // 下次允许主动探测恢复的时间（指数退避）
+	consecutiveDead int       // 连续处于 dead 的探测周期数（用于计算退避）
 }
 
 // UpstreamManager 管理多上游、优先级、负载均衡与健康检查
@@ -238,8 +254,47 @@ func (m *UpstreamManager) selectFrom(allowed map[string]struct{}) *Upstream {
 	return nil
 }
 
+// selectFromExcluding 类似 selectFrom，但跳过 exclude 集合中的上游，
+// 用于在单次 DialProxy 调用中避免重复选择已失败的上游。
+func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclude map[*Upstream]struct{}) *Upstream {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.order {
+		group := m.groups[p]
+		alive := make([]*Upstream, 0, len(group))
+		for _, u := range group {
+			if u.dead {
+				continue
+			}
+			if exclude != nil {
+				if _, ok := exclude[u]; ok {
+					continue
+				}
+			}
+			if allowed != nil {
+				if _, ok := allowed[u.Name]; !ok {
+					continue
+				}
+			}
+			alive = append(alive, u)
+		}
+		if len(alive) == 0 {
+			continue
+		}
+		return pickWeighted(alive)
+	}
+	return nil
+}
+
 func (m *UpstreamManager) SelectFor(names []string) *Upstream {
 	return m.selectFrom(namesToSet(names))
+}
+
+// SelectForExcluding 类似 SelectFor，但跳过 exclude 集合中的上游，
+// 用于在重试循环中避免重复选择同一失败上游。
+func (m *UpstreamManager) SelectForExcluding(names []string, exclude map[*Upstream]struct{}) *Upstream {
+	return m.selectFromExcluding(namesToSet(names), exclude)
 }
 
 func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
@@ -331,12 +386,62 @@ func pickWeighted(us []*Upstream) *Upstream {
 	return us[chosen]
 }
 
+// markDead 记录一次失败。连续失败达到阈值才标记 dead，
+// 并按指数退避调度下次主动恢复探测。
 func (m *UpstreamManager) markDead(up *Upstream) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.checkInterval <= 0 {
-		m.mu.Unlock()
 		return
 	}
-	up.dead = true
-	m.mu.Unlock()
+	up.failures++
+	if up.failures < deadFailureThreshold {
+		// 未达阈值，暂不标记 dead，但记录下次可快速重试的时间。
+		return
+	}
+	if !up.dead {
+		up.dead = true
+		up.deadSince = time.Now()
+		up.consecutiveDead = 0
+	}
+	up.consecutiveDead++
+	// 指数退避：base * 2^(n-1)，上限 maxInterval。
+	backoff := deadProbeBaseInterval * time.Duration(1<<uint(up.consecutiveDead-1))
+	if backoff > deadProbeMaxInterval {
+		backoff = deadProbeMaxInterval
+	}
+	up.nextProbeAt = time.Now().Add(backoff)
+}
+
+// markDeadImmediate 立即将上游标记为 dead（跳过失败计数阈值）。
+// 用于 BIND/UDP 等特殊命令——上游对这些命令的失败通常意味着不支持，
+// 不应反复尝试导致请求挂起。
+func (m *UpstreamManager) markDeadImmediate(up *Upstream) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.checkInterval <= 0 {
+		return
+	}
+	if !up.dead {
+		up.dead = true
+		up.deadSince = time.Now()
+		up.consecutiveDead = 0
+	}
+	up.failures = deadFailureThreshold
+	up.consecutiveDead++
+	backoff := deadProbeBaseInterval * time.Duration(1<<uint(up.consecutiveDead-1))
+	if backoff > deadProbeMaxInterval {
+		backoff = deadProbeMaxInterval
+	}
+	up.nextProbeAt = time.Now().Add(backoff)
+}
+
+// markAlive 重置失败计数并清除 dead 状态。
+func (m *UpstreamManager) markAlive(up *Upstream) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	up.failures = 0
+	up.dead = false
+	up.consecutiveDead = 0
+	up.nextProbeAt = time.Time{}
 }

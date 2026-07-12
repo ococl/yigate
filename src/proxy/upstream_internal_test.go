@@ -178,12 +178,48 @@ func TestUpstreamManagerMarkDead(t *testing.T) {
 	if up == nil {
 		t.Fatal("expected upstream")
 	}
-	_, _, err = mgr.DialProxy("127.0.0.1:1", nil)
-	if err == nil {
-		t.Fatal("expected dial error")
+	// 连续失败达到阈值才标记 dead，避免单次抖动误判。
+	for i := 0; i < deadFailureThreshold; i++ {
+		mgr.markDead(up)
 	}
 	if !up.dead {
 		t.Fatal("expected upstream marked dead")
+	}
+	// 标记 dead 后应调度恢复探测
+	if up.nextProbeAt.IsZero() {
+		t.Fatal("expected nextProbeAt set after markDead")
+	}
+	if up.consecutiveDead != 1 {
+		t.Fatalf("expected consecutiveDead=1, got %d", up.consecutiveDead)
+	}
+	// markAlive 恢复
+	mgr.markAlive(up)
+	if up.dead {
+		t.Fatal("expected upstream alive after markAlive")
+	}
+	if up.failures != 0 || up.consecutiveDead != 0 {
+		t.Fatal("expected counters reset after markAlive")
+	}
+}
+
+// TestMarkDeadFailureThreshold 验证单次失败不标记 dead。
+func TestMarkDeadFailureThreshold(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "u", URL: "http://127.0.0.1:1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.StartHealthCheck(3600)
+	defer mgr.StopHealthCheck()
+	up := mgr.Select()
+	if up == nil {
+		t.Fatal("expected upstream")
+	}
+	mgr.markDead(up)
+	if up.dead {
+		t.Fatal("expected NOT dead after single failure")
+	}
+	if up.failures != 1 {
+		t.Fatalf("expected failures=1, got %d", up.failures)
 	}
 }
 

@@ -31,19 +31,22 @@ type AccessController struct {
 
 // rateLimiter 是简单令牌桶限速器。
 type rateLimiter struct {
-	rate   float64
-	burst  int
-	tokens float64
-	last   time.Time
-	mu     sync.Mutex
+	rate     float64
+	burst    int
+	tokens   float64
+	last     time.Time
+	lastUsed time.Time
+	mu       sync.Mutex
 }
 
 func newRateLimiter(r float64, burst int) *rateLimiter {
+	now := time.Now()
 	return &rateLimiter{
-		rate:   r,
-		burst:  burst,
-		tokens: float64(burst),
-		last:   time.Now(),
+		rate:     r,
+		burst:    burst,
+		tokens:   float64(burst),
+		last:     now,
+		lastUsed: now,
 	}
 }
 
@@ -53,6 +56,7 @@ func (l *rateLimiter) allow() bool {
 	now := time.Now()
 	elapsed := now.Sub(l.last).Seconds()
 	l.last = now
+	l.lastUsed = now
 	l.tokens += elapsed * l.rate
 	if l.tokens > float64(l.burst) {
 		l.tokens = float64(l.burst)
@@ -159,14 +163,36 @@ func (a *AccessController) ReleaseUserSlot(user string) {
 }
 
 // CleanupStaleRateLimiters 清理长时间未使用的限速器，避免内存无限增长。
+// 删除超过 maxAge 未被访问的条目。
 func (a *AccessController) CleanupStaleRateLimiters(maxAge time.Duration) {
-	if a == nil {
+	if a == nil || maxAge <= 0 {
 		return
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// 当前使用简单策略：不实现单独计时；实际生产环境可扩展为带 lastUsed 的包装器。
-	_ = maxAge
+	cutoff := time.Now().Add(-maxAge)
+	for host, lim := range a.rateLimiters {
+		lim.mu.Lock()
+		stale := lim.lastUsed.Before(cutoff)
+		lim.mu.Unlock()
+		if stale {
+			delete(a.rateLimiters, host)
+		}
+	}
+}
+
+// StartCleanup 启动一个后台 goroutine，周期性清理过期的限速器。
+func (a *AccessController) StartCleanup(interval, maxAge time.Duration) {
+	if a == nil || interval <= 0 || maxAge <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			a.CleanupStaleRateLimiters(maxAge)
+		}
+	}()
 }
 
 // ErrAccessDenied 表示访问被拒绝。

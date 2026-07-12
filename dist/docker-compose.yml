@@ -11,3 +11,9 @@ services:
     volumes:
       - ./k5:/k5
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "-w3", "127.0.0.1", "8891"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

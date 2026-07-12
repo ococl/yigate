@@ -170,8 +170,9 @@ def start_local_http_server(host="127.0.0.1", port=0):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b"DIRECT_LOCAL")
+            self.wfile.write(b'{"origin": "k5pw-test", "status": "ok"}')
 
         def do_POST(self):
             length = int(self.headers.get("Content-Length", 0))
@@ -180,7 +181,7 @@ def start_local_http_server(host="127.0.0.1", port=0):
             self.end_headers()
             self.wfile.write(b"ECHO:" + body)
 
-        def log_message(self, fmt, *args):
+        def log_message(self, format, *args):
             pass
 
     server = http.server.HTTPServer((host, port), Handler)
@@ -353,38 +354,55 @@ def test_tcp_connect():
 
 
 def test_http_get():
+    server = None
     try:
+        server, addr = start_local_http_server()
         proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
         r = http_request_with_retry(
             "GET",
-            "http://httpbin.org/get",
+            f"http://127.0.0.1:{addr[1]}/get",
             proxies=proxies,
             timeout=15,
             headers={"User-Agent": "k5pw-test/1.0"},
         )
         r.raise_for_status()
-        return TestResult("HTTP 代理 GET", True, f"HTTP {r.status_code}")
+        ok = r.status_code == 200
+        return TestResult("HTTP 代理 GET", ok, f"HTTP {r.status_code}")
     except Exception as e:
         return TestResult("HTTP 代理 GET", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
 
 
 def test_http_post():
+    server = None
     try:
+        server, addr = start_local_http_server()
         proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
-        payload = {"k5pw": "test"}
+        payload = b"k5pw-test-body"
         r = http_request_with_retry(
             "POST",
-            "http://httpbin.org/post",
-            json=payload,
+            f"http://127.0.0.1:{addr[1]}/post",
+            data=payload,
             proxies=proxies,
             timeout=15,
             headers={"User-Agent": "k5pw-test/1.0"},
         )
         r.raise_for_status()
-        ok = payload["k5pw"] in r.text
+        ok = (b"ECHO:" + payload).decode() in r.text
         return TestResult("HTTP 代理 POST", ok, f"HTTP {r.status_code}", "" if ok else "回显缺少 payload")
     except Exception as e:
         return TestResult("HTTP 代理 POST", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
 
 
 def test_http_connect():
@@ -416,7 +434,7 @@ def test_direct_local_http():
             "GET", url, proxies=proxies, timeout=15, headers={"User-Agent": "k5pw-test/1.0"}
         )
         r.raise_for_status()
-        get_ok = r.text == "DIRECT_LOCAL"
+        get_ok = "k5pw-test" in r.text
         payload = b"k5pw-direct-body"
         r2 = http_request_with_retry(
             "POST",
@@ -635,7 +653,7 @@ def test_concurrent_requests():
                     timeout=15,
                     headers={"User-Agent": f"k5pw-test/1.0-{i}"},
                 )
-                return r.status_code == 200 and r.text == "DIRECT_LOCAL"
+                return r.status_code == 200 and "k5pw-test" in r.text
             except Exception:
                 return False
 

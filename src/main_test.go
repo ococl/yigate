@@ -59,7 +59,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"services:", "k5pw:", "build:", "context: ../src", "dockerfile: Dockerfile", "ports:", `"8891:8891"`, "volumes:", "restart: unless-stopped"} {
+	for _, want := range []string{"services:", "k5pw:", "build:", "context: ../src", "dockerfile: Dockerfile", "network_mode: host", "volumes:", "restart: unless-stopped", "healthcheck:"} {
 		if !bytes.Contains(compose, []byte(want)) {
 			t.Fatalf("docker-compose.yml missing %q", want)
 		}

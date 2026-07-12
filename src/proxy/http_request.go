@@ -211,11 +211,13 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 
 func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, names []string, resetBody func()) (*http.Response, error) {
 	var lastErr error
+	tried := make(map[*Upstream]struct{})
 	for i := 0; i < mgr.AttemptCount(names); i++ {
-		up := mgr.SelectFor(names)
+		up := mgr.SelectForExcluding(names, tried)
 		if up == nil {
 			break
 		}
+		tried[up] = struct{}{}
 		resetBody()
 		resp, err := forwardRequest(req, up)
 		if err == nil {

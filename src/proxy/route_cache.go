@@ -44,7 +44,9 @@ func (c *RouteCache) Get(key string) (RouteCacheEntry, bool) {
 		return RouteCacheEntry{}, false
 	}
 	if !entry.ExpiresAt.IsZero() && time.Now().After(entry.ExpiresAt) {
-		c.Delete(key)
+		// 原子地删除过期条目：在写锁下重新校验 ExpiresAt，
+		// 避免误删在 RUnlock 与 Lock 之间被其他 goroutine 写入的新值。
+		c.deleteIfExpired(key, entry.ExpiresAt)
 		MetricInc("k5pw_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
@@ -68,6 +70,24 @@ func (c *RouteCache) Delete(key string) {
 		return
 	}
 	c.mu.Lock()
+	delete(c.entries, key)
+	c.removeFromOrderLocked(key)
+	c.mu.Unlock()
+}
+
+// deleteIfExpired 在写锁下删除 key，仅当当前条目的 ExpiresAt 与 staleExpiresAt 一致时才删除。
+// 这样即使另一个 goroutine 在读锁释放后写入了一个新的（未过期）条目，也不会被误删。
+func (c *RouteCache) deleteIfExpired(key string, staleExpiresAt time.Time) {
+	if c == nil || key == "" {
+		return
+	}
+	c.mu.Lock()
+	cur, ok := c.entries[key]
+	if !ok || !cur.ExpiresAt.Equal(staleExpiresAt) {
+		// 条目已被更新或删除，不操作。
+		c.mu.Unlock()
+		return
+	}
 	delete(c.entries, key)
 	c.removeFromOrderLocked(key)
 	c.mu.Unlock()
