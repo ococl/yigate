@@ -296,43 +296,45 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 	result, err, _ := r.sfGroup.Do(key, func() (interface{}, error) {
 		// 再次检查缓存，可能在等待期间已被其他请求填充。
 		if entry, ok := r.cache.Get(key); ok {
-			return RouteCacheEntry{Action: entry.Action, UpstreamName: entry.UpstreamName}, nil
+			return entry, nil
 		}
 		if r.auto.Mode == "proxy_first" {
 			conn, up, dialErr := r.dialProxy(target, mgr, nil)
 			if dialErr == nil {
+				_ = conn.Close()
 				r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
-				return cachedConn{conn: conn}, nil
+				return RouteCacheEntry{Action: ActionProxy, UpstreamName: up.Name}, nil
 			}
 			conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
 			if directErr == nil {
+				_ = conn.Close()
 				r.cache.SetDirect(key, r.auto.CacheTTL)
-				return cachedConn{conn: conn}, nil
+				return RouteCacheEntry{Action: ActionDirect}, nil
 			}
 			return nil, fmt.Errorf("proxy failed: %v; direct failed: %w", dialErr, directErr)
 		}
 		// direct_first（默认）
 		conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
 		if directErr == nil {
+			_ = conn.Close()
 			r.cache.SetDirect(key, r.auto.CacheTTL)
-			return cachedConn{conn: conn}, nil
+			return RouteCacheEntry{Action: ActionDirect}, nil
 		}
 		conn, up, proxyErr := r.dialProxy(target, mgr, nil)
 		if proxyErr == nil {
+			_ = conn.Close()
 			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
-			return cachedConn{conn: conn}, nil
+			return RouteCacheEntry{Action: ActionProxy, UpstreamName: up.Name}, nil
 		}
 		return nil, fmt.Errorf("direct failed: %v; proxy failed: %w", directErr, proxyErr)
 	})
 	if err != nil {
 		return nil, err
 	}
-	// 如果探测返回的是已建立的连接，直接复用。
-	if cc, ok := result.(cachedConn); ok {
-		return cc.conn, nil
+	entry, ok := result.(RouteCacheEntry)
+	if !ok {
+		return nil, fmt.Errorf("invalid route probe result %T", result)
 	}
-	// 探测期间缓存被填充（决策已知），按缓存决策建立新连接。
-	entry, _ := result.(RouteCacheEntry)
 	switch entry.Action {
 	case ActionDirect:
 		return DialTarget(target)
@@ -342,12 +344,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 			return conn, err
 		}
 	}
-	return DialTarget(target)
-}
-
-// cachedConn 包装探测阶段建立的连接，供 singleflight 共享。
-type cachedConn struct {
-	conn net.Conn
+	return nil, fmt.Errorf("unsupported cached route action %q", entry.Action)
 }
 
 func (r *Router) dialProxy(target string, mgr *UpstreamManager, names []string) (net.Conn, *Upstream, error) {

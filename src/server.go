@@ -25,6 +25,8 @@ type Server struct {
 	geoUpdate   *proxy.GeoSiteUpdater
 	mgmt        *proxy.ManagementServer
 	mgmtAddr    string
+	stateMu     sync.RWMutex
+	applyMu     sync.Mutex
 	lnMu        sync.Mutex
 	ln          net.Listener
 	quit        chan struct{}
@@ -32,6 +34,7 @@ type Server struct {
 	activeConns sync.WaitGroup
 	watcherMu   sync.Mutex
 	watcher     *fsnotify.Watcher
+	watcherWG   sync.WaitGroup
 	connCount   atomic.Int64
 	maxConns    atomic.Int64
 }
@@ -51,11 +54,19 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 	return s, nil
 }
 
+func (s *Server) managementServer() *proxy.ManagementServer {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.mgmt
+}
+
 // statusSnapshot 返回当前进程运行摘要，供管理 API 使用。
 func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 	cur := s.Config()
+	mgmt := s.managementServer()
+	pprofEnabled := mgmt != nil && mgmt.PprofEnabled()
 	if cur == nil {
-		return proxy.StatusSnapshot{Status: "up", PprofEnabled: s.mgmt.PprofEnabled()}
+		return proxy.StatusSnapshot{Status: "up", PprofEnabled: pprofEnabled}
 	}
 	return proxy.StatusSnapshot{
 		Status:        "up",
@@ -64,7 +75,7 @@ func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 		UpstreamCount: len(cur.Upstreams),
 		RouterReady:   s.Router() != nil,
 		ManagerReady:  s.Manager() != nil,
-		PprofEnabled:  s.mgmt.PprofEnabled(),
+		PprofEnabled:  pprofEnabled,
 	}
 }
 
@@ -103,6 +114,15 @@ func (s *Server) ApplyConfig(cfg *Config) error {
 }
 
 func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	select {
+	case <-s.quit:
+		return errors.New("server is stopping")
+	default:
+	}
+
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
 	if err != nil {
 		return err
@@ -112,7 +132,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		return err
 	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
-	if initialLoad && cfg.Routing.GeoSite.AutoUpdate {
+	if initialLoad && cfg.Routing.GeoSite.AutoUpdate && cfg.Routing.GeoSite.Path != "" {
 		// 仅在 geosite 文件不存在时同步下载，避免每次启动/重载都阻塞。
 		if _, err := os.Stat(cfg.Routing.GeoSite.Path); os.IsNotExist(err) {
 			if err := updater.UpdateOnce(); err != nil {
@@ -133,16 +153,21 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	proxy.SetTimeouts(cfg.Timeouts)
 
 	// 记录旧组件，用于替换后优雅停止。
+	s.stateMu.RLock()
+	oldAccess := s.access
+	oldUpdater := s.geoUpdate
+	s.stateMu.RUnlock()
 	oldMgr := s.Manager()
 	oldRouter := s.Router()
-	oldUpdater := s.geoUpdate
 
 	// 原子替换：新连接立刻看到完整的新运行时上下文。
+	s.stateMu.Lock()
 	s.config.Store(cfg)
 	s.mgr.Store(mgr)
 	s.router.Store(router)
 	s.access = access
 	s.geoUpdate = updater
+	s.stateMu.Unlock()
 
 	// 启动新组件的健康检查与 geosite 自动更新。
 	mgr.StartHealthCheck(cfg.CheckInterval)
@@ -158,6 +183,9 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	})
 
 	// 停止旧组件，避免旧 manager 的健康检查继续占用资源。
+	if oldAccess != nil {
+		oldAccess.StopCleanup()
+	}
 	if oldUpdater != nil {
 		oldUpdater.Stop()
 	}
@@ -166,6 +194,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 	_ = oldRouter // 旧 router 无背景任务，直接由 GC 回收即可。
 
+	s.stateMu.Lock()
 	if s.mgmtAddr != cfg.Management || s.mgmt.PprofEnabled() != cfg.EnablePprof || s.mgmt.AuthToken() != cfg.ManagementAuthToken {
 		if s.mgmtAddr != "" {
 			s.mgmt.Stop()
@@ -186,7 +215,8 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		}, cfg.EnablePprof, cfg.ManagementAuthToken)
 		if cfg.Management != "" {
 			if err := s.mgmt.Start(cfg.Management); err != nil {
-				proxy.Logger().Warnw("start management server failed", "address", cfg.Management, "error", err)
+				s.stateMu.Unlock()
+				return fmt.Errorf("start management server on %s: %w", cfg.Management, err)
 			}
 		}
 		s.mgmtAddr = cfg.Management
@@ -207,6 +237,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
 	s.mgmt.SetReload(s.reloadConfig)
+	s.stateMu.Unlock()
 
 	// 启动访问控制器的周期清理，防止 rateLimiters 内存无限增长。
 	if s.access != nil {
@@ -221,21 +252,35 @@ func (s *Server) LoadAndApply() error {
 	if err != nil {
 		return err
 	}
-	if old := s.Config(); old != nil && old.Listen != cfg.Listen {
-		proxy.Logger().Infow("config listen changed, switching listener", "old", old.Listen, "new", cfg.Listen)
-		newLn, err := net.Listen("tcp", cfg.Listen)
+
+	var newLn net.Listener
+	old := s.Config()
+	if old != nil && old.Listen != cfg.Listen {
+		proxy.Logger().Infow("config listen changed, preparing listener", "old", old.Listen, "new", cfg.Listen)
+		newLn, err = net.Listen("tcp", cfg.Listen)
 		if err != nil {
 			return fmt.Errorf("switch listener to %s: %w", cfg.Listen, err)
 		}
-		s.lnMu.Lock()
-		oldLn := s.ln
-		s.ln = newLn
-		s.lnMu.Unlock()
-		if oldLn != nil {
-			oldLn.Close()
-		}
 	}
-	return s.applyConfig(cfg, false)
+
+	if err := s.applyConfig(cfg, false); err != nil {
+		if newLn != nil {
+			_ = newLn.Close()
+		}
+		return err
+	}
+	if newLn == nil {
+		return nil
+	}
+
+	s.lnMu.Lock()
+	oldLn := s.ln
+	s.ln = newLn
+	s.lnMu.Unlock()
+	if oldLn != nil {
+		_ = oldLn.Close()
+	}
+	return nil
 }
 
 // Start 启动监听并处理连接
@@ -362,15 +407,27 @@ func (s *Server) Stop() {
 			s.watcher = nil
 		}
 		s.watcherMu.Unlock()
-		if s.geoUpdate != nil {
-			s.geoUpdate.Stop()
+		s.watcherWG.Wait()
+
+		s.applyMu.Lock()
+		s.stateMu.RLock()
+		access := s.access
+		updater := s.geoUpdate
+		mgmt := s.mgmt
+		s.stateMu.RUnlock()
+		if access != nil {
+			access.StopCleanup()
+		}
+		if updater != nil {
+			updater.Stop()
 		}
 		if mgr := s.Manager(); mgr != nil {
 			mgr.StopHealthCheck()
 		}
-		if s.mgmt != nil {
-			s.mgmt.Stop()
+		if mgmt != nil {
+			mgmt.Stop()
 		}
+		s.applyMu.Unlock()
 		s.activeConns.Wait()
 	})
 }
@@ -394,7 +451,11 @@ func (s *Server) watchConfig() error {
 	}
 	s.watcher = w
 
-	go s.watchLoop(w)
+	s.watcherWG.Add(1)
+	go func() {
+		defer s.watcherWG.Done()
+		s.watchLoop(w)
+	}()
 	return nil
 }
 
@@ -449,7 +510,9 @@ func (s *Server) handle(conn net.Conn) {
 	cfg := s.Config()
 	mgr := s.Manager()
 	router := s.Router()
+	s.stateMu.RLock()
 	access := s.access
+	s.stateMu.RUnlock()
 	if cfg == nil || mgr == nil || router == nil {
 		conn.Close()
 		return

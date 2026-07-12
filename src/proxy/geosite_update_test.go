@@ -44,6 +44,31 @@ func TestGeoSiteUpdaterRejectsTinyDownload(t *testing.T) {
 	}
 }
 
+func TestGeoSiteUpdaterRejectsOversizedDownload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(make([]byte, maxGeoSiteDatSize+1))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
+	original := []byte("existing geosite data")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	updater := NewGeoSiteUpdater(GeoSiteConfig{Path: path, UpdateURL: server.URL}, nil)
+	if err := updater.UpdateOnce(); err == nil {
+		t.Fatal("expected error for oversized download")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatal("oversized download replaced existing geosite file")
+	}
+}
+
 func TestGeoSiteUpdaterRequiresPath(t *testing.T) {
 	updater := NewGeoSiteUpdater(GeoSiteConfig{}, nil)
 	if err := updater.UpdateOnce(); err == nil {

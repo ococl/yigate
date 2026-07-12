@@ -100,6 +100,26 @@ func TestRateLimiterRefill(t *testing.T) {
 	}
 }
 
+func TestAccessControllerCleanupLifecycle(t *testing.T) {
+	ac, err := NewAccessController(AccessControlConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac.StartCleanup(time.Millisecond, time.Millisecond)
+	ac.StartCleanup(time.Millisecond, time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		ac.StopCleanup()
+		ac.StopCleanup()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup goroutine did not stop")
+	}
+}
+
 func TestCleanupStaleRateLimiters(t *testing.T) {
 	cfg := AccessControlConfig{RateLimit: struct {
 		ConnectionsPerSecond int `yaml:"connections_per_second"`

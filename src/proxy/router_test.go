@@ -1,6 +1,9 @@
 package proxy
 
 import (
+	"fmt"
+	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -151,6 +154,81 @@ func TestRouterDialAutoDirect(t *testing.T) {
 		t.Fatalf("dial auto: %v", err)
 	}
 	defer conn.Close()
+}
+
+func TestRouterDialAutoConcurrentConnectionsAreIndependent(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	const clients = 8
+	var serverWG sync.WaitGroup
+	serverWG.Add(clients + 1) // one probe connection plus one connection per caller
+	go func() {
+		for i := 0; i < clients+1; i++ {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer serverWG.Done()
+				defer c.Close()
+				buf := make([]byte, 32)
+				n, err := c.Read(buf)
+				if err != nil {
+					return
+				}
+				_, _ = c.Write(buf[:n])
+			}(conn)
+		}
+	}()
+
+	router, err := NewRouter(RoutingConfig{Final: ActionAuto})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, clients)
+	var clientWG sync.WaitGroup
+	for i := 0; i < clients; i++ {
+		clientWG.Add(1)
+		go func(id int) {
+			defer clientWG.Done()
+			<-start
+			conn, err := router.Dial(ln.Addr().String(), nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer conn.Close()
+			message := fmt.Sprintf("client-%d", id)
+			if _, err := conn.Write([]byte(message)); err != nil {
+				errs <- err
+				return
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			buf := make([]byte, len(message))
+			if _, err := conn.Read(buf); err != nil {
+				errs <- err
+				return
+			}
+			if string(buf) != message {
+				errs <- fmt.Errorf("received %q, want %q", buf, message)
+			}
+		}(i)
+	}
+	close(start)
+	clientWG.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	ln.Close()
+	serverWG.Wait()
 }
 
 func TestSocks5HRedirectConfig(t *testing.T) {

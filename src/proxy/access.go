@@ -27,6 +27,10 @@ type AccessController struct {
 	mu           sync.Mutex
 	userConns    map[string]int
 	rateLimiters map[string]*rateLimiter
+	cleanupOnce  sync.Once
+	stopOnce     sync.Once
+	cleanupDone  chan struct{}
+	cleanupWG    sync.WaitGroup
 }
 
 // rateLimiter 是简单令牌桶限速器。
@@ -186,13 +190,36 @@ func (a *AccessController) StartCleanup(interval, maxAge time.Duration) {
 	if a == nil || interval <= 0 || maxAge <= 0 {
 		return
 	}
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for range ticker.C {
-			a.CleanupStaleRateLimiters(maxAge)
+	a.cleanupOnce.Do(func() {
+		a.cleanupDone = make(chan struct{})
+		a.cleanupWG.Add(1)
+		go func() {
+			defer a.cleanupWG.Done()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					a.CleanupStaleRateLimiters(maxAge)
+				case <-a.cleanupDone:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// StopCleanup 停止后台清理任务并等待退出。
+func (a *AccessController) StopCleanup() {
+	if a == nil {
+		return
+	}
+	a.stopOnce.Do(func() {
+		if a.cleanupDone != nil {
+			close(a.cleanupDone)
 		}
-	}()
+	})
+	a.cleanupWG.Wait()
 }
 
 // ErrAccessDenied 表示访问被拒绝。

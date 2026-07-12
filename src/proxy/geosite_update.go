@@ -13,6 +13,7 @@ import (
 
 const (
 	minGeoSiteDatSize      = 1024
+	maxGeoSiteDatSize      = 64 << 20
 	geoSiteDownloadTimeout = 5 * time.Minute
 )
 
@@ -121,11 +122,13 @@ func (u *GeoSiteUpdater) doRequest(req *http.Request) (*http.Response, error) {
 
 func (u *GeoSiteUpdater) requestViaAutoProxy(req *http.Request) (*http.Response, error) {
 	var lastErr error
+	tried := make(map[*Upstream]struct{})
 	for i := 0; i < u.mgr.AttemptCount(nil); i++ {
-		up := u.mgr.SelectFor(nil)
+		up := u.mgr.SelectForExcluding(nil, tried)
 		if up == nil {
 			break
 		}
+		tried[up] = struct{}{}
 		cloned := req.Clone(req.Context())
 		resp, err := requestViaUpstreamClient(cloned, up)
 		if err == nil {
@@ -163,11 +166,15 @@ func writeGeoSiteAtomically(path string, body io.Reader) error {
 	if err != nil {
 		return err
 	}
-	written, copyErr := io.Copy(f, io.LimitReader(body, 64<<20))
+	written, copyErr := io.Copy(f, io.LimitReader(body, maxGeoSiteDatSize+1))
 	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(tmp)
 		return copyErr
+	}
+	if written > maxGeoSiteDatSize {
+		os.Remove(tmp)
+		return fmt.Errorf("downloaded geosite dat exceeds maximum size: %d bytes", maxGeoSiteDatSize)
 	}
 	if closeErr != nil {
 		os.Remove(tmp)

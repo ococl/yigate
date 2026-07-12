@@ -278,11 +278,12 @@ log:
 func TestServerStatusSnapshot(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Listen = "127.0.0.1:4479"
-	cfg.Management = "127.0.0.1:8892"
+	cfg.Management = "127.0.0.1:0"
 	s, err := NewServer("", cfg)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	defer s.Stop()
 	snapshot := s.statusSnapshot()
 	if snapshot.Status != "up" {
 		t.Fatalf("expected status up, got %q", snapshot.Status)
@@ -290,8 +291,8 @@ func TestServerStatusSnapshot(t *testing.T) {
 	if snapshot.Listen != "127.0.0.1:4479" {
 		t.Fatalf("expected listen 127.0.0.1:4479, got %q", snapshot.Listen)
 	}
-	if snapshot.Management != "127.0.0.1:8892" {
-		t.Fatalf("expected management 127.0.0.1:8892, got %q", snapshot.Management)
+	if snapshot.Management != "127.0.0.1:0" {
+		t.Fatalf("expected management 127.0.0.1:0, got %q", snapshot.Management)
 	}
 	if !snapshot.RouterReady || !snapshot.ManagerReady {
 		t.Fatal("expected router and manager ready")
