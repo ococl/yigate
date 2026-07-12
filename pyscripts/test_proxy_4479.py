@@ -189,12 +189,6 @@ def start_local_http_server(host="127.0.0.1", port=0):
     return server, server.server_address
 
 
-def run_in_thread(fn, *args, **kwargs):
-    t = threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True)
-    t.start()
-    return t
-
-
 # ---------------------------------------------------------------------------
 # SOCKS5 原始协议实现
 # ---------------------------------------------------------------------------
@@ -619,24 +613,32 @@ def test_socks5_anonymous_auth():
 
 
 def test_concurrent_requests():
-    """通过 HTTP 代理并发发起多个请求，验证代理连接处理能力。"""
+    """通过 HTTP 代理并发访问本地服务，验证代理连接并发处理能力。
+
+    使用本地确定性 HTTP 服务器而非外部站点，确保用例度量的是代理本身的
+    并发处理能力，而不是外部网络（如 httpbin.org 多 IP）的稳定性。
+    """
     import concurrent.futures
 
-    def fetch_once(i):
-        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
-        try:
-            r = http_request_with_retry(
-                "GET",
-                "http://httpbin.org/get",
-                proxies=proxies,
-                timeout=15,
-                headers={"User-Agent": f"k5pw-test/1.0-{i}"},
-            )
-            return r.status_code == 200
-        except Exception:
-            return False
-
+    server = None
     try:
+        server, addr = start_local_http_server()
+        url = f"http://127.0.0.1:{addr[1]}/concurrent"
+        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+
+        def fetch_once(i):
+            try:
+                r = http_request_with_retry(
+                    "GET",
+                    url,
+                    proxies=proxies,
+                    timeout=15,
+                    headers={"User-Agent": f"k5pw-test/1.0-{i}"},
+                )
+                return r.status_code == 200 and r.text == "DIRECT_LOCAL"
+            except Exception:
+                return False
+
         concurrency = 8
         with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
             results = list(ex.map(fetch_once, range(concurrency)))
@@ -648,6 +650,12 @@ def test_concurrent_requests():
         )
     except Exception as e:
         return TestResult("HTTP 并发请求", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
 
 
 def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):

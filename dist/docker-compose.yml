@@ -5,8 +5,9 @@ services:
       dockerfile: Dockerfile
     image: k5pw:latest
     container_name: k5pw
-    ports:
-      - "8891:8891"
+    # host 网络模式：代理服务器需要处理 BIND/UDP 入站连接和本地回环，
+    # bridge NAT 会破坏这些场景。host 模式消除 NAT 隔离，性能更优。
+    network_mode: host
     volumes:
       - ./k5:/k5
     restart: unless-stopped
