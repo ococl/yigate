@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -202,7 +203,7 @@ func TestServerConnLimit(t *testing.T) {
 	if !s.acquireConnSlot(c1) {
 		t.Fatal("expected acquire with no limit to pass")
 	}
-	s.releaseConnSlot()
+	s.releaseConnSlot(c1)
 
 	cfg2 := defaultConfig()
 	cfg2.Listen = "127.0.0.1:0"
@@ -224,7 +225,7 @@ func TestServerConnLimit(t *testing.T) {
 	if s2.acquireConnSlot(c3) {
 		t.Fatal("expected second acquire to fail")
 	}
-	s2.releaseConnSlot()
+	s2.releaseConnSlot(c2)
 }
 
 func TestServerApplyConfig(t *testing.T) {
@@ -524,6 +525,130 @@ log:
 	}
 }
 
+func TestServerLoadAndApplyManagementFailureRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: old-token
+routing:
+  final: direct
+log:
+  level: warn
+  output: stdout
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	oldState := s.currentRuntime()
+	oldMgmtAddr := s.managementServer().Addr()
+
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	_ = writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: `+occupied.Addr().String()+`
+management_auth_token: new-token
+routing:
+  final: proxy
+log:
+  level: warn
+  output: stdout
+`)
+	if err := s.LoadAndApply(); err == nil {
+		t.Fatal("expected management listener conflict")
+	}
+	if s.currentRuntime() != oldState {
+		t.Fatal("runtime state changed after failed reload")
+	}
+	if got := s.managementServer().Addr(); got != oldMgmtAddr {
+		t.Fatalf("management addr changed to %q, want %q", got, oldMgmtAddr)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://"+oldMgmtAddr+"/health", nil)
+	req.Header.Set("Authorization", "Bearer old-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("old management server unavailable: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("old management status = %d", resp.StatusCode)
+	}
+}
+
+func TestServerConnCountAcrossLimitReload(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	cfg.MaxConnections = 1
+	s, err := NewServer("", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	c1, peer1 := net.Pipe()
+	defer peer1.Close()
+	if !s.acquireConnSlot(c1) {
+		t.Fatal("first connection rejected")
+	}
+	if got := s.connCount.Load(); got != 1 {
+		t.Fatalf("count = %d, want 1", got)
+	}
+	s.maxConns.Store(0)
+	c2, peer2 := net.Pipe()
+	defer peer2.Close()
+	if !s.acquireConnSlot(c2) {
+		t.Fatal("unlimited connection rejected")
+	}
+	if got := s.connCount.Load(); got != 2 {
+		t.Fatalf("count = %d, want 2", got)
+	}
+	s.releaseConnSlot(c1)
+	s.maxConns.Store(1)
+	c3, peer3 := net.Pipe()
+	defer peer3.Close()
+	if s.acquireConnSlot(c3) {
+		t.Fatal("connection should be rejected while one remains active")
+	}
+	s.releaseConnSlot(c2)
+	if got := s.connCount.Load(); got != 0 {
+		t.Fatalf("count = %d, want 0", got)
+	}
+}
+
+func TestServerShutdownClosesActiveConnectionsOnTimeout(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	s, err := NewServer("", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, peer := net.Pipe()
+	defer peer.Close()
+	if !s.acquireConnSlot(conn) {
+		t.Fatal("connection rejected")
+	}
+	go func() {
+		buf := make([]byte, 1)
+		_, _ = conn.Read(buf)
+		s.releaseConnSlot(conn)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("Shutdown error = %v, want deadline exceeded", err)
+	}
+	if got := s.connCount.Load(); got != 0 {
+		t.Fatalf("active count = %d, want 0", got)
+	}
+}
+
 func TestServerLoadAndApplyRuntimeComponents(t *testing.T) {
 	dir := t.TempDir()
 	oldLog := filepath.Join(dir, "old.log")
@@ -579,7 +704,7 @@ access_control:
 	if proxy.ProxyDialTimeout() != 2*time.Second {
 		t.Fatalf("dial timeout = %v, want 2s", proxy.ProxyDialTimeout())
 	}
-	if s.access.IsAllowedIP(&net.TCPAddr{IP: net.ParseIP("127.0.0.1")}) {
+	if s.currentRuntime().access.IsAllowedIP(&net.TCPAddr{IP: net.ParseIP("127.0.0.1")}) {
 		t.Fatal("expected reloaded access control to deny 127.0.0.1")
 	}
 	proxy.Logger().Warn("new logger active")

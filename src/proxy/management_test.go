@@ -2,10 +2,33 @@ package proxy
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestManagementServerStartListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewManagementServer(func() HealthStatus {
+		return HealthStatus{Status: "up", RouterReady: true, ManagerReady: true}
+	}, false)
+	if err := m.StartListener(ln); err != nil {
+		t.Fatalf("StartListener: %v", err)
+	}
+	defer m.Stop()
+	resp, err := http.Get("http://" + ln.Addr().String() + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
 
 func TestManagementServerHealthAndMetrics(t *testing.T) {
 	m := NewManagementServer(func() HealthStatus {

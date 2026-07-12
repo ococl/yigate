@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -15,14 +16,18 @@ import (
 	"k5pw/proxy"
 )
 
+type runtimeState struct {
+	config    *Config
+	manager   *proxy.UpstreamManager
+	router    *proxy.Router
+	access    *proxy.AccessController
+	geoUpdate *proxy.GeoSiteUpdater
+}
+
 // Server 统一代理服务器，支持配置热加载
 type Server struct {
 	cfgPath     string
-	config      atomic.Value
-	mgr         atomic.Value
-	router      atomic.Value
-	access      *proxy.AccessController
-	geoUpdate   *proxy.GeoSiteUpdater
+	runtime     atomic.Pointer[runtimeState]
 	mgmt        *proxy.ManagementServer
 	mgmtAddr    string
 	stateMu     sync.RWMutex
@@ -31,7 +36,11 @@ type Server struct {
 	ln          net.Listener
 	quit        chan struct{}
 	stopOnce    sync.Once
+	shutdownErr error
 	activeConns sync.WaitGroup
+	activeMu    sync.Mutex
+	connections map[net.Conn]struct{}
+	stopping    bool
 	watcherMu   sync.Mutex
 	watcher     *fsnotify.Watcher
 	watcherWG   sync.WaitGroup
@@ -42,12 +51,10 @@ type Server struct {
 // NewServer 创建服务器，cfg 为初始配置
 func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 	s := &Server{
-		cfgPath: cfgPath,
-		quit:    make(chan struct{}),
-		mgmt:    proxy.NewManagementServer(nil, cfg.EnablePprof, cfg.ManagementAuthToken),
+		cfgPath:     cfgPath,
+		quit:        make(chan struct{}),
+		connections: make(map[net.Conn]struct{}),
 	}
-	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
-	s.mgmt.SetReload(s.reloadConfig)
 	if err := s.ApplyConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -84,26 +91,30 @@ func (s *Server) reloadConfig() error {
 	return s.LoadAndApply()
 }
 
+func (s *Server) currentRuntime() *runtimeState {
+	return s.runtime.Load()
+}
+
 // Config 返回当前生效的配置
 func (s *Server) Config() *Config {
-	if v := s.config.Load(); v != nil {
-		return v.(*Config)
+	if state := s.currentRuntime(); state != nil {
+		return state.config
 	}
 	return nil
 }
 
 // Manager 返回当前生效的上游管理器
 func (s *Server) Manager() *proxy.UpstreamManager {
-	if v := s.mgr.Load(); v != nil {
-		return v.(*proxy.UpstreamManager)
+	if state := s.currentRuntime(); state != nil {
+		return state.manager
 	}
 	return nil
 }
 
 // Router 返回当前生效的路由器
 func (s *Server) Router() *proxy.Router {
-	if v := s.router.Load(); v != nil {
-		return v.(*proxy.Router)
+	if state := s.currentRuntime(); state != nil {
+		return state.router
 	}
 	return nil
 }
@@ -133,7 +144,6 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
 	if initialLoad && cfg.Routing.GeoSite.AutoUpdate && cfg.Routing.GeoSite.Path != "" {
-		// 仅在 geosite 文件不存在时同步下载，避免每次启动/重载都阻塞。
 		if _, err := os.Stat(cfg.Routing.GeoSite.Path); os.IsNotExist(err) {
 			if err := updater.UpdateOnce(); err != nil {
 				proxy.Logger().Warnw("initial geosite update failed", "error", err)
@@ -144,106 +154,120 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	if err != nil {
 		return err
 	}
-
-	// 在替换全局引用前，先准备好日志和超时配置。
 	if err := proxy.InitLogger(cfg.Log); err != nil {
 		return err
 	}
-	s.maxConns.Store(int64(cfg.MaxConnections))
-	proxy.SetTimeouts(cfg.Timeouts)
 
-	// 记录旧组件，用于替换后优雅停止。
+	oldState := s.currentRuntime()
+	newState := &runtimeState{
+		config:    cfg,
+		manager:   mgr,
+		router:    router,
+		access:    access,
+		geoUpdate: updater,
+	}
+
 	s.stateMu.RLock()
-	oldAccess := s.access
-	oldUpdater := s.geoUpdate
+	oldMgmt := s.mgmt
+	oldMgmtAddr := s.mgmtAddr
 	s.stateMu.RUnlock()
-	oldMgr := s.Manager()
-	oldRouter := s.Router()
+	mgmtChanged := oldMgmt == nil || oldMgmtAddr != cfg.Management || oldMgmt.PprofEnabled() != cfg.EnablePprof || oldMgmt.AuthToken() != cfg.ManagementAuthToken
+	newMgmt := oldMgmt
+	if mgmtChanged {
+		newMgmt = s.newManagementServer(cfg)
+		if cfg.Management != "" {
+			mgmtLn, err := net.Listen("tcp", cfg.Management)
+			if err != nil {
+				return fmt.Errorf("prepare management listener on %s: %w", cfg.Management, err)
+			}
+			if err := newMgmt.StartListener(mgmtLn); err != nil {
+				_ = mgmtLn.Close()
+				return fmt.Errorf("start management server on %s: %w", cfg.Management, err)
+			}
+		}
+	}
 
-	// 原子替换：新连接立刻看到完整的新运行时上下文。
-	s.stateMu.Lock()
-	s.config.Store(cfg)
-	s.mgr.Store(mgr)
-	s.router.Store(router)
-	s.access = access
-	s.geoUpdate = updater
-	s.stateMu.Unlock()
+	var newLn net.Listener
+	s.lnMu.Lock()
+	currentLn := s.ln
+	s.lnMu.Unlock()
+	if !initialLoad && oldState != nil && oldState.config.Listen != cfg.Listen && currentLn != nil {
+		newLn, err = net.Listen("tcp", cfg.Listen)
+		if err != nil {
+			if mgmtChanged && newMgmt != nil {
+				newMgmt.Stop()
+			}
+			return fmt.Errorf("prepare proxy listener on %s: %w", cfg.Listen, err)
+		}
+	}
 
-	// 启动新组件的健康检查与 geosite 自动更新。
+	proxy.SetTimeouts(cfg.Timeouts)
+	s.runtime.Store(newState)
+	s.maxConns.Store(int64(cfg.MaxConnections))
+
+	if newLn != nil {
+		s.lnMu.Lock()
+		currentLn = s.ln
+		s.ln = newLn
+		s.lnMu.Unlock()
+	}
+	if mgmtChanged {
+		s.stateMu.Lock()
+		s.mgmt = newMgmt
+		s.mgmtAddr = cfg.Management
+		s.stateMu.Unlock()
+	}
+
 	mgr.StartHealthCheck(cfg.CheckInterval)
+	access.StartCleanup(5*time.Minute, 10*time.Minute)
 	updater.Start(func() {
-		cfg, err := LoadConfig(s.cfgPath)
+		loaded, err := LoadConfig(s.cfgPath)
 		if err != nil {
 			proxy.Logger().Warnw("load config after geosite update failed", "error", err)
 			return
 		}
-		if err := s.applyConfig(cfg, false); err != nil {
+		if err := s.applyConfig(loaded, false); err != nil {
 			proxy.Logger().Warnw("reload config after geosite update failed", "error", err)
 		}
 	})
 
-	// 停止旧组件，避免旧 manager 的健康检查继续占用资源。
-	if oldAccess != nil {
-		oldAccess.StopCleanup()
+	if newLn != nil && currentLn != nil {
+		_ = currentLn.Close()
 	}
-	if oldUpdater != nil {
-		oldUpdater.Stop()
-	}
-	if oldMgr != nil {
-		oldMgr.StopHealthCheck()
-	}
-	_ = oldRouter // 旧 router 无背景任务，直接由 GC 回收即可。
-
-	s.stateMu.Lock()
-	if s.mgmtAddr != cfg.Management || s.mgmt.PprofEnabled() != cfg.EnablePprof || s.mgmt.AuthToken() != cfg.ManagementAuthToken {
-		if s.mgmtAddr != "" {
-			s.mgmt.Stop()
+	if oldState != nil {
+		if oldState.access != nil {
+			oldState.access.StopCleanup()
 		}
-		// 重新创建管理服务器以切换 pprof 路由
-		s.mgmt = proxy.NewManagementServer(func() proxy.HealthStatus {
-			curCfg := s.Config()
-			if curCfg == nil {
-				return proxy.HealthStatus{Status: "up"}
-			}
-			return proxy.HealthStatus{
-				Status:        "up",
-				Listen:        curCfg.Listen,
-				UpstreamCount: len(curCfg.Upstreams),
-				ManagerReady:  s.Manager() != nil,
-				RouterReady:   s.Router() != nil,
-			}
-		}, cfg.EnablePprof, cfg.ManagementAuthToken)
-		if cfg.Management != "" {
-			if err := s.mgmt.Start(cfg.Management); err != nil {
-				s.stateMu.Unlock()
-				return fmt.Errorf("start management server on %s: %w", cfg.Management, err)
-			}
+		if oldState.geoUpdate != nil {
+			oldState.geoUpdate.Stop()
 		}
-		s.mgmtAddr = cfg.Management
-	} else {
-		s.mgmt.SetStatusGetter(func() proxy.HealthStatus {
-			curCfg := s.Config()
-			if curCfg == nil {
-				return proxy.HealthStatus{Status: "up"}
-			}
-			return proxy.HealthStatus{
-				Status:        "up",
-				Listen:        curCfg.Listen,
-				UpstreamCount: len(curCfg.Upstreams),
-				ManagerReady:  s.Manager() != nil,
-				RouterReady:   s.Router() != nil,
-			}
-		})
+		if oldState.manager != nil {
+			oldState.manager.StopHealthCheck()
+		}
 	}
-	s.mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
-	s.mgmt.SetReload(s.reloadConfig)
-	s.stateMu.Unlock()
-
-	// 启动访问控制器的周期清理，防止 rateLimiters 内存无限增长。
-	if s.access != nil {
-		s.access.StartCleanup(5*time.Minute, 10*time.Minute)
+	if mgmtChanged && oldMgmt != nil {
+		oldMgmt.Stop()
 	}
 	return nil
+}
+
+func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
+	mgmt := proxy.NewManagementServer(func() proxy.HealthStatus {
+		curCfg := s.Config()
+		if curCfg == nil {
+			return proxy.HealthStatus{Status: "up"}
+		}
+		return proxy.HealthStatus{
+			Status:        "up",
+			Listen:        curCfg.Listen,
+			UpstreamCount: len(curCfg.Upstreams),
+			ManagerReady:  s.Manager() != nil,
+			RouterReady:   s.Router() != nil,
+		}
+	}, cfg.EnablePprof, cfg.ManagementAuthToken)
+	mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
+	mgmt.SetReload(s.reloadConfig)
+	return mgmt
 }
 
 // LoadAndApply 从磁盘重新加载并应用配置
@@ -252,35 +276,7 @@ func (s *Server) LoadAndApply() error {
 	if err != nil {
 		return err
 	}
-
-	var newLn net.Listener
-	old := s.Config()
-	if old != nil && old.Listen != cfg.Listen {
-		proxy.Logger().Infow("config listen changed, preparing listener", "old", old.Listen, "new", cfg.Listen)
-		newLn, err = net.Listen("tcp", cfg.Listen)
-		if err != nil {
-			return fmt.Errorf("switch listener to %s: %w", cfg.Listen, err)
-		}
-	}
-
-	if err := s.applyConfig(cfg, false); err != nil {
-		if newLn != nil {
-			_ = newLn.Close()
-		}
-		return err
-	}
-	if newLn == nil {
-		return nil
-	}
-
-	s.lnMu.Lock()
-	oldLn := s.ln
-	s.ln = newLn
-	s.lnMu.Unlock()
-	if oldLn != nil {
-		_ = oldLn.Close()
-	}
-	return nil
+	return s.applyConfig(cfg, false)
 }
 
 // Start 启动监听并处理连接
@@ -345,10 +341,8 @@ func (s *Server) Start() error {
 		if !s.acquireConnSlot(conn) {
 			continue
 		}
-		s.activeConns.Add(1)
 		go func() {
-			defer s.activeConns.Done()
-			defer s.releaseConnSlot()
+			defer s.releaseConnSlot(conn)
 			s.handle(conn)
 		}()
 	}
@@ -356,17 +350,24 @@ func (s *Server) Start() error {
 
 func (s *Server) acquireConnSlot(conn net.Conn) bool {
 	max := s.maxConns.Load()
-	if max <= 0 {
-		return true
-	}
 	for {
 		cur := s.connCount.Load()
-		if cur >= max {
+		if max > 0 && cur >= max {
 			proxy.Logger().Warnw("connection limit reached, closing connection", "remote", conn.RemoteAddr(), "active", cur, "max", max)
 			conn.Close()
 			return false
 		}
 		if s.connCount.CompareAndSwap(cur, cur+1) {
+			s.activeMu.Lock()
+			if s.stopping {
+				s.activeMu.Unlock()
+				s.connCount.Add(-1)
+				_ = conn.Close()
+				return false
+			}
+			s.connections[conn] = struct{}{}
+			s.activeConns.Add(1)
+			s.activeMu.Unlock()
 			proxy.MetricSet("k5pw_connections_active", float64(cur+1))
 			proxy.MetricInc("k5pw_connections_total")
 			return true
@@ -374,11 +375,13 @@ func (s *Server) acquireConnSlot(conn net.Conn) bool {
 	}
 }
 
-func (s *Server) releaseConnSlot() {
-	max := s.maxConns.Load()
-	if max <= 0 {
-		return
+func (s *Server) releaseConnSlot(conn net.Conn) {
+	s.activeMu.Lock()
+	if _, exists := s.connections[conn]; exists {
+		delete(s.connections, conn)
+		s.activeConns.Done()
 	}
+	s.activeMu.Unlock()
 	for {
 		cur := s.connCount.Load()
 		if cur <= 0 {
@@ -392,44 +395,77 @@ func (s *Server) releaseConnSlot() {
 	}
 }
 
-// Stop 优雅停止服务器
+// Stop 使用默认期限优雅停止服务器。
 func (s *Server) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = s.Shutdown(ctx)
+}
+
+// Shutdown 在期限内等待活动连接结束，超时后主动关闭剩余连接。
+func (s *Server) Shutdown(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		close(s.quit)
+		s.activeMu.Lock()
+		s.stopping = true
+		s.activeMu.Unlock()
 		s.lnMu.Lock()
 		if s.ln != nil {
-			s.ln.Close()
+			_ = s.ln.Close()
+			s.ln = nil
 		}
 		s.lnMu.Unlock()
 		s.watcherMu.Lock()
 		if s.watcher != nil {
-			s.watcher.Close()
+			_ = s.watcher.Close()
 			s.watcher = nil
 		}
 		s.watcherMu.Unlock()
 		s.watcherWG.Wait()
 
 		s.applyMu.Lock()
+		state := s.currentRuntime()
 		s.stateMu.RLock()
-		access := s.access
-		updater := s.geoUpdate
 		mgmt := s.mgmt
 		s.stateMu.RUnlock()
-		if access != nil {
-			access.StopCleanup()
-		}
-		if updater != nil {
-			updater.Stop()
-		}
-		if mgr := s.Manager(); mgr != nil {
-			mgr.StopHealthCheck()
+		if state != nil {
+			if state.access != nil {
+				state.access.StopCleanup()
+			}
+			if state.geoUpdate != nil {
+				state.geoUpdate.Stop()
+			}
+			if state.manager != nil {
+				state.manager.StopHealthCheck()
+			}
 		}
 		if mgmt != nil {
 			mgmt.Stop()
 		}
 		s.applyMu.Unlock()
-		s.activeConns.Wait()
+
+		done := make(chan struct{})
+		go func() {
+			s.activeConns.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			s.activeMu.Lock()
+			connections := make([]net.Conn, 0, len(s.connections))
+			for conn := range s.connections {
+				connections = append(connections, conn)
+			}
+			s.activeMu.Unlock()
+			for _, conn := range connections {
+				_ = conn.Close()
+			}
+			<-done
+			s.shutdownErr = ctx.Err()
+		}
 	})
+	return s.shutdownErr
 }
 
 func (s *Server) watchConfig() error {
@@ -507,16 +543,15 @@ func (s *Server) watchLoop(w *fsnotify.Watcher) {
 
 func (s *Server) handle(conn net.Conn) {
 	// 连接关闭由 public handler 负责，避免重复关闭。
-	cfg := s.Config()
-	mgr := s.Manager()
-	router := s.Router()
-	s.stateMu.RLock()
-	access := s.access
-	s.stateMu.RUnlock()
-	if cfg == nil || mgr == nil || router == nil {
+	state := s.currentRuntime()
+	if state == nil || state.config == nil || state.manager == nil || state.router == nil {
 		conn.Close()
 		return
 	}
+	cfg := state.config
+	mgr := state.manager
+	router := state.router
+	access := state.access
 
 	if access != nil {
 		if !access.IsAllowedIP(conn.RemoteAddr()) {

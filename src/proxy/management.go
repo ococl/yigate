@@ -178,14 +178,27 @@ func (m *ManagementServer) Start(addr string) error {
 	if addr == "" {
 		return nil
 	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	if err := m.StartListener(ln); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	return nil
+}
+
+// StartListener 使用已经绑定的监听器启动管理接口。
+// 启动成功后监听器所有权转移给 ManagementServer。
+func (m *ManagementServer) StartListener(ln net.Listener) error {
+	if ln == nil {
+		return errors.New("management listener is nil")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.ln != nil {
 		return errors.New("management server already started")
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
 	}
 	m.ln = ln
 	go func() {
@@ -193,7 +206,7 @@ func (m *ManagementServer) Start(addr string) error {
 			Logger().Warnw("management server error", "error", err)
 		}
 	}()
-	Logger().Infow("management server started", "address", addr, "pprof", m.enablePprof)
+	Logger().Infow("management server started", "address", ln.Addr().String(), "pprof", m.enablePprof)
 	return nil
 }
 
