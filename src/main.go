@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/kardianos/service"
 	"k5pw/proxy"
 )
 
@@ -29,7 +30,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  uninstall uninstall system service\n")
 		fmt.Fprintf(os.Stderr, "  start     start installed service\n")
 		fmt.Fprintf(os.Stderr, "  stop      stop installed service\n")
-		fmt.Fprintf(os.Stderr, "  restart   restart installed service\n\n")
+		fmt.Fprintf(os.Stderr, "  restart   restart installed service\n")
+		fmt.Fprintf(os.Stderr, "  status    show installed service status\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -55,7 +57,7 @@ func main() {
 		runForeground(cfgPath)
 	case "service":
 		runService(cfgPath)
-	case "install", "uninstall", "start", "stop", "restart":
+	case "install", "uninstall", "start", "stop", "restart", "status":
 		controlService(cfgPath, cmd)
 	default:
 		flag.Usage()
@@ -104,6 +106,15 @@ func runService(cfgPath string) {
 
 func controlService(cfgPath, action string) {
 	s := newService(cfgPath)
+	if action == "status" {
+		st, err := s.Status()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "query service status: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(serviceStatusString(st))
+		return
+	}
 	var err error
 	switch action {
 	case "install":
@@ -122,4 +133,17 @@ func controlService(cfgPath, action string) {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "service %s succeeded\n", action)
+}
+
+func serviceStatusString(st service.Status) string {
+	switch st {
+	case service.StatusRunning:
+		return "k5pw service: running"
+	case service.StatusStopped:
+		return "k5pw service: stopped"
+	case service.StatusUnknown:
+		return "k5pw service: unknown (not installed or status unavailable)"
+	default:
+		return fmt.Sprintf("k5pw service: status=%d", int(st))
+	}
 }

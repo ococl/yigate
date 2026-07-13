@@ -1,6 +1,8 @@
 package main
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/kardianos/service"
@@ -29,6 +31,63 @@ func TestProgramStartInvalidConfig(t *testing.T) {
 	p := &program{cfgPath: "/nonexistent/config.yml"}
 	if err := p.Start(&mockService{}); err == nil {
 		t.Fatal("expected error for invalid config")
+	}
+}
+
+func TestPlatformServiceOptions(t *testing.T) {
+	opts := platformServiceOptions()
+	if opts == nil {
+		t.Fatal("expected non-nil platform options")
+	}
+	// 各平台至少应注入一个恢复/重启相关选项，保证崩溃后可自动恢复。
+	switch runtime.GOOS {
+	case "windows":
+		if _, ok := opts["OnFailure"]; !ok {
+			t.Error("windows option missing OnFailure")
+		}
+	case "darwin":
+		if _, ok := opts["KeepAlive"]; !ok {
+			t.Error("darwin option missing KeepAlive")
+		}
+	default:
+		if opts["Restart"] != "always" {
+			t.Errorf("linux/default Restart = %v, want always", opts["Restart"])
+		}
+		if opts["SuccessExitStatus"] != "1 2 8 SIGKILL" {
+			t.Errorf("linux/default SuccessExitStatus = %v, want '1 2 8 SIGKILL'", opts["SuccessExitStatus"])
+		}
+		// RestartSec / StartLimitBurst 在自定义 systemd 模板中写死，
+		// 需校验模板字符串而非 Option 键。
+		tmpl, ok := opts["SystemdScript"].(string)
+		if !ok || tmpl == "" {
+			t.Fatal("linux/default missing SystemdScript template")
+		}
+		if !strings.Contains(tmpl, "RestartSec=10") {
+			t.Error("SystemdScript template missing RestartSec=10")
+		}
+		if !strings.Contains(tmpl, "StartLimitBurst=64") {
+			t.Error("SystemdScript template missing StartLimitBurst=64")
+		}
+		if !strings.Contains(tmpl, "{{.Restart}}") || !strings.Contains(tmpl, "{{.SuccessExitStatus}}") {
+			t.Error("SystemdScript template should keep dynamic Restart/SuccessExitStatus")
+		}
+	}
+}
+
+func TestServiceStatusString(t *testing.T) {
+	cases := map[service.Status]string{
+		service.StatusRunning:               "k5pw service: running",
+		service.StatusStopped:               "k5pw service: stopped",
+		service.StatusUnknown:               "k5pw service: unknown (not installed or status unavailable)",
+	}
+	for st, want := range cases {
+		if got := serviceStatusString(st); got != want {
+			t.Errorf("serviceStatusString(%v) = %q, want %q", st, got, want)
+		}
+	}
+	// 其余未定义状态走 default 分支，返回含 status= 文本。
+	if got := serviceStatusString(service.Status(99)); got == "" {
+		t.Error("expected non-empty string for unknown status code")
 	}
 }
 
