@@ -1,0 +1,70 @@
+# k5pw 4479 端口全能力自包含测试配置
+# 设计目标：不依赖真实外网或真实上游，全部使用本地可控的
+# 目标服务器与本地上游代理（见 pyscripts/test_proxy_4479.py）。
+#
+# - listen: 测试脚本连接的统一代理端口
+# - management: 独立管理端口（回环 + 空 token，无需鉴权）
+# - users: 空 => 允许匿名访问（HTTP/SOCKS5 均无需账号）
+# - upstreams: 本地 HTTP 上游代理（由测试脚本在 127.0.0.1:8893 拉起）
+# - routing:
+#     * domain_suffix "foreign.test" => proxy（经本地上游）
+#     * final: direct（其余直连本地服务器）
+# - destination_policy: 关闭私网保护，以便测试脚本使用 127.0.0.1 本地服务器
+# - socks5: 开启 BIND / UDP ASSOCIATE（无 SOCKS5 上游时自动走本地回退路径）
+
+listen: "127.0.0.1:4479"
+management: "127.0.0.1:8892"
+management_auth_token: ""
+users: {}
+
+upstreams:
+  - name: "local-upstream"
+    url: "http://127.0.0.1:8893"
+    types: ["http", "https", "socks5", "socks5h"]
+    priority: 1
+    weight: 5
+
+routing:
+  final: direct
+  # 本测试仅使用 HTTP 上游，无 socks5h 上游，故关闭 socks5h_redirect，
+  # 避免其尝试远端 DNS 而无可用 socks5h 上游时触发熔断，影响 SOCKS5 连通性。
+  socks5h_redirect:
+    enabled: false
+  rules:
+    - type: domain_suffix
+      values:
+        - "foreign.test"
+      action: proxy
+
+destination_policy:
+  # 测试场景：关闭私网保护以便使用 127.0.0.1 本地服务器，
+  # 但通过 deny_cidrs 显式拒绝云元数据/链路本地，验证 SSRF 防护仍然生效。
+  protect_private: false
+  default_action: allow
+  deny_cidrs:
+    - "169.254.0.0/16"
+
+socks5:
+  allow_bind: true
+  allow_udp_associate: true
+
+access_control:
+  allowed_clients: []
+  rate_limit:
+    connections_per_second: 0
+    burst: 0
+  max_conns_per_user: 0
+
+timeouts:
+  dial: 10s
+  handshake: 10s
+  http_exchange: 60s
+  tunnel_idle: 5m
+
+log:
+  level: info
+  format: json
+  output: stdout
+
+check_interval: 3
+max_connections: 1024

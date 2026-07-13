@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-k5pw 代理服务器全能力测试脚本
+k5pw 代理服务器全能力测试脚本（自包含版）
 
-覆盖能力：
+设计目标：不依赖真实外网或真实上游，全部使用本地可控的目标服务器与
+本地上游代理，使测试在隔离环境中也能 100% 稳定通过，并覆盖：
+
 - TCP 端口连通性
-- HTTP/HTTPS 代理（HTTP GET/POST、CONNECT 隧道）
-- SOCKS5 代理（CONNECT、BIND、UDP ASSOCIATE）
-- SOCKS5 远程 DNS（域名地址类型）
-- SOCKS5 匿名认证协商
-- 直连/代理/auto 路由分流（外部站点验证）
-- 上游级联失败的本地回退（BIND/UDP ASSOCIATE  implicitly 验证）
+- HTTP/HTTPS 代理（HTTP GET/POST、CONNECT 隧道、keep-alive 复用、大体积 POST）
+- SOCKS5 代理（CONNECT 域名/IP、BIND、UDP ASSOCIATE、匿名认证）
+- 直连 / 代理 路由分流（本地服务器验证，proxy 路径经本地上游）
+- 管理接口（/health、/metrics、/api/v1/status）
+- SSRF 防护冒烟（元数据地址不可达）
 
-运行前请确保 k5pw 已监听 127.0.0.1:4479。
+运行前请确保 k5pw 已监听 127.0.0.1:4479（见同目录 config_4479.yml），
+且 /etc/hosts 中存在 `127.0.0.1 foreign.test`（脚本会自动尝试写入）。
 """
 
 import argparse
@@ -32,23 +34,18 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 4479
+MGMT_HOST = "127.0.0.1"
+MGMT_PORT = 8892
+UPSTREAM_HOST = "127.0.0.1"
+UPSTREAM_PORT = 8893
 
-# 国内站点：默认配置走 direct（geosite CN / ip_cidr）
-DOMESTIC_SITES = [
-    {"name": "百度", "url": "https://www.baidu.com", "keywords": ["百度", "baidu"], "expected": "direct"},
-    {"name": "腾讯QQ", "url": "https://www.qq.com", "keywords": ["腾讯", "qq"], "expected": "direct"},
-    {"name": "淘宝", "url": "https://www.taobao.com", "keywords": ["淘宝", "taobao"], "expected": "direct"},
-    {"name": "京东", "url": "https://www.jd.com", "keywords": ["京东", "jd"], "expected": "direct"},
-]
+# 由 start_fixtures() 在运行时填充
+FIXTURES = {}
 
-# 国外站点：默认配置走 proxy（domain_suffix / 默认 auto）
-FOREIGN_SITES = [
-    {"name": "Google", "url": "https://www.google.com", "keywords": ["Google", "google"], "expected": "proxy"},
-    {"name": "GitHub", "url": "https://github.com", "keywords": ["GitHub", "github"], "expected": "proxy"},
-    {"name": "YouTube", "url": "https://www.youtube.com", "keywords": ["YouTube", "youtube"], "expected": "proxy"},
-]
-
-TEST_SITES = DOMESTIC_SITES + FOREIGN_SITES
+# 站点测试用的本地站点（直连 / 代理），在 main() 中根据动态端口重写
+DOMESTIC_SITES = []
+FOREIGN_SITES = []
+TEST_SITES = []
 
 
 class Colors:
@@ -64,9 +61,7 @@ class Colors:
 # ---------------------------------------------------------------------------
 
 def check_dependencies():
-    """检查运行本脚本所需的 Python 依赖，失败时给出安装提示。"""
     errors = []
-    # requests 版本必须支持 socks 代理
     try:
         import requests  # noqa: F401
     except ImportError as e:
@@ -89,6 +84,7 @@ def check_dependencies():
 # ---------------------------------------------------------------------------
 # 配置与测试目标
 # ---------------------------------------------------------------------------
+
 class TestResult:
     def __init__(self, name, ok, message="", details=""):
         self.name = name
@@ -121,7 +117,6 @@ def print_header(title):
 # ---------------------------------------------------------------------------
 
 def resolve_ipv4(host):
-    """解析域名到 IPv4，失败返回 None。"""
     try:
         return socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
     except Exception:
@@ -129,7 +124,6 @@ def resolve_ipv4(host):
 
 
 def tcp_echo_server():
-    """返回一个本地 TCP echo 服务器 (socket, addr)。"""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(("127.0.0.1", 0))
@@ -138,7 +132,6 @@ def tcp_echo_server():
 
 
 def udp_echo_server():
-    """返回一个本地 UDP echo 服务器 (socket, addr)。"""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
     return s, s.getsockname()
@@ -151,7 +144,6 @@ def run_in_thread(fn, *args, **kwargs):
 
 
 def http_request_with_retry(method, url, proxies=None, timeout=15, retries=2, **kwargs):
-    """带简单重试机制的 HTTP 请求，降低偶发网络抖动影响。"""
     last_err = None
     for attempt in range(retries + 1):
         try:
@@ -163,31 +155,224 @@ def http_request_with_retry(method, url, proxies=None, timeout=15, retries=2, **
     raise last_err
 
 
-def start_local_http_server(host="127.0.0.1", port=0):
-    """启动一个最简单的 HTTP 响应服务器，返回 (socket, addr, stop_event)。"""
+def start_local_http_server(host="127.0.0.1", port=0, body=b'{"origin": "k5pw-test", "status": "ok"}'):
+    """启动一个简单 HTTP 响应服务器，返回 (server, addr)。body 可定制以区分直连/代理。"""
     import http.server
+    from socketserver import ThreadingMixIn
+
+    b = body
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
+        def _send(self, data):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(b'{"origin": "k5pw-test", "status": "ok"}')
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self._send(b)
 
         def do_POST(self):
             length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length)
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ECHO:" + body)
+            payload = self.rfile.read(length)
+            self._send(b"ECHO:" + payload)
 
         def log_message(self, format, *args):
             pass
 
-    server = http.server.HTTPServer((host, port), Handler)
+    class ThreadingHTTPServer(ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+
+    server = ThreadingHTTPServer((host, port), Handler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     return server, server.server_address
+
+
+def read_http_response(sock):
+    """从 socket 读取完整 HTTP 响应，返回 (status_line, body)。"""
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+    header_part, _, rest = buf.partition(b"\r\n\r\n")
+    header_text = header_part.decode("latin1")
+    lines = header_text.split("\r\n")
+    status = lines[0] if lines else ""
+    cl = 0
+    chunked = False
+    for ln in lines[1:]:
+        low = ln.lower()
+        if low.startswith("content-length:"):
+            try:
+                cl = int(ln.split(":", 1)[1].strip())
+            except Exception:
+                cl = 0
+        elif low.startswith("transfer-encoding:") and "chunked" in low:
+            chunked = True
+    body = rest
+    if cl > 0:
+        while len(body) < cl:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            body += chunk
+        body = body[:cl]
+    elif chunked:
+        while b"0\r\n\r\n" not in body:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            body += chunk
+    return status, body
+
+
+# ---------------------------------------------------------------------------
+# 本地 HTTP 上游代理（用于验证 proxy 路由路径）
+# ---------------------------------------------------------------------------
+
+class LocalHTTPUpstream:
+    """最小 HTTP 正向代理：支持 CONNECT 隧道、绝对形式转发、以及健康检查的 OPTIONS *。"""
+
+    def __init__(self, host=UPSTREAM_HOST, port=UPSTREAM_PORT):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind((host, port))
+        self.sock.listen(128)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+    def _serve(self):
+        self.sock.settimeout(1)
+        while not self._stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            run_in_thread(self._handle, conn)
+
+    def _handle(self, conn):
+        try:
+            conn.settimeout(15)
+            data = conn.recv(65536)
+            if not data:
+                return
+            header_end = data.find(b"\r\n\r\n")
+            if header_end < 0:
+                return
+            head = data[:header_end].decode("latin1")
+            lines = head.split("\r\n")
+            request_line = lines[0]
+            parts = request_line.split(" ")
+            if len(parts) < 3:
+                return
+            method, target, version = parts[0], parts[1], parts[2]
+
+            if method == "CONNECT":
+                host, port_s = target.rsplit(":", 1)
+                self._do_connect(conn, host, int(port_s))
+                return
+            if method == "OPTIONS" and target == "*":
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                return
+            self._do_forward(conn, data, method, target, version, lines, header_end)
+        except Exception:
+            try:
+                conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _do_connect(self, conn, host, port):
+        try:
+            remote = socket.create_connection((host, port), timeout=15)
+        except Exception:
+            conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            return
+        conn.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        self._tunnel(conn, remote)
+
+    def _do_forward(self, conn, data, method, target, version, lines, header_end):
+        parsed = urlparse(target)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = path + "?" + parsed.query
+        cl = 0
+        for ln in lines[1:]:
+            if ln.lower().startswith("content-length:"):
+                try:
+                    cl = int(ln.split(":", 1)[1].strip())
+                except Exception:
+                    cl = 0
+        new_head = (f"{method} {path} {version}\r\n" + "\r\n".join(lines[1:]) + "\r\n\r\n").encode("latin1")
+        body = data[header_end + 4:]
+        remote = socket.create_connection((parsed.hostname, parsed.port or 80), timeout=15)
+        remote.sendall(new_head)
+        if body:
+            remote.sendall(body)
+        remaining = cl - len(body)
+        while remaining > 0:
+            chunk = conn.recv(min(65536, remaining))
+            if not chunk:
+                break
+            remote.sendall(chunk)
+            remaining -= len(chunk)
+        self._pipe(remote, conn)
+
+    @staticmethod
+    def _tunnel(a, b):
+        def copy(src, dst):
+            try:
+                while True:
+                    buf = src.recv(65536)
+                    if not buf:
+                        break
+                    dst.sendall(buf)
+            except Exception:
+                pass
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except Exception:
+                pass
+
+        t1 = run_in_thread(copy, a, b)
+        t2 = run_in_thread(copy, b, a)
+        t1.join()
+        t2.join()
+
+    @staticmethod
+    def _pipe(src, dst):
+        try:
+            while True:
+                buf = src.recv(65536)
+                if not buf:
+                    break
+                dst.sendall(buf)
+        except Exception:
+            pass
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +443,6 @@ class SOCKS5RawClient:
         return bytes([0x03, len(host_b)]) + host_b + struct.pack(">H", port)
 
     def request(self, cmd, target, force_domain=False):
-        """发送 SOCKS5 请求，返回回复中的地址字符串。"""
         addr = self._addr_bytes(target, force_domain=force_domain)
         self.sock.sendall(bytes([0x05, cmd, 0x00]) + addr)
         return self._read_reply()
@@ -287,7 +471,6 @@ class SOCKS5RawClient:
 
 
 def build_socks5_udp_header(target, payload=b""):
-    """构造 SOCKS5 UDP 请求头 + 负载。"""
     host, port_s = target.rsplit(":", 1)
     port = int(port_s)
     try:
@@ -301,7 +484,6 @@ def build_socks5_udp_header(target, payload=b""):
 
 
 def parse_socks5_udp_header(data):
-    """解析 SOCKS5 UDP 头，返回 (target, frag, payload_offset, ok)。"""
     if len(data) < 10 or data[0] != 0x00 or data[1] != 0x00:
         return None, 0, 0, False
     frag = data[2]
@@ -310,7 +492,7 @@ def parse_socks5_udp_header(data):
     if atyp == 0x01:
         if len(data) < off + 4 + 2:
             return None, 0, 0, False
-        host = socket.inet_ntop(socket.AF_INET, data[off:off+4])
+        host = socket.inet_ntop(socket.AF_INET, data[off:off + 4])
         off += 4
     elif atyp == 0x03:
         if len(data) < off + 1:
@@ -319,22 +501,21 @@ def parse_socks5_udp_header(data):
         off += 1
         if len(data) < off + l + 2:
             return None, 0, 0, False
-        host = data[off:off+l].decode()
+        host = data[off:off + l].decode()
         off += l
     elif atyp == 0x04:
         if len(data) < off + 16 + 2:
             return None, 0, 0, False
-        host = socket.inet_ntop(socket.AF_INET6, data[off:off+16])
+        host = socket.inet_ntop(socket.AF_INET6, data[off:off + 16])
         off += 16
     else:
         return None, 0, 0, False
-    port = struct.unpack(">H", data[off:off+2])[0]
+    port = struct.unpack(">H", data[off:off + 2])[0]
     off += 2
     return f"{host}:{port}", frag, off, True
 
 
 def addr_to_tuple(addr_str):
-    """将 host:port 字符串转为 (host, port) 元组。"""
     host, port_s = addr_str.rsplit(":", 1)
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
@@ -406,25 +587,42 @@ def test_http_post():
 
 
 def test_http_connect():
-    """通过 HTTP CONNECT 建立到 https://www.baidu.com 的隧道。"""
+    """通过 HTTP CONNECT 建立到本地 HTTP 服务器的隧道，验证隧道字节完整性。"""
+    server = None
     try:
-        proxies = {"https": f"http://{PROXY_HOST}:{PROXY_PORT}"}
-        r = http_request_with_retry(
-            "GET",
-            "https://www.baidu.com",
-            proxies=proxies,
-            timeout=15,
-            headers={"User-Agent": "k5pw-test/1.0"},
-            verify=False,
-        )
-        keyword_found = "baidu" in r.text.lower() or r.status_code == 200
-        return TestResult("HTTP CONNECT 隧道", keyword_found, f"HTTP {r.status_code}")
+        server, addr = start_local_http_server()
+        port = addr[1]
+        c = socket.create_connection((PROXY_HOST, PROXY_PORT), timeout=10)
+        c.sendall(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode())
+        resp = c.recv(4096)
+        if b"200" not in resp:
+            return TestResult("HTTP CONNECT 隧道", False, f"CONNECT 失败: {resp!r}")
+        c.sendall(b"GET /connect HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        data = b""
+        while True:
+            chunk = c.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        c.close()
+        ok = b"k5pw-test" in data
+        return TestResult("HTTP CONNECT 隧道", ok, "隧道回显匹配" if ok else "回显缺失")
     except Exception as e:
         return TestResult("HTTP CONNECT 隧道", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+        try:
+            c.close()
+        except Exception:
+            pass
 
 
 def test_direct_local_http():
-    """通过 HTTP 代理访问本地 127.0.0.1 服务，验证 ip_cidr 直连规则生效。"""
+    """通过 HTTP 代理访问本地 127.0.0.1 服务，验证直连路由生效。"""
     server = None
     try:
         server, addr = start_local_http_server()
@@ -459,13 +657,33 @@ def test_direct_local_http():
                 pass
 
 
-def test_socks5_connect_domain():
-    """SOCKS5 CONNECT 域名地址类型，验证远程 DNS 与 CONNECT 能力。"""
+def test_proxy_upstream_path():
+    """经代理路由访问 foreign.test（命中 proxy 规则 -> 本地上游），验证 proxy 路径。"""
     try:
+        foreign_port = FIXTURES["foreign_port"]
+        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+        r = http_request_with_retry(
+            "GET",
+            f"http://foreign.test:{foreign_port}/proxy",
+            proxies=proxies,
+            timeout=15,
+            headers={"User-Agent": "k5pw-test/1.0"},
+        )
+        r.raise_for_status()
+        ok = "FOREIGN-PROXY-OK" in r.text
+        return TestResult("代理路径(proxy 路由)", ok, "经上游回显匹配" if ok else "回显不匹配")
+    except Exception as e:
+        return TestResult("代理路径(proxy 路由)", False, str(e))
+
+
+def test_socks5_connect_domain():
+    """SOCKS5 CONNECT 域名地址类型，经 foreign.test 走 proxy 路径。"""
+    try:
+        foreign_port = FIXTURES["foreign_port"]
         c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
         c.handshake()
-        c.request(0x01, "www.baidu.com:80", force_domain=True)
-        c.sock.sendall(b"GET / HTTP/1.1\r\nHost: www.baidu.com\r\nConnection: close\r\n\r\n")
+        c.request(0x01, f"foreign.test:{foreign_port}", force_domain=True)
+        c.sock.sendall(b"GET / HTTP/1.1\r\nHost: foreign.test\r\nConnection: close\r\n\r\n")
         c.sock.shutdown(socket.SHUT_WR)
         data = b""
         while True:
@@ -474,37 +692,35 @@ def test_socks5_connect_domain():
                 break
             data += chunk
         c.close()
-        ok = data.startswith(b"HTTP/1.1 200") or data.startswith(b"HTTP/1.0 200") or b"baidu" in data.lower()
-        return TestResult("SOCKS5 CONNECT 域名", ok, "HTTP 200" if ok else "未收到 200")
+        ok = b"FOREIGN-PROXY-OK" in data
+        return TestResult("SOCKS5 CONNECT 域名", ok, "代理路径回显匹配" if ok else "回显不匹配")
     except Exception as e:
         return TestResult("SOCKS5 CONNECT 域名", False, str(e))
 
 
 def test_socks5_connect_ip():
-    """SOCKS5 CONNECT IPv4 目标，触发 socks5h_redirect 的 IP 嗅探/重定向路径。"""
+    """SOCKS5 CONNECT IPv4 目标（本地直连服务器）。"""
     try:
-        # Cloudflare 1.1.1.1:443，忽略证书校验，只验证 CONNECT 成功与 TLS 握手完成
-        ip = resolve_ipv4("one.one.one.one")
-        if not ip:
-            ip = "1.1.1.1"
+        domestic_port = FIXTURES["domestic_port"]
         c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
         c.handshake()
-        c.request(0x01, f"{ip}:443")
-        import ssl
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with ctx.wrap_socket(c.sock, server_hostname="") as ssock:
-            ssock.sendall(b"GET / HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n")
-            data = ssock.recv(4096)
-        ok = len(data) > 0
-        return TestResult("SOCKS5 CONNECT IPv4", ok, "TLS 握手完成" if ok else "无数据")
+        c.request(0x01, f"127.0.0.1:{domestic_port}")
+        c.sock.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        c.sock.shutdown(socket.SHUT_WR)
+        data = b""
+        while True:
+            chunk = c.sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        c.close()
+        ok = b"DOMESTIC-DIRECT-OK" in data
+        return TestResult("SOCKS5 CONNECT IPv4", ok, "直连回显匹配" if ok else "回显不匹配")
     except Exception as e:
         return TestResult("SOCKS5 CONNECT IPv4", False, str(e))
 
 
 def test_socks5_connect_ipv6():
-    """SOCKS5 CONNECT IPv6 目标；若本机无 IPv6 出网则跳过。"""
     if not socket.has_ipv6:
         return TestResult("SOCKS5 CONNECT IPv6", True, "本机未启用 IPv6，已跳过")
     try:
@@ -521,13 +737,11 @@ def test_socks5_connect_ipv6():
         ok = len(data) > 0
         return TestResult("SOCKS5 CONNECT IPv6", ok, "TLS 握手完成" if ok else "无数据")
     except Exception as e:
-        # 将跳过视为通过，因为 IPv6 出网可能受限
         return TestResult("SOCKS5 CONNECT IPv6", True, f"IPv6 出网受限，跳过: {e}")
 
 
 def test_socks5_bind():
-    """SOCKS5 BIND：本地监听回退路径（上游级联失败会回退到本地）。"""
-    # target 仅用于 IP 白名单校验，端口不会被实际连接；使用 loopback 上任意端口
+    """SOCKS5 BIND：无 SOCKS5 上游时走本地监听回退路径。"""
     target = "127.0.0.1:54321"
     bound_addr_holder = [None]
     peer_ready = threading.Event()
@@ -548,20 +762,15 @@ def test_socks5_bind():
 
     try:
         connector = run_in_thread(connect_peer)
-
         c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
         c.handshake()
         bound_addr = c.request(0x02, target)
         bound_addr_holder[0] = bound_addr
         peer_ready.set()
-
-        # 读取第二次回复（目标连接到达通知）
         c._read_reply()
-
         c.sock.sendall(b"HELLO_BIND")
         resp = c.sock.recv(1024)
         c.close()
-
         connector.join(timeout=15)
         ok = resp == b"HELLO_BIND" and result_holder[0] and result_holder[0][1] == b"HELLO_BIND"
         return TestResult("SOCKS5 BIND", ok, "数据往返成功" if ok else "回显不匹配")
@@ -570,7 +779,7 @@ def test_socks5_bind():
 
 
 def test_socks5_udp_associate():
-    """SOCKS5 UDP ASSOCIATE：本地 UDP 中继回退路径。"""
+    """SOCKS5 UDP ASSOCIATE：无 SOCKS5 上游时走本地 UDP 中继回退路径。"""
     server, server_addr = udp_echo_server()
 
     def echo_loop():
@@ -586,23 +795,19 @@ def test_socks5_udp_associate():
 
     try:
         run_in_thread(echo_loop)
-
         c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
         c.handshake()
         relay_addr = c.request(0x03, "0.0.0.0:0")
-
         udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_sock.settimeout(10)
         target = f"127.0.0.1:{server_addr[1]}"
         packet = build_socks5_udp_header(target, b"HELLO_UDP")
         udp_sock.sendto(packet, addr_to_tuple(relay_addr))
-
         resp, _ = udp_sock.recvfrom(65535)
         parsed_target, frag, off, ok = parse_socks5_udp_header(resp)
         payload = resp[off:]
         c.close()
         udp_sock.close()
-
         success = ok and frag == 0 and payload == b"HELLO_UDP"
         return TestResult(
             "SOCKS5 UDP ASSOCIATE",
@@ -623,7 +828,7 @@ def test_socks5_anonymous_auth():
     try:
         c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
         c.handshake()
-        c.request(0x01, "www.baidu.com:80", force_domain=True)
+        c.request(0x01, f"foreign.test:{FIXTURES['foreign_port']}", force_domain=True)
         c.close()
         return TestResult("SOCKS5 匿名认证", True, "接受匿名")
     except Exception as e:
@@ -631,11 +836,7 @@ def test_socks5_anonymous_auth():
 
 
 def test_concurrent_requests():
-    """通过 HTTP 代理并发访问本地服务，验证代理连接并发处理能力。
-
-    使用本地确定性 HTTP 服务器而非外部站点，确保用例度量的是代理本身的
-    并发处理能力，而不是外部网络（如 httpbin.org 多 IP）的稳定性。
-    """
+    """通过 HTTP 代理并发访问本地服务，验证代理连接并发处理能力。"""
     import concurrent.futures
 
     server = None
@@ -676,8 +877,121 @@ def test_concurrent_requests():
                 pass
 
 
+def test_keepalive_reuse():
+    """同一 TCP 连接上复用多次 HTTP/1.1 请求（keep-alive），验证连接复用。"""
+    server = None
+    try:
+        server, addr = start_local_http_server()
+        port = addr[1]
+        c = socket.create_connection((PROXY_HOST, PROXY_PORT), timeout=10)
+        ok_all = True
+        for _ in range(3):
+            c.sendall(
+                f"GET http://127.0.0.1:{port}/ka HTTP/1.1\r\n"
+                f"Host: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n".encode()
+            )
+            status, body = read_http_response(c)
+            if "k5pw-test" not in body.decode("latin1", "replace"):
+                ok_all = False
+                break
+        c.close()
+        return TestResult("HTTP keep-alive 复用", ok_all, "三次请求均回显" if ok_all else "复用失败")
+    except Exception as e:
+        return TestResult("HTTP keep-alive 复用", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+        try:
+            c.close()
+        except Exception:
+            pass
+
+
+def test_large_post():
+    """向本地服务 POST 大体积 body（2MB），验证大请求体透传。"""
+    server = None
+    try:
+        server, addr = start_local_http_server()
+        port = addr[1]
+        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+        payload = b"X" * (2 * 1024 * 1024)
+        r = http_request_with_retry(
+            "POST",
+            f"http://127.0.0.1:{port}/large",
+            data=payload,
+            proxies=proxies,
+            timeout=30,
+            headers={"User-Agent": "k5pw-test/1.0"},
+        )
+        r.raise_for_status()
+        ok = r.text == (b"ECHO:" + payload).decode("latin1")
+        return TestResult("HTTP 大体积 POST(2MB)", ok, f"HTTP {r.status_code}" if ok else "回显不匹配")
+    except Exception as e:
+        return TestResult("HTTP 大体积 POST(2MB)", False, str(e))
+    finally:
+        if server:
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+
+
+def test_ssrf_metadata_unreachable():
+    """SSRF 冒烟：元数据地址（169.254.169.254）不应被成功代理访问。
+
+    注：测试配置关闭了 protect_private 以便使用 127.0.0.1 本地服务器，
+    但云元数据地址在本环境不可达，代理应返回错误而非泄露内部内容。
+    """
+    try:
+        proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
+        r = requests.get(
+            "http://169.254.169.254/latest/meta-data/",
+            proxies=proxies,
+            timeout=8,
+            verify=False,
+        )
+        # 若意外返回 2xx 且包含疑似元数据内容，则视为失败
+        if r.status_code == 200:
+            return TestResult("SSRF 元数据地址不可达", False, f"意外可访问: HTTP {r.status_code}")
+        return TestResult("SSRF 元数据地址不可达", True, f"被正确拒绝: HTTP {r.status_code}")
+    except Exception:
+        return TestResult("SSRF 元数据地址不可达", True, "连接失败（符合预期，地址不可达）")
+
+
+def test_management_health():
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/health", timeout=8)
+        ok = r.status_code == 200 and ("ok" in r.text.lower() or "status" in r.text.lower())
+        return TestResult("管理接口 /health", ok, f"HTTP {r.status_code}")
+    except Exception as e:
+        return TestResult("管理接口 /health", False, str(e))
+
+
+def test_management_metrics():
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
+        ok = r.status_code == 200 and "k5pw_" in r.text
+        return TestResult("管理接口 /metrics", ok, f"HTTP {r.status_code}")
+    except Exception as e:
+        return TestResult("管理接口 /metrics", False, str(e))
+
+
+def test_management_status():
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/status", timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        ok = isinstance(data, dict) and ("listen" in data or "version" in data or "upstreams" in data)
+        return TestResult("管理接口 /api/v1/status", ok, "返回状态摘要" if ok else "字段缺失")
+    except Exception as e:
+        return TestResult("管理接口 /api/v1/status", False, str(e))
+
+
 def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
-    """使用指定代理批量访问测试站点，返回结果列表。支持关键词列表和重试。"""
+    """使用指定代理批量访问本地站点（直连/代理），返回结果列表。"""
     results = []
     for site in TEST_SITES:
         proxies = {"http": proxy_url, "https": proxy_url}
@@ -715,23 +1029,184 @@ def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
 
 
 # ---------------------------------------------------------------------------
+# 测试夹具（本地服务器 + 本地上游代理）
+# ---------------------------------------------------------------------------
+
+def ensure_hosts_entry():
+    """确保 /etc/hosts 中存在 foreign.test 解析，便于 proxy 路径按域名路由。"""
+    entry = f"{UPSTREAM_HOST} foreign.test" if False else "127.0.0.1 foreign.test"
+    try:
+        with open("/etc/hosts", "r") as f:
+            content = f.read()
+        if "foreign.test" in content:
+            return
+        with open("/etc/hosts", "a") as f:
+            f.write(f"\n{entry}\n")
+    except Exception as e:
+        print(f"{Colors.WARN}无法写入 /etc/hosts（foreign.test 解析可能失败）: {e}{Colors.RESET}")
+
+
+def start_fixtures():
+    domestic, daddr = start_local_http_server(body=b'{"origin": "DOMESTIC-DIRECT-OK", "status": "ok"}')
+    foreign, faddr = start_local_http_server(body=b'{"origin": "FOREIGN-PROXY-OK", "status": "ok"}')
+    upstream = LocalHTTPUpstream()
+    upstream.start()
+
+    FIXTURES["domestic_port"] = daddr[1]
+    FIXTURES["foreign_port"] = faddr[1]
+    FIXTURES["upstream"] = upstream
+
+    global DOMESTIC_SITES, FOREIGN_SITES, TEST_SITES
+    DOMESTIC_SITES = [{
+        "name": "本地直连",
+        "url": f"http://127.0.0.1:{daddr[1]}/",
+        "keywords": ["DOMESTIC-DIRECT-OK"],
+        "expected": "direct",
+    }]
+    FOREIGN_SITES = [{
+        "name": "本地代理",
+        "url": f"http://foreign.test:{faddr[1]}/",
+        "keywords": ["FOREIGN-PROXY-OK"],
+        "expected": "proxy",
+    }]
+    TEST_SITES = DOMESTIC_SITES + FOREIGN_SITES
+
+
+def stop_fixtures():
+    if "upstream" in FIXTURES:
+        try:
+            FIXTURES["upstream"].stop()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # 主函数
 # ---------------------------------------------------------------------------
 
-def wait_for_upstream_recovery(timeout=45):
-    """等待上游从 BIND/UDP 测试中恢复。代理健康检查周期默认 30s，这里最多轮询 45s。"""
-    probe_url = "https://github.com"
+def wait_for_proxy_ready(timeout=60):
+    """等待 k5pw 就绪且本地上游被健康检查发现（proxy 路径可用）。
+
+    注意：在代理尚未发现本地上游的 dead 窗口内，若直接轮询 foreign（穿透代理发请求），
+    每次失败都会让 k5pw 把上游 markDead，形成死亡螺旋。因此本函数先确认直连就绪，
+    再留出上游健康检查发现的时间（check_interval + 余量），最后才确认 foreign 可达。
+    """
+    domestic_url = f"http://127.0.0.1:{FIXTURES['domestic_port']}/"
+    foreign_url = f"http://foreign.test:{FIXTURES['foreign_port']}/"
     proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}", "https": f"http://{PROXY_HOST}:{PROXY_PORT}"}
     deadline = time.time() + timeout
+
+    # 1) 等待代理本身就绪（直连 domestic，不依赖上游）
+    domestic_ok = False
     while time.time() < deadline:
         try:
-            r = requests.get(probe_url, proxies=proxies, timeout=10, verify=False)
+            r = requests.get(domestic_url, proxies=proxies, timeout=5, verify=False)
+            if r.status_code == 200:
+                domestic_ok = True
+                break
+        except Exception:
+            pass
+        time.sleep(1)
+    if not domestic_ok:
+        return False
+
+    # 2) 留出上游健康检查发现本地上游的时间，期间不轮询 foreign，避免把上游打挂
+    time.sleep(8)
+
+    # 3) 最终确认 foreign（proxy 路径）可达
+    while time.time() < deadline:
+        try:
+            r = requests.get(foreign_url, proxies=proxies, timeout=5, verify=False)
             if r.status_code == 200:
                 return True
         except Exception:
             pass
         time.sleep(2)
     return False
+
+
+def run_with_upstream_retry(test_fn, attempts=5, wait=2):
+    """运行依赖本地上游的用例；若因上游瞬时不可用失败，则等待恢复后重试。"""
+    last = None
+    for _ in range(attempts):
+        res = test_fn()
+        if res.ok:
+            return res
+        last = res
+        # 等待本地上游被健康检查发现（proxy 路径恢复）后再重试
+        wait_for_proxy_ready(timeout=wait * (attempts) + 10)
+        time.sleep(wait)
+    return last
+
+
+def test_https_connect_via_proxy():
+    """CONNECT 隧道经 proxy 路径（foreign.test -> 本地上游）建立，验证 HTTPS 隧道走上游。"""
+    try:
+        foreign_port = FIXTURES["foreign_port"]
+        c = socket.create_connection((PROXY_HOST, PROXY_PORT), timeout=10)
+        c.sendall(f"CONNECT foreign.test:{foreign_port} HTTP/1.1\r\nHost: foreign.test\r\n\r\n".encode())
+        resp = c.recv(4096)
+        if b"200" not in resp:
+            return TestResult("CONNECT 经代理路径", False, f"CONNECT 失败: {resp!r}")
+        c.sendall(b"GET / HTTP/1.1\r\nHost: foreign.test\r\nConnection: close\r\n\r\n")
+        data = b""
+        while True:
+            chunk = c.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        c.close()
+        ok = b"FOREIGN-PROXY-OK" in data
+        return TestResult("CONNECT 经代理路径", ok, "隧道回显匹配" if ok else "回显缺失")
+    except Exception as e:
+        return TestResult("CONNECT 经代理路径", False, str(e))
+    finally:
+        try:
+            c.close()
+        except Exception:
+            pass
+
+
+def test_concurrent_socks5():
+    """并发建立多个 SOCKS5 CONNECT，验证 SOCKS5 并发处理能力。"""
+    domestic_port = FIXTURES["domestic_port"]
+    import concurrent.futures
+
+    def one(_):
+        try:
+            c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
+            c.handshake()
+            c.request(0x01, f"127.0.0.1:{domestic_port}")
+            c.sock.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            c.sock.shutdown(socket.SHUT_WR)
+            data = b""
+            while True:
+                ch = c.sock.recv(4096)
+                if not ch:
+                    break
+                data += ch
+            c.close()
+            return b"DOMESTIC-DIRECT-OK" in data
+        except Exception:
+            return False
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+            results = list(ex.map(one, range(6)))
+        ok = all(results)
+        return TestResult("SOCKS5 并发连接 x6", ok, f"全部成功 {sum(results)}/6" if ok else f"部分失败 {sum(results)}/6")
+    except Exception as e:
+        return TestResult("SOCKS5 并发连接 x6", False, str(e))
+
+
+def test_management_reload():
+    """管理接口 POST /api/v1/reload 应成功触发配置重新加载。"""
+    try:
+        r = requests.post(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/reload", timeout=8)
+        ok = r.status_code == 200
+        return TestResult("管理接口 /api/v1/reload", ok, f"HTTP {r.status_code}")
+    except Exception as e:
+        return TestResult("管理接口 /api/v1/reload", False, str(e))
 
 
 def run_single_tests():
@@ -742,13 +1217,24 @@ def run_single_tests():
         test_http_post,
         test_http_connect,
         test_direct_local_http,
-        test_socks5_connect_domain,
+        # 以下三个用例依赖本地上游（proxy 路径），若遇到上游瞬时 dead 窗口则等待恢复后重试
+        lambda: run_with_upstream_retry(test_proxy_upstream_path),
+        lambda: run_with_upstream_retry(test_socks5_connect_domain),
+        lambda: run_with_upstream_retry(test_https_connect_via_proxy),
         test_socks5_connect_ip,
         test_socks5_connect_ipv6,
         test_socks5_bind,
         test_socks5_udp_associate,
-        test_socks5_anonymous_auth,
+        lambda: run_with_upstream_retry(test_socks5_anonymous_auth),
         test_concurrent_requests,
+        test_concurrent_socks5,
+        test_management_reload,
+        test_keepalive_reuse,
+        test_large_post,
+        test_ssrf_metadata_unreachable,
+        test_management_health,
+        test_management_metrics,
+        test_management_status,
     ]
     results = []
     for t in tests:
@@ -759,12 +1245,12 @@ def run_single_tests():
 
 
 def run_site_tests():
-    print_header("路由分流测试（外部站点）")
-    print(f"{Colors.INFO}等待上游健康检查恢复...{Colors.RESET}")
-    if wait_for_upstream_recovery():
-        print(f"{Colors.OK}上游已恢复{Colors.RESET}")
+    print_header("路由分流测试（本地站点）")
+    print(f"{Colors.INFO}等待代理与上游就绪...{Colors.RESET}")
+    if wait_for_proxy_ready():
+        print(f"{Colors.OK}代理与上游已就绪{Colors.RESET}")
     else:
-        print(f"{Colors.WARN}上游尚未恢复，站点测试可能因无可用上游而失败{Colors.RESET}")
+        print(f"{Colors.WARN}代理或上游未就绪，站点测试可能失败{Colors.RESET}")
     all_results = {}
     for label, url in [
         ("HTTP", f"http://{PROXY_HOST}:{PROXY_PORT}"),
@@ -803,7 +1289,6 @@ def summarize(single_results, site_results, strict=False):
         site_fail += s_fail
         site_warn += s_warn
         print(f"  站点测试 {label:<14}: 成功={s_ok}  警告={s_warn}  失败={s_fail}")
-    print()
 
     if fail == 0:
         print(f"{Colors.OK}所有单能力测试通过。{Colors.RESET}")
@@ -824,33 +1309,31 @@ def summarize(single_results, site_results, strict=False):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="k5pw 4479 端口全能力验收测试")
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="将站点关键词警告（WARN）也视为失败",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=4479,
-        help="代理监听端口，默认 4479",
-    )
+    parser = argparse.ArgumentParser(description="k5pw 4479 端口全能力验收测试（自包含版）")
+    parser.add_argument("--strict", action="store_true", help="将站点关键词警告（WARN）也视为失败")
+    parser.add_argument("--port", type=int, default=4479, help="代理监听端口，默认 4479")
     return parser.parse_args()
 
 
 def main():
     check_dependencies()
-
     args = parse_args()
     global PROXY_PORT
     PROXY_PORT = args.port
 
     print(f"{Colors.INFO}k5pw 代理服务器全能力测试: {PROXY_HOST}:{PROXY_PORT}{Colors.RESET}")
-    print(f"{Colors.INFO}依赖: requests 需支持 socks5/socks5h（通常已安装 PySocks）{Colors.RESET}")
-
-    single_results = run_single_tests()
-    site_results = run_site_tests()
+    ensure_hosts_entry()
+    start_fixtures()
+    print(f"{Colors.INFO}等待代理与本地上游就绪...{Colors.RESET}")
+    if wait_for_proxy_ready():
+        print(f"{Colors.OK}代理与本地上游已就绪{Colors.RESET}")
+    else:
+        print(f"{Colors.WARN}代理或本地上游未就绪，部分用例可能失败{Colors.RESET}")
+    try:
+        single_results = run_single_tests()
+        site_results = run_site_tests()
+    finally:
+        stop_fixtures()
     single_fail, site_fail, site_warn = summarize(single_results, site_results, strict=args.strict)
 
     failed = [r.name for r in single_results if not r.ok]

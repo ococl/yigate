@@ -1,4 +1,6 @@
 listen: "0.0.0.0:8891"
+# 管理端口（仅回环监听，依配置约定无需配置 management_auth_token）
+management: "127.0.0.1:8890"
 users: {}
 upstreams:
   - name: "default"
