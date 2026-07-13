@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -29,7 +30,7 @@ func startTestSOCKS5Server(t *testing.T, router *Router) (string, func()) {
 			}
 			go func(c net.Conn) {
 				br := bufio.NewReader(c)
-				HandleSOCKS5(c, br, nil, nil, router, nil)
+				HandleSOCKS5(c, br, nil, nil, router, nil, true, true)
 			}(conn)
 		}
 	}()
@@ -71,13 +72,50 @@ func startTestProxyWithUpstream(t *testing.T, upstreamAddr string) (string, func
 			}
 			go func(c net.Conn) {
 				br := bufio.NewReader(c)
-				HandleSOCKS5(c, br, nil, mgr, router, nil)
+				HandleSOCKS5(c, br, nil, mgr, router, nil, true, true)
 			}(conn)
 		}
 	}()
 	return ln.Addr().String(), func() {
 		close(quit)
 		ln.Close()
+	}
+}
+
+func TestUDPRelaySignalStopIsIdempotent(t *testing.T) {
+	relay := &udpRelay{quit: make(chan struct{})}
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			relay.signalStop()
+		}()
+	}
+	wg.Wait()
+	select {
+	case <-relay.quit:
+	default:
+		t.Fatal("relay quit channel was not closed")
+	}
+}
+
+func TestUDPRelayLocksClientEndpoint(t *testing.T) {
+	relay := &udpRelay{}
+	first := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 10001}
+	if !relay.acceptClientAddr(first) {
+		t.Fatal("first endpoint should be accepted")
+	}
+	if !relay.acceptClientAddr(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 10001}) {
+		t.Fatal("same endpoint should be accepted")
+	}
+	if relay.acceptClientAddr(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 10002}) {
+		t.Fatal("different source port should be rejected")
+	}
+	got := relay.clientAddr()
+	got.Port = 20000
+	if relay.clientAddr().Port != 10001 {
+		t.Fatal("clientAddr must return a defensive copy")
 	}
 }
 

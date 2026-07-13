@@ -197,6 +197,42 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadConfigPreservesExplicitUnlimitedConnections(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	if err := os.WriteFile(path, []byte("listen: 127.0.0.1:0\nmax_connections: 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.MaxConnections != 0 {
+		t.Fatalf("max connections = %d, want unlimited (0)", cfg.MaxConnections)
+	}
+}
+
+func TestValidateConfigRejectsInvalidDurations(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"dial timeout", func(cfg *Config) { cfg.Timeouts.Dial = proxy.Duration(-time.Second) }},
+		{"direct timeout", func(cfg *Config) { cfg.Routing.Auto.DirectTimeout = proxy.Duration(-time.Second) }},
+		{"cache ttl", func(cfg *Config) { cfg.Routing.Auto.CacheTTL = proxy.Duration(-time.Second) }},
+		{"geosite interval", func(cfg *Config) { cfg.Routing.GeoSite.UpdateInterval = proxy.Duration(-time.Second) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			tc.mutate(cfg)
+			if err := validateConfig(cfg); err == nil {
+				t.Fatal("expected duration validation error")
+			}
+		})
+	}
+}
+
 func TestLoadConfigExpandsSensitiveEnv(t *testing.T) {
 	t.Setenv("K5PW_MANAGEMENT_TOKEN", "mgmt-token")
 	t.Setenv("K5PW_PROXY_PASSWORD", "proxy-pass")

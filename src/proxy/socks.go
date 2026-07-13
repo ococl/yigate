@@ -6,7 +6,7 @@ import (
 )
 
 // HandleSOCKS5 处理 SOCKS5 代理请求，并在 socks5h_redirect 开启时尝试恢复域名
-func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController) {
+func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController, allowBind, allowUDP bool) {
 	defer client.Close()
 	MetricInc("k5pw_requests_total", "protocol=socks5")
 
@@ -38,8 +38,18 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 	case 0x01: // CONNECT
 		handleSOCKS5Connect(client, clientReader, target, mgr, router, access)
 	case 0x02: // BIND
+		if !allowBind {
+			Logger().Warnw("socks5 bind command disabled", "target", target)
+			socks5Reply(client, 0x07)
+			return
+		}
 		handleSOCKS5Bind(client, target, mgr, router)
 	case 0x03: // UDP ASSOCIATE
+		if !allowUDP {
+			Logger().Warnw("socks5 udp associate command disabled", "target", target)
+			socks5Reply(client, 0x07)
+			return
+		}
 		handleSOCKS5UDPAssociate(client, clientReader, target, mgr, router)
 	default:
 		Logger().Warnw("socks5 unsupported command", "command", cmd)
@@ -77,6 +87,6 @@ func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target str
 }
 
 // HandleSOCKS is retained as a public alias for callers that use the old name.
-func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController) {
-	HandleSOCKS5(client, clientReader, users, mgr, router, access)
+func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController, allowBind, allowUDP bool) {
+	HandleSOCKS5(client, clientReader, users, mgr, router, access, allowBind, allowUDP)
 }

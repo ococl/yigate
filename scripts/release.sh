@@ -42,6 +42,7 @@ LDFLAGS="-s -w \
 
 echo "Building k5pw ${TAG} (commit ${COMMIT}, built ${BUILD_TIME})"
 
+rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
 PLATFORMS=(
@@ -74,6 +75,11 @@ for platform in "${PLATFORMS[@]}"; do
       go build -trimpath -ldflags "${LDFLAGS}" -o "${BUILD_DIR}/${output_name}" .
   )
 done
+
+(
+  cd "${BUILD_DIR}"
+  sha256sum k5pw-* > SHA256SUMS
+)
 
 echo "Release artifacts written to ${BUILD_DIR}"
 

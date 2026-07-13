@@ -110,7 +110,7 @@ func startMockSocks5Proxy(t *testing.T) string {
 			go func(c net.Conn) {
 				defer c.Close()
 				br := bufio.NewReader(c)
-				HandleSOCKS5(c, br, nil, nil, router, nil)
+				HandleSOCKS5(c, br, nil, nil, router, nil, false, false)
 			}(conn)
 		}
 	}()

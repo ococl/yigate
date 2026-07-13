@@ -22,6 +22,7 @@ const (
 	CodeAuthFailure        ErrorCode = "AUTH_FAILURE"
 	CodeUpstreamFailure    ErrorCode = "UPSTREAM_FAILURE"
 	CodeTargetUnreachable  ErrorCode = "TARGET_UNREACHABLE"
+	CodeDestinationDenied  ErrorCode = "DESTINATION_DENIED"
 	CodeInternalError      ErrorCode = "INTERNAL_ERROR"
 )
 
@@ -135,7 +136,7 @@ func SOCKS5ReplyFromError(err error) byte {
 		code = ClassifyNetError(err)
 	}
 	switch code {
-	case CodeAuthFailure:
+	case CodeAuthFailure, CodeDestinationDenied:
 		return 0x02 // connection not allowed by ruleset
 	case CodeNetworkUnreachable:
 		return 0x03 // network unreachable
@@ -164,6 +165,8 @@ func HTTPStatusFromError(err error) int {
 	switch code {
 	case CodeAuthFailure:
 		return http.StatusProxyAuthRequired
+	case CodeDestinationDenied:
+		return http.StatusForbidden
 	case CodeConnectionTimeout:
 		return http.StatusGatewayTimeout
 	case CodeConnectionRefused, CodeDNSFailure, CodeNetworkUnreachable, CodeTargetUnreachable, CodeUpstreamFailure, CodeProtocolError:

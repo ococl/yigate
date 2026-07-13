@@ -91,7 +91,7 @@ func runForeground(cfgPath string) {
 
 	srv.Stop()
 	proxy.Logger().Infow("k5pw proxy stopped")
-	proxy.SyncLogger()
+	proxy.CloseLogger()
 }
 
 func runService(cfgPath string) {

@@ -150,6 +150,11 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 			}
 		}
 	}
+	policy, err := proxy.NewDestinationPolicy(cfg.DestinationPolicy)
+	if err != nil {
+		return err
+	}
+	cfg.Routing.Policy = policy
 	router, err := proxy.NewRouter(cfg.Routing)
 	if err != nil {
 		return err
@@ -580,7 +585,7 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	if b[0] == 0x05 {
-		proxy.HandleSOCKS(conn, br, cfg.Users, mgr, router, access)
+		proxy.HandleSOCKS(conn, br, cfg.Users, mgr, router, access, cfg.Socks5.AllowBind, cfg.Socks5.AllowUDPAssociate)
 	} else {
 		proxy.HandleHTTP(conn, br, cfg.Users, mgr, router, access)
 	}

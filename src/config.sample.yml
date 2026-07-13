@@ -31,7 +31,6 @@ routing:
         - "10.0.0.0/8"
         - "172.16.0.0/12"
         - "192.168.0.0/16"
-        - "127.0.0.0/8"
         - "100.64.0.0/10"
       action: direct
     - type: domain_suffix
@@ -44,6 +43,20 @@ routing:
         - "docker.io"
         - "docker.com"
       action: proxy
+# 目标地址访问策略：独立于路由，统一兜底拒绝回环/私网/链路本地/元数据等敏感地址，
+# 防止 SSRF 与内网横向访问。直连路径会在 DNS 解析后再次校验真实 IP。
+destination_policy:
+  protect_private: true   # 默认拒绝 loopback/RFC1918/ULA/link-local/multicast/metadata
+  default_action: allow   # 非受保护地址默认放行；设为 deny 则仅 allow_* 可访问
+  allow_cidrs:            # 需要让代理访问的内网段（按需开启，回环务必保持拒绝）
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "100.64.0.0/10"
+# SOCKS5 可选命令默认禁用，仅在前述场景确有必要且受信任时开启。
+socks5:
+  allow_bind: false
+  allow_udp_associate: false
 access_control:
   # allowed_clients 为空时不限制客户端来源
   allowed_clients: []

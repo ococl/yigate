@@ -9,7 +9,15 @@ services:
     # bridge NAT 会破坏这些场景。host 模式消除 NAT 隔离，性能更优。
     network_mode: host
     volumes:
-      - ./k5:/k5
+      - ./k5/config.yml:/etc/k5pw/config.yml:ro
+      - ./k5/geosite.dat:/etc/k5pw/geosite.dat:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "nc", "-z", "-w3", "127.0.0.1", "8891"]

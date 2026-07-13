@@ -77,9 +77,10 @@ func NormalizeLogConfig(cfg *LogConfig) {
 }
 
 var (
-	loggerVal atomic.Value // stores *zap.SugaredLogger
-	logMu     sync.Mutex
-	logWriter io.Closer
+	loggerVal     atomic.Value // stores *zap.SugaredLogger
+	logMu         sync.Mutex
+	logWriter     io.Closer
+	retiredWriter []io.Closer
 )
 
 func init() {
@@ -111,7 +112,7 @@ func Logger() *zap.SugaredLogger {
 }
 
 // InitLogger 根据配置初始化/替换全局 logger。
-// 新 logger 构建完成后原子地切换，旧 logger 会先 Sync 再关闭其 writer，避免并发写入到已关闭的 writer。
+// 新 logger 原子发布，旧 writer 延迟到 CloseLogger 关闭，避免并发请求写入已关闭资源。
 func InitLogger(cfg LogConfig) error {
 	NormalizeLogConfig(&cfg)
 
@@ -156,13 +157,13 @@ func InitLogger(cfg LogConfig) error {
 	oldWriter := logWriter
 	loggerVal.Store(newLogger)
 	logWriter = closer
+	if oldWriter != nil {
+		retiredWriter = append(retiredWriter, oldWriter)
+	}
 	logMu.Unlock()
 
 	if oldLogger != nil {
 		_ = oldLogger.Sync()
-	}
-	if oldWriter != nil {
-		_ = oldWriter.Close()
 	}
 	return nil
 }
@@ -171,6 +172,21 @@ func InitLogger(cfg LogConfig) error {
 func SyncLogger() {
 	if l := Logger(); l != nil {
 		_ = l.Sync()
+	}
+}
+
+// CloseLogger 刷新并关闭当前及热加载期间退休的日志 writer。
+func CloseLogger() {
+	SyncLogger()
+	logMu.Lock()
+	writers := append(retiredWriter, logWriter)
+	retiredWriter = nil
+	logWriter = nil
+	logMu.Unlock()
+	for _, writer := range writers {
+		if writer != nil {
+			_ = writer.Close()
+		}
 	}
 }
 

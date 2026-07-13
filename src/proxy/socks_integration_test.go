@@ -25,7 +25,7 @@ func startMockSocks5ProxyWithUsers(t *testing.T, users map[string]string) string
 			go func(c net.Conn) {
 				defer c.Close()
 				br := bufio.NewReader(c)
-				HandleSOCKS5(c, br, users, nil, router, nil)
+				HandleSOCKS5(c, br, users, nil, router, nil, true, true)
 			}(conn)
 		}
 	}()

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -122,6 +123,38 @@ func TestInitLoggerInvalid(t *testing.T) {
 	}
 	if err := InitLogger(LogConfig{Output: "unknown"}); err == nil {
 		t.Fatal("expected error for invalid output")
+	}
+}
+
+func TestInitLoggerConcurrentReload(t *testing.T) {
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "first.log")
+	secondPath := filepath.Join(dir, "second.log")
+	if err := InitLogger(LogConfig{Level: "info", Output: "file", File: firstPath}); err != nil {
+		t.Fatal(err)
+	}
+	oldLogger := Logger()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				oldLogger.Infow("concurrent old logger write", "index", j)
+			}
+		}()
+	}
+	if err := InitLogger(LogConfig{Level: "info", Output: "file", File: secondPath}); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	Logger().Info("new logger write")
+	SyncLogger()
+	if info, err := os.Stat(firstPath); err != nil || info.Size() == 0 {
+		t.Fatalf("old log was not written: info=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(secondPath); err != nil || info.Size() == 0 {
+		t.Fatalf("new log was not written: info=%v err=%v", info, err)
 	}
 }
 

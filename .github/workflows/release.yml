@@ -20,17 +20,29 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Run tests
-        run: cd src && go test ./...
+      - name: Run quality gates
+        working-directory: src
+        run: |
+          go test -race ./...
+          go vet ./...
 
       - name: Build release binaries
         run: ./scripts/release.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Smoke test Linux binary
+        run: ./build/k5pw-${GITHUB_REF_NAME#v}-linux-amd64 -version
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./src
+          format: spdx-json
+          output-file: ./build/k5pw-${{ github.ref_name }}.spdx.json
 
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v2
         with:
           files: build/*
-          body: |
-            See [CHANGELOG.md](./CHANGELOG.md) for release notes.
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

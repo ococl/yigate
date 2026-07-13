@@ -18,6 +18,8 @@ const (
 	ActionDirect = "direct"
 	ActionProxy  = "proxy"
 	ActionAuto   = "auto"
+	ActionDeny   = "deny"
+	ActionAllow  = "allow"
 )
 
 const (
@@ -70,6 +72,8 @@ type RoutingConfig struct {
 	Auto            AutoConfig    `yaml:"auto"`
 	Socks5HRedirect Socks5HConfig `yaml:"socks5h_redirect"`
 	Rules           []RouteRule   `yaml:"rules"`
+	// Policy 由服务层在加载配置后注入，不通过 YAML 反序列化。
+	Policy *DestinationPolicy `yaml:"-"`
 }
 
 type GeoSiteConfig struct {
@@ -110,6 +114,7 @@ type Router struct {
 	socks5h Socks5HConfig
 	cache   *RouteCache
 	sfGroup singleflight.Group
+	policy  *DestinationPolicy
 
 	// socks5hBreaker 记录 socks5h 熔断到期时间（unix nano），0 表示未熔断。
 	socks5hBreaker atomic.Int64
@@ -161,6 +166,7 @@ func NewRouter(cfg RoutingConfig) (*Router, error) {
 	r := &Router{
 		final:   RouteDecision{Action: finalAction},
 		geoSite: matcher,
+		policy:  cfg.Policy,
 		auto: autoRuntimeConfig{
 			Mode:          normalizeAutoMode(cfg.Auto.Mode),
 			DirectTimeout: cfg.Auto.DirectTimeout.value(defaultDirectTimeout),
@@ -194,6 +200,9 @@ func compileRouteRule(rule RouteRule) (compiledRouteRule, error) {
 	}
 	if !validAction(action) {
 		return compiledRouteRule{}, fmt.Errorf("unsupported action %q", rule.Action)
+	}
+	if action == ActionDeny && typ == "match" {
+		return compiledRouteRule{}, fmt.Errorf("deny action is not allowed with type match")
 	}
 	compiled := compiledRouteRule{
 		typ: typ,
@@ -261,9 +270,17 @@ func (r *Router) Decide(target string) RouteDecision {
 
 func (r *Router) Dial(target string, mgr *UpstreamManager) (net.Conn, error) {
 	decision := r.Decide(target)
+	if decision.Action == ActionDeny {
+		return nil, NewError(CodeDestinationDenied, "destination denied by route rule: "+target)
+	}
+	if r.policy != nil {
+		if err := r.policy.CheckTarget(target); err != nil {
+			return nil, err
+		}
+	}
 	switch decision.Action {
 	case ActionDirect:
-		return DialTarget(target)
+		return r.dialDirectChecked(target)
 	case ActionProxy:
 		conn, _, err := r.dialProxy(target, mgr, decision.Upstreams)
 		return conn, err
@@ -272,12 +289,20 @@ func (r *Router) Dial(target string, mgr *UpstreamManager) (net.Conn, error) {
 	}
 }
 
+// Policy 返回当前生效的目标访问策略（可能为 nil）。
+func (r *Router) Policy() *DestinationPolicy {
+	if r == nil {
+		return nil
+	}
+	return r.policy
+}
+
 func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error) {
 	key := routeCacheKey(target)
 	if entry, ok := r.cache.Get(key); ok {
 		switch entry.Action {
 		case ActionDirect:
-			conn, err := DialTarget(target)
+			conn, err := r.dialDirectChecked(target)
 			if err == nil {
 				return conn, nil
 			}
@@ -305,7 +330,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 				r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
 				return RouteCacheEntry{Action: ActionProxy, UpstreamName: up.Name}, nil
 			}
-			conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
+			conn, directErr := r.dialDirectChecked(target)
 			if directErr == nil {
 				_ = conn.Close()
 				r.cache.SetDirect(key, r.auto.CacheTTL)
@@ -314,7 +339,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 			return nil, fmt.Errorf("proxy failed: %v; direct failed: %w", dialErr, directErr)
 		}
 		// direct_first（默认）
-		conn, directErr := DialTargetTimeout(target, r.auto.DirectTimeout)
+		conn, directErr := r.dialDirectChecked(target)
 		if directErr == nil {
 			_ = conn.Close()
 			r.cache.SetDirect(key, r.auto.CacheTTL)
@@ -337,7 +362,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 	}
 	switch entry.Action {
 	case ActionDirect:
-		return DialTarget(target)
+		return r.dialDirectChecked(target)
 	case ActionProxy:
 		if entry.UpstreamName != "" {
 			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName})
@@ -439,7 +464,7 @@ func normalizeAction(v string) string {
 }
 
 func validAction(action string) bool {
-	return action == ActionDirect || action == ActionProxy || action == ActionAuto
+	return action == ActionDirect || action == ActionProxy || action == ActionAuto || action == ActionDeny
 }
 
 func normalizeAutoMode(v string) string {

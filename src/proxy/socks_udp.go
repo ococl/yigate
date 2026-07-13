@@ -23,11 +23,53 @@ type udpRelay struct {
 	upPacketConn  *net.UDPConn // 上游 UDP 连接（级联模式）
 	useUpstream   bool
 	sessions      map[string]*udpSession
+	policy        *DestinationPolicy
 	mu            sync.Mutex
+	clientMu      sync.RWMutex
+	stopOnce      sync.Once
 	quit          chan struct{}
 }
 
+func (r *udpRelay) signalStop() {
+	r.stopOnce.Do(func() { close(r.quit) })
+}
+
+func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
+	if addr == nil {
+		return nil
+	}
+	return &net.UDPAddr{IP: append(net.IP(nil), addr.IP...), Port: addr.Port, Zone: addr.Zone}
+}
+
+func (r *udpRelay) acceptClientAddr(src *net.UDPAddr) bool {
+	r.clientMu.Lock()
+	defer r.clientMu.Unlock()
+	if r.clientUDPAddr == nil {
+		r.clientUDPAddr = cloneUDPAddr(src)
+		return true
+	}
+	return r.clientUDPAddr.IP.Equal(src.IP) && r.clientUDPAddr.Port == src.Port && r.clientUDPAddr.Zone == src.Zone
+}
+
+func (r *udpRelay) clientAddr() *net.UDPAddr {
+	r.clientMu.RLock()
+	defer r.clientMu.RUnlock()
+	return cloneUDPAddr(r.clientUDPAddr)
+}
+
+func (r *udpRelay) touchSession(sess *udpSession) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, current := range r.sessions {
+		if current == sess {
+			sess.lastUsed = time.Now()
+			return
+		}
+	}
+}
+
 func (r *udpRelay) run(clientReader *bufio.Reader) {
+	defer r.closeSessions()
 	if r.upConn != nil {
 		// 级联模式：上游 TCP 控制连接一旦关闭，UDP 中继也应终止。
 		go func() {
@@ -35,7 +77,7 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 			for {
 				n, err := r.upConn.Read(buf)
 				if n == 0 || err != nil {
-					close(r.quit)
+					r.signalStop()
 					return
 				}
 			}
@@ -47,7 +89,7 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 		for {
 			n, err := r.clientConn.Read(buf)
 			if n == 0 || err != nil {
-				close(r.quit)
+				r.signalStop()
 				return
 			}
 		}
@@ -83,10 +125,8 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 			}
 		}
 
-		if r.clientUDPAddr == nil {
-			r.clientUDPAddr = srcAddr
-		} else if r.clientUDPAddr.IP.String() != srcAddr.IP.String() {
-			Logger().Warnw("udp relay ignore packet", "from", srcAddr, "expected", r.clientUDPAddr)
+		if !r.acceptClientAddr(srcAddr) {
+			Logger().Warnw("udp relay ignore packet", "from", srcAddr, "expected", r.clientAddr())
 			continue
 		}
 
@@ -119,6 +159,12 @@ func (r *udpRelay) forwardToTarget(target string, data []byte) error {
 	udpAddr, err := net.ResolveUDPAddr("udp", target)
 	if err != nil {
 		return err
+	}
+	if r.policy != nil {
+		if err := r.policy.Check(udpAddr.IP.String(), udpAddr.Port, udpAddr.IP); err != nil {
+			Logger().Warnw("udp relay target denied by policy", "target", target, "error", err)
+			return err
+		}
 	}
 
 	r.mu.Lock()
@@ -166,15 +212,16 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 				return
 			}
 		}
-		if r.clientUDPAddr == nil {
+		clientAddr := r.clientAddr()
+		if clientAddr == nil {
 			continue
 		}
 		packet := append(header, buf[:n]...)
-		if _, err := r.ln.WriteToUDP(packet, r.clientUDPAddr); err != nil {
+		if _, err := r.ln.WriteToUDP(packet, clientAddr); err != nil {
 			Logger().Warnw("udp relay write back to client failed", "error", err)
 			return
 		}
-		sess.lastUsed = time.Now()
+		r.touchSession(sess)
 	}
 }
 
@@ -198,10 +245,11 @@ func (r *udpRelay) readFromUpstream() {
 				return
 			}
 		}
-		if r.clientUDPAddr == nil {
+		clientAddr := r.clientAddr()
+		if clientAddr == nil {
 			continue
 		}
-		if _, err := r.ln.WriteToUDP(buf[:n], r.clientUDPAddr); err != nil {
+		if _, err := r.ln.WriteToUDP(buf[:n], clientAddr); err != nil {
 			Logger().Warnw("udp relay write back to client failed", "error", err)
 			return
 		}

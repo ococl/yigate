@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"sync/atomic"
@@ -38,6 +39,24 @@ type TimeoutConfig struct {
 	Handshake    Duration `yaml:"handshake"`
 	HTTPExchange Duration `yaml:"http_exchange"`
 	TunnelIdle   Duration `yaml:"tunnel_idle"`
+}
+
+func ValidateTimeoutConfig(cfg TimeoutConfig) error {
+	values := []struct {
+		name  string
+		value Duration
+	}{
+		{"dial", cfg.Dial},
+		{"handshake", cfg.Handshake},
+		{"http_exchange", cfg.HTTPExchange},
+		{"tunnel_idle", cfg.TunnelIdle},
+	}
+	for _, item := range values {
+		if item.value < 0 {
+			return fmt.Errorf("%s must be >= 0", item.name)
+		}
+	}
+	return nil
 }
 
 // SetTimeouts 根据配置更新超时参数，未设置项保持当前值

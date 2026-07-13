@@ -14,18 +14,26 @@ import (
 
 // Config 代理服务器配置
 type Config struct {
-	Listen              string                    `yaml:"listen"`
-	Management          string                    `yaml:"management"`
-	ManagementAuthToken string                    `yaml:"management_auth_token"`
-	Users               map[string]string         `yaml:"users"`
-	Upstreams           []proxy.UpstreamConfig    `yaml:"upstreams"`
-	Routing             proxy.RoutingConfig       `yaml:"routing"`
-	Timeouts            proxy.TimeoutConfig       `yaml:"timeouts"`
-	Log                 proxy.LogConfig           `yaml:"log"`
-	CheckInterval       int                       `yaml:"check_interval"`
-	MaxConnections      int                       `yaml:"max_connections"`
-	AccessControl       proxy.AccessControlConfig `yaml:"access_control"`
-	EnablePprof         bool                      `yaml:"enable_pprof"`
+	Listen              string                        `yaml:"listen"`
+	Management          string                        `yaml:"management"`
+	ManagementAuthToken string                        `yaml:"management_auth_token"`
+	Users               map[string]string             `yaml:"users"`
+	Upstreams           []proxy.UpstreamConfig        `yaml:"upstreams"`
+	Routing             proxy.RoutingConfig           `yaml:"routing"`
+	DestinationPolicy   proxy.DestinationPolicyConfig `yaml:"destination_policy"`
+	Timeouts            proxy.TimeoutConfig           `yaml:"timeouts"`
+	Log                 proxy.LogConfig               `yaml:"log"`
+	CheckInterval       int                           `yaml:"check_interval"`
+	MaxConnections      int                           `yaml:"max_connections"`
+	AccessControl       proxy.AccessControlConfig     `yaml:"access_control"`
+	Socks5              Socks5Config                  `yaml:"socks5"`
+	EnablePprof         bool                          `yaml:"enable_pprof"`
+}
+
+// Socks5Config 控制 SOCKS5 可选命令的可用性，默认均禁用。
+type Socks5Config struct {
+	AllowBind         bool `yaml:"allow_bind"`
+	AllowUDPAssociate bool `yaml:"allow_udp_associate"`
 }
 
 const (
@@ -52,9 +60,17 @@ func defaultConfig() *Config {
 			},
 			Socks5HRedirect: proxy.Socks5HConfig{Enabled: true},
 		},
+		DestinationPolicy: proxy.DestinationPolicyConfig{
+			ProtectPrivate: true,
+			DefaultAction:  "allow",
+		},
 		Log:            proxy.DefaultLogConfig(),
 		CheckInterval:  30,
 		MaxConnections: defaultMaxConnections,
+		Socks5: Socks5Config{
+			AllowBind:         false,
+			AllowUDPAssociate: false,
+		},
 	}
 }
 
@@ -78,9 +94,6 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Upstreams == nil {
 		cfg.Upstreams = []proxy.UpstreamConfig{}
-	}
-	if cfg.MaxConnections == 0 {
-		cfg.MaxConnections = defaultMaxConnections
 	}
 	if err := expandConfigEnv(cfg); err != nil {
 		return nil, err
@@ -170,6 +183,21 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.MaxConnections < 0 {
 		return fmt.Errorf("max_connections must be >= 0")
+	}
+	if err := proxy.ValidateTimeoutConfig(cfg.Timeouts); err != nil {
+		return fmt.Errorf("timeouts: %w", err)
+	}
+	if _, err := proxy.NewDestinationPolicy(cfg.DestinationPolicy); err != nil {
+		return fmt.Errorf("destination_policy: %w", err)
+	}
+	if cfg.Routing.Auto.DirectTimeout < 0 {
+		return fmt.Errorf("routing.auto.direct_timeout must be >= 0")
+	}
+	if cfg.Routing.Auto.CacheTTL < 0 {
+		return fmt.Errorf("routing.auto.cache_ttl must be >= 0")
+	}
+	if cfg.Routing.GeoSite.UpdateInterval <= 0 {
+		return fmt.Errorf("routing.geosite.update_interval must be > 0")
 	}
 	if cfg.Management != "" && !isLoopbackListen(cfg.Management) && cfg.ManagementAuthToken == "" {
 		return fmt.Errorf("management_auth_token is required when management listens on a non-loopback address")
