@@ -12,8 +12,30 @@ import (
 	"k5pw/proxy"
 )
 
+// TLSConfig 配置代理端口的 TLS 服务端终止。
+// 若 CertFile/KeyFile 均非空，则代理端口会升级为 TLS 监听；
+// 若 ClientCAFile 非空，则强制要求客户端提供 mTLS 证书。
+type TLSConfig struct {
+	CertFile     string `yaml:"cert_file"`
+	KeyFile      string `yaml:"key_file"`
+	ClientCAFile string `yaml:"client_ca_file"`
+}
+
+// ListenerConfig 单个代理监听端口配置。
+// 多监听端口策略下，每个 listener 可拥有独立的认证、访问控制、SOCKS5 命令与 TLS 配置。
+type ListenerConfig struct {
+	Listen         string                    `yaml:"listen"`
+	TLS            TLSConfig                 `yaml:"tls"`
+	Users          map[string]string         `yaml:"users"`
+	AccessControl  proxy.AccessControlConfig `yaml:"access_control"`
+	Socks5         Socks5Config              `yaml:"socks5"`
+	MaxConnections int                       `yaml:"max_connections"`
+	TProxy         proxy.TProxyConfig        `yaml:"tproxy"`
+}
+
 // Config 代理服务器配置
 type Config struct {
+	Listeners           []ListenerConfig              `yaml:"listeners"`
 	Listen              string                        `yaml:"listen"`
 	Management          string                        `yaml:"management"`
 	ManagementAuthToken string                        `yaml:"management_auth_token"`
@@ -28,6 +50,10 @@ type Config struct {
 	AccessControl       proxy.AccessControlConfig     `yaml:"access_control"`
 	Socks5              Socks5Config                  `yaml:"socks5"`
 	EnablePprof         bool                          `yaml:"enable_pprof"`
+	TLS                 TLSConfig                     `yaml:"tls"`
+	DNS                 proxy.DNSConfig               `yaml:"dns"`
+	TrafficAudit         proxy.TrafficAuditConfig      `yaml:"traffic_audit"`
+	TProxy              proxy.TProxyConfig           `yaml:"tproxy"`
 }
 
 // Socks5Config 控制 SOCKS5 可选命令的可用性，默认均禁用。
@@ -100,12 +126,45 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	baseDir := filepath.Dir(path)
 	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
+	resolveTLSPaths(&cfg.TLS, baseDir)
 	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
 	proxy.NormalizeLogConfig(&cfg.Log)
+	if err := normalizeListeners(cfg, baseDir); err != nil {
+		return nil, err
+	}
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// normalizeListeners 将旧版单 listen 配置转换为多 listener 模型。
+// 若 listeners 为空，则使用全局 listen/users/access_control/socks5/tls/max_connections 生成一个默认 listener。
+func normalizeListeners(cfg *Config, baseDir string) error {
+	if len(cfg.Listeners) == 0 {
+		users := cfg.Users
+		if users == nil {
+			users = make(map[string]string)
+		}
+		cfg.Listeners = []ListenerConfig{{
+			Listen:         cfg.Listen,
+			TLS:            cfg.TLS,
+			Users:          users,
+			AccessControl:  cfg.AccessControl,
+			Socks5:         cfg.Socks5,
+			MaxConnections: cfg.MaxConnections,
+			TProxy:         cfg.TProxy,
+		}}
+		return nil
+	}
+
+	for i := range cfg.Listeners {
+		if cfg.Listeners[i].Users == nil {
+			cfg.Listeners[i].Users = make(map[string]string)
+		}
+		resolveTLSPaths(&cfg.Listeners[i].TLS, baseDir)
+	}
+	return nil
 }
 
 func expandConfigEnv(cfg *Config) error {
@@ -140,6 +199,57 @@ func expandConfigEnv(cfg *Config) error {
 		}
 		cfg.Upstreams[i].URL = strings.TrimSpace(expanded)
 	}
+	if err := expandTLSConfigEnv(&cfg.TLS); err != nil {
+		return err
+	}
+	for i := range cfg.Listeners {
+		if err := expandListenerUsersEnv(&cfg.Listeners[i], i); err != nil {
+			return err
+		}
+		if err := expandTLSConfigEnv(&cfg.Listeners[i].TLS); err != nil {
+			return fmt.Errorf("listeners[%d].tls: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func expandListenerUsersEnv(lc *ListenerConfig, idx int) error {
+	for user, pass := range lc.Users {
+		if strings.TrimSpace(user) == "" {
+			return fmt.Errorf("listeners[%d].users contains empty username", idx)
+		}
+		expanded, err := expandEnvStrict(fmt.Sprintf("listeners[%d].users[%q]", idx, user), pass)
+		if err != nil {
+			return err
+		}
+		expanded = strings.TrimSpace(expanded)
+		if expanded == "" {
+			return fmt.Errorf("listeners[%d].users[%q] password must not be empty", idx, user)
+		}
+		lc.Users[user] = expanded
+	}
+	return nil
+}
+
+func expandTLSConfigEnv(tlsCfg *TLSConfig) error {
+	fields := map[string]*string{
+		"tls.cert_file":      &tlsCfg.CertFile,
+		"tls.key_file":       &tlsCfg.KeyFile,
+		"tls.client_ca_file": &tlsCfg.ClientCAFile,
+	}
+	for field, ptr := range fields {
+		if *ptr == "" {
+			continue
+		}
+		expanded, err := expandEnvStrict(field, *ptr)
+		if err != nil {
+			return err
+		}
+		*ptr = strings.TrimSpace(expanded)
+		if *ptr == "" {
+			return fmt.Errorf("%s must not be empty", field)
+		}
+	}
 	return nil
 }
 
@@ -159,6 +269,18 @@ func expandEnvStrict(field, value string) (string, error) {
 	return expanded, nil
 }
 
+func resolveTLSPaths(tlsCfg *TLSConfig, baseDir string) {
+	if !filepath.IsAbs(tlsCfg.CertFile) && tlsCfg.CertFile != "" {
+		tlsCfg.CertFile = filepath.Join(baseDir, tlsCfg.CertFile)
+	}
+	if !filepath.IsAbs(tlsCfg.KeyFile) && tlsCfg.KeyFile != "" {
+		tlsCfg.KeyFile = filepath.Join(baseDir, tlsCfg.KeyFile)
+	}
+	if !filepath.IsAbs(tlsCfg.ClientCAFile) && tlsCfg.ClientCAFile != "" {
+		tlsCfg.ClientCAFile = filepath.Join(baseDir, tlsCfg.ClientCAFile)
+	}
+}
+
 func isLoopbackListen(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -171,13 +293,78 @@ func isLoopbackListen(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+func validateTLSConfig(tlsCfg *TLSConfig) error {
+	hasCert := strings.TrimSpace(tlsCfg.CertFile) != ""
+	hasKey := strings.TrimSpace(tlsCfg.KeyFile) != ""
+	hasClientCA := strings.TrimSpace(tlsCfg.ClientCAFile) != ""
+
+	if hasCert != hasKey {
+		return fmt.Errorf("tls.cert_file and tls.key_file must be both provided or both empty")
+	}
+	if hasClientCA && !hasCert {
+		return fmt.Errorf("tls.client_ca_file requires tls.cert_file and tls.key_file")
+	}
+	if hasCert {
+		if _, err := os.Stat(tlsCfg.CertFile); err != nil {
+			return fmt.Errorf("cert_file %q: %w", tlsCfg.CertFile, err)
+		}
+		if _, err := os.Stat(tlsCfg.KeyFile); err != nil {
+			return fmt.Errorf("key_file %q: %w", tlsCfg.KeyFile, err)
+		}
+	}
+	if hasClientCA {
+		if _, err := os.Stat(tlsCfg.ClientCAFile); err != nil {
+			return fmt.Errorf("client_ca_file %q: %w", tlsCfg.ClientCAFile, err)
+		}
+	}
+	return nil
+}
+
 func validateConfig(cfg *Config) error {
-	if strings.TrimSpace(cfg.Listen) == "" {
-		return fmt.Errorf("listen must not be empty")
+	if err := validateTLSConfig(&cfg.TLS); err != nil {
+		return fmt.Errorf("tls: %w", err)
 	}
-	if _, err := net.ResolveTCPAddr("tcp", cfg.Listen); err != nil {
-		return fmt.Errorf("listen %q is not a valid TCP address: %w", cfg.Listen, err)
+
+	if len(cfg.Listeners) == 0 {
+		if strings.TrimSpace(cfg.Listen) == "" {
+			return fmt.Errorf("listen must not be empty")
+		}
+		if _, err := net.ResolveTCPAddr("tcp", cfg.Listen); err != nil {
+			return fmt.Errorf("listen %q is not a valid TCP address: %w", cfg.Listen, err)
+		}
 	}
+	seenListeners := make(map[string]struct{}, len(cfg.Listeners))
+	for i, lc := range cfg.Listeners {
+		if strings.TrimSpace(lc.Listen) == "" {
+			return fmt.Errorf("listeners[%d].listen must not be empty", i)
+		}
+		if _, err := net.ResolveTCPAddr("tcp", lc.Listen); err != nil {
+			return fmt.Errorf("listeners[%d].listen %q is not a valid TCP address: %w", i, lc.Listen, err)
+		}
+		if _, exists := seenListeners[lc.Listen]; exists {
+			return fmt.Errorf("listeners[%d].listen %q is duplicated", i, lc.Listen)
+		}
+		seenListeners[lc.Listen] = struct{}{}
+		if err := validateTLSConfig(&lc.TLS); err != nil {
+			return fmt.Errorf("listeners[%d].tls: %w", i, err)
+		}
+		if lc.TProxy.Enabled {
+			if !proxy.IsTProxySupported() {
+				return fmt.Errorf("listeners[%d].tproxy: transparent proxy is only supported on Linux", i)
+			}
+			mode := lc.TProxy.NormalizedMode()
+			if mode != "redirect" && mode != "tproxy" {
+				return fmt.Errorf("listeners[%d].tproxy.mode: unsupported mode %q, must be \"redirect\" or \"tproxy\"", i, lc.TProxy.Mode)
+			}
+			if lc.TLS.CertFile != "" || lc.TLS.KeyFile != "" {
+				return fmt.Errorf("listeners[%d].tproxy: TLS is not supported with transparent proxy", i)
+			}
+		}
+		if _, err := proxy.NewAccessController(lc.AccessControl); err != nil {
+			return fmt.Errorf("listeners[%d].access_control: %w", i, err)
+		}
+	}
+
 	if cfg.CheckInterval < 0 {
 		return fmt.Errorf("check_interval must be >= 0")
 	}
@@ -265,6 +452,10 @@ func validateConfig(cfg *Config) error {
 
 	if _, err := proxy.NewAccessController(cfg.AccessControl); err != nil {
 		return fmt.Errorf("access_control: %w", err)
+	}
+
+	if err := proxy.ValidateDNSConfig(cfg.DNS); err != nil {
+		return fmt.Errorf("dns: %w", err)
 	}
 
 	return nil

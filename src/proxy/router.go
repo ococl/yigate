@@ -107,14 +107,18 @@ type RouteDecision struct {
 }
 
 type Router struct {
-	final   RouteDecision
-	rules   []compiledRouteRule
-	geoSite *GeoSiteMatcher
-	auto    autoRuntimeConfig
-	socks5h Socks5HConfig
-	cache   *RouteCache
-	sfGroup singleflight.Group
-	policy  *DestinationPolicy
+	final    RouteDecision
+	rules    []compiledRouteRule
+	geoSite  *GeoSiteMatcher
+	auto     autoRuntimeConfig
+	socks5h  Socks5HConfig
+	cache    *RouteCache
+	sfGroup  singleflight.Group
+	policy   *DestinationPolicy
+	resolver *DNSResolver
+
+	// ipPrecedence 控制 DNS 解析后 IPv4/IPv6 的优先级。
+	ipPrecedence string
 
 	// socks5hBreaker 记录 socks5h 熔断到期时间（unix nano），0 表示未熔断。
 	socks5hBreaker atomic.Int64
@@ -141,7 +145,7 @@ func ResolveRoutingPaths(cfg *RoutingConfig, baseDir string) {
 	cfg.GeoSite.Path = filepath.Join(baseDir, cfg.GeoSite.Path)
 }
 
-func NewRouter(cfg RoutingConfig) (*Router, error) {
+func NewRouter(cfg RoutingConfig, dnsCfg DNSConfig) (*Router, error) {
 	finalAction := normalizeAction(cfg.Final)
 	if finalAction == "" {
 		finalAction = ActionAuto
@@ -176,7 +180,9 @@ func NewRouter(cfg RoutingConfig) (*Router, error) {
 			Enabled:   cfg.Socks5HRedirect.Enabled,
 			Upstreams: normalizeUpstreamNames(cfg.Socks5HRedirect.Upstreams),
 		},
-		cache: NewRouteCache(),
+		cache:       NewRouteCache(),
+		resolver:    NewDNSResolver(dnsCfg),
+		ipPrecedence: normalizeIPPrecedence(dnsCfg.IPPrecedence),
 	}
 
 	for i, rule := range cfg.Rules {
@@ -268,7 +274,7 @@ func (r *Router) Decide(target string) RouteDecision {
 	return r.final
 }
 
-func (r *Router) Dial(target string, mgr *UpstreamManager) (net.Conn, error) {
+func (r *Router) Dial(target string, mgr *UpstreamManager, sourceIP ...string) (net.Conn, error) {
 	decision := r.Decide(target)
 	if decision.Action == ActionDeny {
 		return nil, NewError(CodeDestinationDenied, "destination denied by route rule: "+target)
@@ -278,16 +284,21 @@ func (r *Router) Dial(target string, mgr *UpstreamManager) (net.Conn, error) {
 			return nil, err
 		}
 	}
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
 	switch decision.Action {
 	case ActionDirect:
 		return r.dialDirectChecked(target)
 	case ActionProxy:
-		conn, _, err := r.dialProxy(target, mgr, decision.Upstreams)
+		conn, _, err := r.dialProxy(target, mgr, decision.Upstreams, sip)
 		return conn, err
 	default:
-		return r.dialAuto(target, mgr)
+		return r.dialAuto(target, mgr, sip)
 	}
 }
+
 
 // Policy 返回当前生效的目标访问策略（可能为 nil）。
 func (r *Router) Policy() *DestinationPolicy {
@@ -295,6 +306,22 @@ func (r *Router) Policy() *DestinationPolicy {
 		return nil
 	}
 	return r.policy
+}
+
+// Resolver 返回路由器关联的 DNS 解析器（可能为 nil，表示使用系统默认）。
+func (r *Router) Resolver() *DNSResolver {
+	if r == nil {
+		return nil
+	}
+	return r.resolver
+}
+
+// IPPrecedence 返回 IP 优先级策略（ipv4_first / ipv6_first / system）。
+func (r *Router) IPPrecedence() string {
+	if r == nil {
+		return IPPrecedenceIPv4First
+	}
+	return r.ipPrecedence
 }
 
 // Start 启动路由器的后台任务（当前为路由缓存过期清理）。
@@ -319,7 +346,7 @@ func (r *Router) Stop() {
 	}
 }
 
-func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error) {
+func (r *Router) dialAuto(target string, mgr *UpstreamManager, sourceIP string) (net.Conn, error) {
 	key := routeCacheKey(target)
 	if entry, ok := r.cache.Get(key); ok {
 		switch entry.Action {
@@ -330,7 +357,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 			}
 			r.cache.Delete(key)
 		case ActionProxy:
-			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName})
+			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName}, sourceIP)
 			if err == nil {
 				return conn, nil
 			}
@@ -346,7 +373,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 			return entry, nil
 		}
 		if r.auto.Mode == "proxy_first" {
-			conn, up, dialErr := r.dialProxy(target, mgr, nil)
+			conn, up, dialErr := r.dialProxy(target, mgr, nil, sourceIP)
 			if dialErr == nil {
 				_ = conn.Close()
 				r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
@@ -367,7 +394,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 			r.cache.SetDirect(key, r.auto.CacheTTL)
 			return RouteCacheEntry{Action: ActionDirect}, nil
 		}
-		conn, up, proxyErr := r.dialProxy(target, mgr, nil)
+		conn, up, proxyErr := r.dialProxy(target, mgr, nil, sourceIP)
 		if proxyErr == nil {
 			_ = conn.Close()
 			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
@@ -387,14 +414,14 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error)
 		return r.dialDirectChecked(target)
 	case ActionProxy:
 		if entry.UpstreamName != "" {
-			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName})
+			conn, _, err := r.dialProxy(target, mgr, []string{entry.UpstreamName}, sourceIP)
 			return conn, err
 		}
 	}
 	return nil, fmt.Errorf("unsupported cached route action %q", entry.Action)
 }
 
-func (r *Router) dialProxy(target string, mgr *UpstreamManager, names []string) (net.Conn, *Upstream, error) {
+func (r *Router) dialProxy(target string, mgr *UpstreamManager, names []string, sourceIP string) (net.Conn, *Upstream, error) {
 	key := routeCacheKey(target)
 	if len(names) == 0 {
 		if entry, ok := r.cache.Get(key); ok && entry.Action == ActionProxy && entry.UpstreamName != "" {
@@ -404,7 +431,7 @@ func (r *Router) dialProxy(target string, mgr *UpstreamManager, names []string) 
 			r.cache.Delete(key)
 		}
 	}
-	conn, up, err := mgr.DialProxy(target, names)
+	conn, up, err := mgr.DialProxyWithSourceIP(target, sourceIP, names)
 	if err == nil && up != nil {
 		r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
 	}
@@ -495,6 +522,16 @@ func normalizeAutoMode(v string) string {
 		return v
 	}
 	return defaultAutoMode
+}
+
+func normalizeIPPrecedence(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case IPPrecedenceIPv6First, IPPrecedenceSystem:
+		return v
+	default:
+		return IPPrecedenceIPv4First
+	}
 }
 
 func normalizeDomainRuleValue(v string) string {

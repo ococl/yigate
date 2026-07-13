@@ -15,7 +15,7 @@ func TestRouterDecideUsesFirstMatchingRule(t *testing.T) {
 			{Type: "domain_suffix", Values: []string{"github.com"}, Action: ActionProxy, Upstreams: []string{"hk", "sg"}},
 			{Type: "domain_keyword", Values: []string{"internal"}, Action: ActionDirect},
 		},
-	})
+	}, DNSConfig{})
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
@@ -46,7 +46,7 @@ func TestRouterDecideIPAndRegex(t *testing.T) {
 			{Type: "ip_cidr", Values: []string{"10.0.0.0/8"}, Action: ActionProxy},
 			{Type: "domain_regex", Values: []string{`.*\.cn$`}, Action: ActionDirect},
 		},
-	})
+	}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestNormalizeHelpers(t *testing.T) {
 }
 
 func TestRouterDialDirect(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	target := startMockTarget(t)
 	conn, err := router.Dial(target, nil)
 	if err != nil {
@@ -128,7 +128,7 @@ func TestRouterDialProxy(t *testing.T) {
 	router, _ := NewRouter(RoutingConfig{
 		Final: ActionDirect,
 		Rules: []RouteRule{{Type: "domain", Values: []string{"target.local"}, Action: ActionProxy, Upstreams: []string{"up"}}},
-	})
+	}, DNSConfig{})
 	proxyAddr := startMockSocks5Proxy(t)
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "up", URL: "socks5://" + proxyAddr}})
 	target := startMockTarget(t)
@@ -147,7 +147,7 @@ func TestRouterDialProxy(t *testing.T) {
 }
 
 func TestRouterDialAutoDirect(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionAuto})
+	router, _ := NewRouter(RoutingConfig{Final: ActionAuto}, DNSConfig{})
 	target := startMockTarget(t)
 	conn, err := router.Dial(target, nil)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestRouterDialAutoConcurrentConnectionsAreIndependent(t *testing.T) {
 		}
 	}()
 
-	router, err := NewRouter(RoutingConfig{Final: ActionAuto})
+	router, err := NewRouter(RoutingConfig{Final: ActionAuto}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestRouterDialAutoConcurrentConnectionsAreIndependent(t *testing.T) {
 func TestSocks5HRedirectConfig(t *testing.T) {
 	r, err := NewRouter(RoutingConfig{
 		Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"hk", "sg"}},
-	})
+	}, DNSConfig{})
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}

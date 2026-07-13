@@ -14,13 +14,13 @@ const maxBufferedRequestBody = 1 << 20 // 1 MiB
 
 // handleHTTPRequest 处理单个非 CONNECT 的 HTTP 请求，将响应写回客户端。
 // 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
-func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) bool {
+func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string) bool {
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 
 	// Chunked 或超大请求体无法缓冲重试，直接透传。
 	if isChunkedRequest(req) || req.ContentLength < 0 || req.ContentLength > maxBufferedRequestBody {
-		return handleStreamedRequest(client, req, mgr, router)
+		return handleStreamedRequest(client, req, mgr, router, sourceIP)
 	}
 	var bodyBytes []byte
 	if req.Body != nil {
@@ -75,9 +75,9 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		resetBody()
 		resp, err = directRequest(req, router)
 	case ActionProxy:
-		resp, err = requestViaProxy(req, mgr, router, decision.Upstreams, resetBody)
+		resp, err = requestViaProxy(req, mgr, router, decision.Upstreams, resetBody, sourceIP)
 	default:
-		resp, err = requestAuto(req, mgr, router, resetBody)
+		resp, err = requestAuto(req, mgr, router, resetBody, sourceIP)
 	}
 	if err != nil {
 		Logger().Warnw("forward request failed", "target", targetHost(req), "error", err)
@@ -108,7 +108,7 @@ func isChunkedRequest(req *http.Request) bool {
 
 // handleStreamedRequest 处理无法缓冲重试的流式请求（chunked 或超大请求体）。
 // 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
-func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) bool {
+func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string) bool {
 	var resp *http.Response
 	var err error
 	if router.Socks5HEnabled() {
@@ -133,11 +133,11 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 	case ActionDirect:
 		resp, err = directRequest(req, router)
 	case ActionProxy:
-		resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams)
+		resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams, sourceIP)
 	default:
 		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout, router)
 		if err != nil {
-			resp, err = requestViaProxyNoRetry(req, mgr, router, nil)
+			resp, err = requestViaProxyNoRetry(req, mgr, router, nil, sourceIP)
 		}
 	}
 	if err != nil {
@@ -158,8 +158,8 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 	return !req.Close
 }
 
-func requestViaProxyNoRetry(req *http.Request, mgr *UpstreamManager, router *Router, names []string) (*http.Response, error) {
-	up := mgr.SelectFor(names)
+func requestViaProxyNoRetry(req *http.Request, mgr *UpstreamManager, router *Router, names []string, sourceIP string) (*http.Response, error) {
+	up := mgr.SelectForWithSourceIP(names, sourceIP)
 	if up == nil {
 		return nil, errors.New("no available upstream")
 	}
@@ -170,7 +170,7 @@ func requestViaProxyNoRetry(req *http.Request, mgr *UpstreamManager, router *Rou
 	return resp, err
 }
 
-func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func()) (*http.Response, error) {
+func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func(), sourceIP string) (*http.Response, error) {
 	target := targetHost(req)
 	key := routeCacheKey(target)
 	if entry, ok := router.cache.Get(key); ok {
@@ -183,7 +183,7 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 			}
 			router.cache.Delete(key)
 		case ActionProxy:
-			resp, err := requestViaProxy(req, mgr, router, []string{entry.UpstreamName}, resetBody)
+			resp, err := requestViaProxy(req, mgr, router, []string{entry.UpstreamName}, resetBody, sourceIP)
 			if err == nil {
 				return resp, nil
 			}
@@ -192,7 +192,7 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 	}
 
 	if router.auto.Mode == "proxy_first" {
-		resp, err := requestViaProxy(req, mgr, router, nil, resetBody)
+		resp, err := requestViaProxy(req, mgr, router, nil, resetBody, sourceIP)
 		if err == nil {
 			return resp, nil
 		}
@@ -210,18 +210,18 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 		router.cache.SetDirect(key, router.auto.CacheTTL)
 		return resp, nil
 	}
-	resp, proxyErr := requestViaProxy(req, mgr, router, nil, resetBody)
+	resp, proxyErr := requestViaProxy(req, mgr, router, nil, resetBody, sourceIP)
 	if proxyErr == nil {
 		return resp, nil
 	}
 	return nil, fmt.Errorf("direct failed: %v; proxy failed: %w", directErr, proxyErr)
 }
 
-func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, names []string, resetBody func()) (*http.Response, error) {
+func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, names []string, resetBody func(), sourceIP string) (*http.Response, error) {
 	var lastErr error
 	tried := make(map[*Upstream]struct{})
 	for i := 0; i < mgr.AttemptCount(names); i++ {
-		up := mgr.SelectForExcluding(names, tried)
+		up := mgr.SelectForExcludingWithSourceIP(names, tried, sourceIP)
 		if up == nil {
 			break
 		}

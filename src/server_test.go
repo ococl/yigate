@@ -3,6 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -22,6 +30,205 @@ func writeTestConfig(t *testing.T, dir string, content string) string {
 	return path
 }
 
+func TestServerStartStopTLS(t *testing.T) {
+	certFile, keyFile, _ := generateTestCerts(t)
+	cfg := defaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	cfg.TLS.CertFile = certFile
+	cfg.TLS.KeyFile = keyFile
+
+	s, err := NewServer("", cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+
+	ln := waitForFirstListener(t, s)
+	addr := ln.Addr().String()
+	if addr == "" {
+		t.Fatal("server did not listen")
+	}
+
+	// TLS 连接应成功
+	config := &tls.Config{InsecureSkipVerify: true}
+	conn, err := tls.Dial("tcp", addr, config)
+	if err != nil {
+		t.Fatalf("tls dial server: %v", err)
+	}
+	conn.Close()
+
+	// 裸 TCP 连接不应能完成 TLS 握手，但端口应可达
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial server: %v", err)
+	}
+	raw.Close()
+
+	s.Stop()
+}
+
+func TestServerTLSRequiresClientCert(t *testing.T) {
+	certFile, keyFile, caFile := generateTestCerts(t)
+	cfg := defaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	cfg.TLS.CertFile = certFile
+	cfg.TLS.KeyFile = keyFile
+	cfg.TLS.ClientCAFile = caFile
+
+	s, err := NewServer("", cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	ln := waitForFirstListener(t, s)
+	addr := ln.Addr().String()
+	if addr == "" {
+		t.Fatal("server did not listen")
+	}
+
+	// 未提供客户端证书，TLS 握手在连接层面成功，但首次 IO 应失败
+	config := &tls.Config{InsecureSkipVerify: true}
+	conn, err := tls.Dial("tcp", addr, config)
+	if err != nil {
+		// 某些 Go 版本会在 Dial 时直接失败，也算验证通过
+		return
+	}
+	defer conn.Close()
+	buf := make([]byte, 1)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, err = conn.Read(buf)
+	if err == nil {
+		t.Fatal("expected TLS IO to fail without client cert")
+	}
+}
+
+func TestServerLoadAndApplyTLSChange(t *testing.T) {
+	certFile, keyFile, _ := generateTestCerts(t)
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
+log:
+  level: warn
+  output: stdout
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	var oldAddr string
+	ln := waitForFirstListener(t, s)
+	oldAddr = ln.Addr().String()
+	if oldAddr == "" {
+		t.Fatal("server not listening")
+	}
+
+	_ = writeTestConfig(t, dir, fmt.Sprintf(`listen: 127.0.0.1:0
+tls:
+  cert_file: %s
+  key_file: %s
+log:
+  level: warn
+  output: stdout
+`, certFile, keyFile))
+	if err := s.LoadAndApply(); err != nil {
+		t.Fatalf("LoadAndApply: %v", err)
+	}
+
+	// 新 listener 可能监听在新端口，获取当前地址后再验证 TLS
+	newLn := waitForFirstListener(t, s)
+	newAddr := newLn.Addr().String()
+	if newAddr == "" {
+		t.Fatal("server not listening after reload")
+	}
+
+	config := &tls.Config{InsecureSkipVerify: true}
+	conn, err := tls.Dial("tcp", newAddr, config)
+	if err != nil {
+		t.Fatalf("tls dial after reload: %v", err)
+	}
+	conn.Close()
+}
+
+func generateTestCerts(t *testing.T) (certFile, keyFile, caFile string) {
+	t.Helper()
+	dir := t.TempDir()
+
+	ca := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{Organization: []string{"YiGate Test"}},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
+	caFile = filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(caFile, caPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	serverCert := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "yigate"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"yigate"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	serverKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverBytes, err := x509.CreateCertificate(rand.Reader, serverCert, ca, &serverKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverBytes})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(serverKey)})
+	certFile = filepath.Join(dir, "server.crt")
+	keyFile = filepath.Join(dir, "server.key")
+	if err := os.WriteFile(certFile, certPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, keyPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return certFile, keyFile, caFile
+}
+
 func TestNewServer(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Listen = "127.0.0.1:0"
@@ -35,6 +242,21 @@ func TestNewServer(t *testing.T) {
 	if s.Manager() == nil || s.Router() == nil {
 		t.Fatal("manager/router not ready")
 	}
+}
+
+func waitForFirstListener(t *testing.T, s *Server) net.Listener {
+	t.Helper()
+	for i := 0; i < 50; i++ {
+		s.listenersMu.Lock()
+		for _, ln := range s.listeners {
+			s.listenersMu.Unlock()
+			return ln
+		}
+		s.listenersMu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("server did not listen")
+	return nil
 }
 
 func TestServerStartStop(t *testing.T) {
@@ -52,20 +274,8 @@ func TestServerStartStop(t *testing.T) {
 	}()
 
 	// 等待服务器监听并获取实际地址
-	var addr string
-	for i := 0; i < 50; i++ {
-		s.lnMu.Lock()
-		ln := s.ln
-		s.lnMu.Unlock()
-		if ln != nil {
-			addr = ln.Addr().String()
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if addr == "" {
-		t.Fatal("server did not listen")
-	}
+	ln := waitForFirstListener(t, s)
+	addr := ln.Addr().String()
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -89,14 +299,16 @@ func TestServerHandleHTTP(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
-	s.ln = ln
+	s.listenersMu.Lock()
+	s.listeners[cfg.Listen] = ln
+	s.listenersMu.Unlock()
 
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		s.handle(conn)
+		s.handle(conn, cfg.Listen)
 	}()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
@@ -154,14 +366,16 @@ func TestServerHandleSOCKS5(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
-	s.ln = ln
+	s.listenersMu.Lock()
+	s.listeners[cfg.Listen] = ln
+	s.listenersMu.Unlock()
 
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		s.handle(conn)
+		s.handle(conn, cfg.Listen)
 	}()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
@@ -200,7 +414,7 @@ func TestServerConnLimit(t *testing.T) {
 	c1, _ := net.Pipe()
 	defer c1.Close()
 
-	if !s.acquireConnSlot(c1) {
+	if !s.acquireConnSlot(c1, 0) {
 		t.Fatal("expected acquire with no limit to pass")
 	}
 	s.releaseConnSlot(c1)
@@ -217,12 +431,12 @@ func TestServerConnLimit(t *testing.T) {
 	}
 	c2, _ := net.Pipe()
 	defer c2.Close()
-	if !s2.acquireConnSlot(c2) {
+	if !s2.acquireConnSlot(c2, 1) {
 		t.Fatal("expected first acquire to pass")
 	}
 	c3, _ := net.Pipe()
 	defer c3.Close()
-	if s2.acquireConnSlot(c3) {
+	if s2.acquireConnSlot(c3, 1) {
 		t.Fatal("expected second acquire to fail")
 	}
 	s2.releaseConnSlot(c2)
@@ -372,16 +586,8 @@ log:
 	defer s.Stop()
 
 	var oldAddr string
-	for i := 0; i < 50; i++ {
-		s.lnMu.Lock()
-		ln := s.ln
-		s.lnMu.Unlock()
-		if ln != nil {
-			oldAddr = ln.Addr().String()
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	ln := waitForFirstListener(t, s)
+	oldAddr = ln.Addr().String()
 	if oldAddr == "" {
 		t.Fatal("server not listening")
 	}
@@ -396,12 +602,7 @@ log:
 		t.Fatalf("LoadAndApply: %v", err)
 	}
 
-	s.lnMu.Lock()
-	newLn := s.ln
-	s.lnMu.Unlock()
-	if newLn == nil {
-		t.Fatal("new listener is nil")
-	}
+	newLn := waitForFirstListener(t, s)
 	if newLn.Addr().String() == oldAddr {
 		t.Fatalf("expected new listen address, got same %s", oldAddr)
 	}
@@ -594,7 +795,7 @@ func TestServerConnCountAcrossLimitReload(t *testing.T) {
 	defer s.Stop()
 	c1, peer1 := net.Pipe()
 	defer peer1.Close()
-	if !s.acquireConnSlot(c1) {
+	if !s.acquireConnSlot(c1, s.maxConns.Load()) {
 		t.Fatal("first connection rejected")
 	}
 	if got := s.connCount.Load(); got != 1 {
@@ -603,7 +804,7 @@ func TestServerConnCountAcrossLimitReload(t *testing.T) {
 	s.maxConns.Store(0)
 	c2, peer2 := net.Pipe()
 	defer peer2.Close()
-	if !s.acquireConnSlot(c2) {
+	if !s.acquireConnSlot(c2, s.maxConns.Load()) {
 		t.Fatal("unlimited connection rejected")
 	}
 	if got := s.connCount.Load(); got != 2 {
@@ -613,7 +814,7 @@ func TestServerConnCountAcrossLimitReload(t *testing.T) {
 	s.maxConns.Store(1)
 	c3, peer3 := net.Pipe()
 	defer peer3.Close()
-	if s.acquireConnSlot(c3) {
+	if s.acquireConnSlot(c3, s.maxConns.Load()) {
 		t.Fatal("connection should be rejected while one remains active")
 	}
 	s.releaseConnSlot(c2)
@@ -631,7 +832,7 @@ func TestServerShutdownClosesActiveConnectionsOnTimeout(t *testing.T) {
 	}
 	conn, peer := net.Pipe()
 	defer peer.Close()
-	if !s.acquireConnSlot(conn) {
+	if !s.acquireConnSlot(conn, 0) {
 		t.Fatal("connection rejected")
 	}
 	go func() {
@@ -704,7 +905,11 @@ access_control:
 	if proxy.ProxyDialTimeout() != 2*time.Second {
 		t.Fatalf("dial timeout = %v, want 2s", proxy.ProxyDialTimeout())
 	}
-	if s.currentRuntime().access.IsAllowedIP(&net.TCPAddr{IP: net.ParseIP("127.0.0.1")}) {
+	if len(s.Config().Listeners) == 0 {
+		t.Fatal("expected listeners after reload")
+	}
+	listenerAddr := s.Config().Listeners[0].Listen
+	if s.currentRuntime().listeners[listenerAddr].access.IsAllowedIP(&net.TCPAddr{IP: net.ParseIP("127.0.0.1")}) {
 		t.Fatal("expected reloaded access control to deny 127.0.0.1")
 	}
 	proxy.Logger().Warn("new logger active")
@@ -713,3 +918,165 @@ access_control:
 		t.Fatalf("expected new log file: %v", err)
 	}
 }
+
+func TestServerStartMultipleListeners(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	cfg.Listeners = []ListenerConfig{
+		{Listen: "127.0.0.1:0"},
+		{Listen: "127.0.0.2:0"},
+	}
+	s, err := NewServer("", cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	addrs := make(map[string]bool)
+	for i := 0; i < 50 && len(addrs) < 2; i++ {
+		s.listenersMu.Lock()
+		for _, ln := range s.listeners {
+			addrs[ln.Addr().String()] = true
+		}
+		s.listenersMu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(addrs) != 2 {
+		t.Fatalf("expected 2 listeners, got %d", len(addrs))
+	}
+
+	for addr := range addrs {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatalf("dial %s: %v", addr, err)
+		}
+		conn.Close()
+	}
+}
+
+func TestServerMultiListenerHotReload(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: token
+log:
+  level: warn
+  output: stdout
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	oldAddr := waitForFirstListener(t, s).Addr().String()
+
+	_ = writeTestConfig(t, dir, `listeners:
+  - listen: 127.0.0.1:0
+  - listen: 127.0.0.2:0
+management: 127.0.0.1:0
+management_auth_token: token
+log:
+  level: warn
+  output: stdout
+`)
+	if err := s.LoadAndApply(); err != nil {
+		t.Fatalf("LoadAndApply: %v", err)
+	}
+
+	var ln1, ln2 net.Listener
+	for i := 0; i < 50 && (ln1 == nil || ln2 == nil); i++ {
+		s.listenersMu.Lock()
+		ln1 = s.listeners["127.0.0.1:0"]
+		ln2 = s.listeners["127.0.0.2:0"]
+		s.listenersMu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if ln1 == nil || ln2 == nil {
+		t.Fatalf("expected 2 listeners after reload, got ln1=%v ln2=%v", ln1, ln2)
+	}
+
+	// 原 listener 配置未变，应被复用或至少仍在监听
+	if ln1.Addr().String() != oldAddr && ln2.Addr().String() != oldAddr {
+		t.Fatalf("old listen address %s should still be active", oldAddr)
+	}
+
+	for _, ln := range []net.Listener{ln1, ln2} {
+		conn, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			t.Fatalf("dial %s: %v", ln.Addr().String(), err)
+		}
+		conn.Close()
+	}
+}
+
+func TestServerMultiListenerPerListenerUsers(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestConfig(t, dir, `listeners:
+  - listen: 127.0.0.1:0
+    users:
+      alice: alice-pass
+  - listen: 127.0.0.2:0
+    users:
+      bob: bob-pass
+management: 127.0.0.1:0
+management_auth_token: token
+log:
+  level: warn
+  output: stdout
+`)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(path, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	addrs := make(map[string]bool)
+	for i := 0; i < 50 && len(addrs) < 2; i++ {
+		s.listenersMu.Lock()
+		for _, ln := range s.listeners {
+			addrs[ln.Addr().String()] = true
+		}
+		s.listenersMu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(addrs) != 2 {
+		t.Fatalf("expected 2 listeners, got %d", len(addrs))
+	}
+
+	// 验证每个 listener 的运行时上下文都有独立的用户配置
+	rt := s.currentRuntime()
+	if rt == nil || len(rt.listeners) != 2 {
+		t.Fatal("expected 2 listener runtimes")
+	}
+	for addr, lr := range rt.listeners {
+		if len(lr.config.Users) == 0 {
+			t.Fatalf("listener %s has no users", addr)
+		}
+	}
+}
+

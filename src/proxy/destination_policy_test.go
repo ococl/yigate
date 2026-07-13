@@ -98,7 +98,7 @@ func TestRouterDenyRuleBlocksDial(t *testing.T) {
 		Rules: []RouteRule{
 			{Type: "ip_cidr", Values: []string{"93.184.216.34/32"}, Action: ActionDeny},
 		},
-	})
+	}, DNSConfig{})
 	if got := router.Decide("93.184.216.34:443").Action; got != ActionDeny {
 		t.Fatalf("deny rule not applied, got %q", got)
 	}
@@ -111,7 +111,7 @@ func TestRouterMatchDenyRejected(t *testing.T) {
 	if _, err := NewRouter(RoutingConfig{
 		Final: ActionAuto,
 		Rules: []RouteRule{{Type: "match", Values: nil, Action: ActionDeny}},
-	}); err == nil {
+	}, DNSConfig{}); err == nil {
 		t.Fatal("match+deny should be rejected to avoid global block")
 	}
 }
@@ -120,7 +120,7 @@ func TestDialDirectCheckedBlocksProtectedIP(t *testing.T) {
 	router, _ := NewRouter(RoutingConfig{
 		Final:  ActionDirect,
 		Policy: newTestPolicy(t, DestinationPolicyConfig{ProtectPrivate: true, DefaultAction: ActionAllow}),
-	})
+	}, DNSConfig{})
 	if _, err := router.Dial("127.0.0.1:80", nil); err == nil {
 		t.Fatal("loopback dial should be denied by policy")
 	}

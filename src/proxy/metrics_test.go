@@ -72,7 +72,7 @@ func TestTunnelMetrics(t *testing.T) {
 	targetSide, target := net.Pipe()
 	done := make(chan struct{})
 	go func() {
-		Tunnel(proxySide, nil, targetSide)
+		Tunnel(proxySide, nil, targetSide, TrafficKey{}, nil)
 		close(done)
 	}()
 

@@ -103,6 +103,9 @@ type deadlineReader struct {
 	conn            net.Conn
 	timeout         time.Duration
 	metricDirection string
+	trafficKey      TrafficKey
+	accounter       *TrafficAccounter
+	auditDirection  string // "in" = client_to_target, "out" = target_to_client
 }
 
 func (r *deadlineReader) Read(p []byte) (int, error) {
@@ -113,6 +116,13 @@ func (r *deadlineReader) Read(p []byte) (int, error) {
 	if n > 0 && r.metricDirection != "" {
 		MetricAdd("k5pw_tunnel_transferred_bytes_total", float64(n), "direction="+r.metricDirection)
 		MetricInc("k5pw_tunnel_packets_total", "direction="+r.metricDirection)
+	}
+	if n > 0 && r.accounter != nil {
+		if r.auditDirection == "in" {
+			_ = r.accounter.Record(r.trafficKey, int64(n), 0)
+		} else {
+			_ = r.accounter.Record(r.trafficKey, 0, int64(n))
+		}
 	}
 	return n, err
 }

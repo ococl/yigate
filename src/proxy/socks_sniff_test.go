@@ -38,7 +38,7 @@ func TestPreferIPv4(t *testing.T) {
 
 func TestShouldSniffSOCKS5Target(t *testing.T) {
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "up", URL: "socks5://127.0.0.1:1080"}})
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect, Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"up"}}})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect, Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"up"}}}, DNSConfig{})
 	if !shouldSniffSOCKS5Target("127.0.0.1:443", mgr, router) {
 		t.Fatal("expected sniff for IP target")
 	}

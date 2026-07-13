@@ -71,7 +71,7 @@ func TestRouterDialProxyCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router, err := NewRouter(RoutingConfig{Final: ActionProxy})
+	router, err := NewRouter(RoutingConfig{Final: ActionProxy}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestRouterDialProxyCache(t *testing.T) {
 
 func TestRouterDialAutoDirectFirst(t *testing.T) {
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
-	router, err := NewRouter(RoutingConfig{Final: ActionAuto, Auto: AutoConfig{Mode: "direct_first", DirectTimeout: Duration(500 * time.Millisecond)}})
+	router, err := NewRouter(RoutingConfig{Final: ActionAuto, Auto: AutoConfig{Mode: "direct_first", DirectTimeout: Duration(500 * time.Millisecond)}}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestRouterDialAutoProxyFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router, err := NewRouter(RoutingConfig{Final: ActionAuto, Auto: AutoConfig{Mode: "proxy_first", DirectTimeout: Duration(100 * time.Millisecond)}})
+	router, err := NewRouter(RoutingConfig{Final: ActionAuto, Auto: AutoConfig{Mode: "proxy_first", DirectTimeout: Duration(100 * time.Millisecond)}}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestRouterDialAutoProxyFirst(t *testing.T) {
 
 func TestRouterDialAutoProxyFallback(t *testing.T) {
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
-	router, err := NewRouter(RoutingConfig{Final: ActionAuto, Auto: AutoConfig{Mode: "direct_first", DirectTimeout: Duration(100 * time.Millisecond)}})
+	router, err := NewRouter(RoutingConfig{Final: ActionAuto, Auto: AutoConfig{Mode: "direct_first", DirectTimeout: Duration(100 * time.Millisecond)}}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestRouterDialSocks5H(t *testing.T) {
 		Final:           ActionDirect,
 		Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"socks5"}},
 		Auto:            AutoConfig{CacheTTL: Duration(time.Hour)},
-	})
+	}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,14 +176,14 @@ func TestRouterDialSocks5H(t *testing.T) {
 }
 
 func TestRouterNewRouterInvalid(t *testing.T) {
-	_, err := NewRouter(RoutingConfig{Final: "invalid"})
+	_, err := NewRouter(RoutingConfig{Final: "invalid"}, DNSConfig{})
 	if err == nil {
 		t.Fatal("expected error for invalid final")
 	}
 }
 
 func TestRouterDialDirectNilManager(t *testing.T) {
-	router, err := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, err := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestRouterDialDirectNilManager(t *testing.T) {
 }
 
 func TestDialTargetForRequest(t *testing.T) {
-	router, err := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, err := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

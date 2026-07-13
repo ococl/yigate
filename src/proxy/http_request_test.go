@@ -12,7 +12,7 @@ import (
 func TestRequestViaProxy(t *testing.T) {
 	proxyAddr := startMockHTTPProxy(t)
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
-	router, _ := NewRouter(RoutingConfig{Final: ActionProxy})
+	router, _ := NewRouter(RoutingConfig{Final: ActionProxy}, DNSConfig{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("proxied"))
@@ -20,7 +20,7 @@ func TestRequestViaProxy(t *testing.T) {
 	defer ts.Close()
 
 	req := httptest.NewRequest("GET", ts.URL+"/path", nil)
-	resp, err := requestViaProxy(req, mgr, router, nil, func() {})
+	resp, err := requestViaProxy(req, mgr, router, nil, func() {}, "")
 	if err != nil {
 		t.Fatalf("requestViaProxy: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestRequestViaProxy(t *testing.T) {
 func TestRequestViaProxyNoRetry(t *testing.T) {
 	proxyAddr := startMockHTTPProxy(t)
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
-	router, _ := NewRouter(RoutingConfig{Final: ActionProxy})
+	router, _ := NewRouter(RoutingConfig{Final: ActionProxy}, DNSConfig{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("proxied"))
@@ -42,7 +42,7 @@ func TestRequestViaProxyNoRetry(t *testing.T) {
 	defer ts.Close()
 
 	req := httptest.NewRequest("GET", ts.URL+"/path", nil)
-	resp, err := requestViaProxyNoRetry(req, mgr, router, nil)
+	resp, err := requestViaProxyNoRetry(req, mgr, router, nil, "")
 	if err != nil {
 		t.Fatalf("requestViaProxyNoRetry: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestRequestViaProxyNoRetry(t *testing.T) {
 func TestRequestAutoDirectFirst(t *testing.T) {
 	proxyAddr := startMockHTTPProxy(t)
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
-	router, _ := NewRouter(RoutingConfig{Final: ActionAuto})
+	router, _ := NewRouter(RoutingConfig{Final: ActionAuto}, DNSConfig{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("auto"))
@@ -60,7 +60,7 @@ func TestRequestAutoDirectFirst(t *testing.T) {
 	defer ts.Close()
 
 	req := httptest.NewRequest("GET", ts.URL+"/path", nil)
-	resp, err := requestAuto(req, mgr, router, func() {})
+	resp, err := requestAuto(req, mgr, router, func() {}, "")
 	if err != nil {
 		t.Fatalf("requestAuto: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestRequestViaProxyRetriesBufferedBody(t *testing.T) {
 	}
 	mgr.StartHealthCheck(3600)
 	defer mgr.StopHealthCheck()
-	router, _ := NewRouter(RoutingConfig{Final: ActionProxy})
+	router, _ := NewRouter(RoutingConfig{Final: ActionProxy}, DNSConfig{})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -112,7 +112,7 @@ func TestRequestViaProxyRetriesBufferedBody(t *testing.T) {
 		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(string(bodyBytes))), nil }
 		req.ContentLength = int64(len(bodyBytes))
 	}
-	resp, err := requestViaProxy(req, mgr, router, nil, resetBody)
+	resp, err := requestViaProxy(req, mgr, router, nil, resetBody, "")
 	if err != nil {
 		t.Fatalf("requestViaProxy: %v", err)
 	}

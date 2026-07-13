@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,12 +19,24 @@ import (
 	"k5pw/proxy"
 )
 
+type listenerRuntime struct {
+	config ListenerConfig
+	access *proxy.AccessController
+}
+
 type runtimeState struct {
-	config    *Config
-	manager   *proxy.UpstreamManager
-	router    *proxy.Router
-	access    *proxy.AccessController
-	geoUpdate *proxy.GeoSiteUpdater
+	config         *Config
+	manager        *proxy.UpstreamManager
+	router         *proxy.Router
+	geoUpdate      *proxy.GeoSiteUpdater
+	listeners      map[string]*listenerRuntime
+	trafficAccounter *proxy.TrafficAccounter
+}
+
+// listenerContext 封装单个 listener 的运行时上下文，供连接处理使用。
+type listenerContext struct {
+	config ListenerConfig
+	access *proxy.AccessController
 }
 
 // Server 统一代理服务器，支持配置热加载
@@ -32,8 +47,8 @@ type Server struct {
 	mgmtAddr    string
 	stateMu     sync.RWMutex
 	applyMu     sync.Mutex
-	lnMu        sync.Mutex
-	ln          net.Listener
+	listenersMu sync.Mutex
+	listeners   map[string]net.Listener
 	quit        chan struct{}
 	stopOnce    sync.Once
 	shutdownErr error
@@ -54,6 +69,7 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 		cfgPath:     cfgPath,
 		quit:        make(chan struct{}),
 		connections: make(map[net.Conn]struct{}),
+		listeners:   make(map[string]net.Listener),
 	}
 	if err := s.ApplyConfig(cfg); err != nil {
 		return nil, err
@@ -75,9 +91,13 @@ func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 	if cur == nil {
 		return proxy.StatusSnapshot{Status: "up", PprofEnabled: pprofEnabled}
 	}
+	listens := []string{}
+	for _, lc := range cur.Listeners {
+		listens = append(listens, lc.Listen)
+	}
 	return proxy.StatusSnapshot{
 		Status:        "up",
-		Listen:        cur.Listen,
+		Listen:        strings.Join(listens, ","),
 		Management:    cur.Management,
 		UpstreamCount: len(cur.Upstreams),
 		RouterReady:   s.Router() != nil,
@@ -134,25 +154,35 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	default:
 	}
 
+	// 确保无论是旧版单 listen 还是直接构造的 Config，listeners 都被归一化。
+	baseDir := filepath.Dir(s.cfgPath)
+	if err := normalizeListeners(cfg, baseDir); err != nil {
+		return err
+	}
+
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
 	if err != nil {
 		return err
 	}
-	access, err := proxy.NewAccessController(cfg.AccessControl)
-	if err != nil {
-		return err
+	listenerRuntimes := make(map[string]*listenerRuntime, len(cfg.Listeners))
+	for i, lc := range cfg.Listeners {
+		access, err := proxy.NewAccessController(lc.AccessControl)
+		if err != nil {
+			return fmt.Errorf("listeners[%d].access_control: %w", i, err)
+		}
+		listenerRuntimes[lc.Listen] = &listenerRuntime{
+			config: lc,
+			access: access,
+		}
 	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
 	if initialLoad && cfg.Routing.GeoSite.AutoUpdate && cfg.Routing.GeoSite.Path != "" {
 		if _, err := os.Stat(cfg.Routing.GeoSite.Path); os.IsNotExist(err) {
-			// 首次加载且文件缺失时改为后台异步下载，避免阻塞启动
-			// （尤其在隔离网络或国内网络下下载可能很慢甚至失败）。
 			go func() {
 				if err := updater.UpdateOnce(); err != nil {
 					proxy.Logger().Warnw("initial geosite update failed", "error", err)
 					return
 				}
-				// 下载成功后重新加载配置以应用最新的 geosite 数据。
 				loaded, lerr := LoadConfig(s.cfgPath)
 				if lerr != nil {
 					proxy.Logger().Warnw("load config after initial geosite update failed", "error", lerr)
@@ -169,23 +199,26 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		return err
 	}
 	cfg.Routing.Policy = policy
-	router, err := proxy.NewRouter(cfg.Routing)
+	router, err := proxy.NewRouter(cfg.Routing, cfg.DNS)
 	if err != nil {
 		return err
 	}
 	if err := proxy.InitLogger(cfg.Log); err != nil {
 		return err
 	}
-	// 启动路由器后台任务（路由缓存过期清理）。其对应的 Stop 由热加载与关闭流程负责。
 	router.Start()
+
+	trafficAccounter := proxy.NewTrafficAccounter(cfg.TrafficAudit)
+	proxy.SetGlobalTrafficAccounter(trafficAccounter)
 
 	oldState := s.currentRuntime()
 	newState := &runtimeState{
-		config:    cfg,
-		manager:   mgr,
-		router:    router,
-		access:    access,
-		geoUpdate: updater,
+		config:           cfg,
+		manager:          mgr,
+		router:           router,
+		geoUpdate:        updater,
+		listeners:        listenerRuntimes,
+		trafficAccounter: trafficAccounter,
 	}
 
 	s.stateMu.RLock()
@@ -208,29 +241,49 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		}
 	}
 
-	var newLn net.Listener
-	s.lnMu.Lock()
-	currentLn := s.ln
-	s.lnMu.Unlock()
-	if !initialLoad && oldState != nil && oldState.config.Listen != cfg.Listen && currentLn != nil {
-		newLn, err = net.Listen("tcp", cfg.Listen)
-		if err != nil {
-			if mgmtChanged && newMgmt != nil {
-				newMgmt.Stop()
+	newListeners := make(map[string]net.Listener)
+	if !initialLoad {
+		for _, lc := range cfg.Listeners {
+			oldLn := s.currentListener(lc.Listen)
+			oldLc := oldListenerConfig(oldState, lc.Listen)
+			if oldLn != nil && oldLc != nil && oldLc.Listen == lc.Listen && oldLc.TLS == lc.TLS && oldLc.TProxy == lc.TProxy {
+				newListeners[lc.Listen] = oldLn
+				continue
 			}
-			return fmt.Errorf("prepare proxy listener on %s: %w", cfg.Listen, err)
+			ln, err := createListener(lc.Listen, lc.TLS, lc.TProxy)
+			if err != nil {
+				for _, l := range newListeners {
+					_ = l.Close()
+				}
+				if mgmtChanged && newMgmt != nil {
+					newMgmt.Stop()
+				}
+				return fmt.Errorf("prepare listener on %s: %w", lc.Listen, err)
+			}
+			newListeners[lc.Listen] = ln
 		}
 	}
 
 	proxy.SetTimeouts(cfg.Timeouts)
 	s.runtime.Store(newState)
-	s.maxConns.Store(int64(cfg.MaxConnections))
 
-	if newLn != nil {
-		s.lnMu.Lock()
-		currentLn = s.ln
-		s.ln = newLn
-		s.lnMu.Unlock()
+	if !initialLoad {
+		s.listenersMu.Lock()
+		oldListeners := s.listeners
+		s.listeners = newListeners
+		s.listenersMu.Unlock()
+		for addr, oldLn := range oldListeners {
+			if newLn, ok := newListeners[addr]; ok && newLn == oldLn {
+				continue
+			}
+			_ = oldLn.Close()
+		}
+		for addr, newLn := range newListeners {
+			if oldLn, ok := oldListeners[addr]; ok && oldLn == newLn {
+				continue
+			}
+			go s.serveListener(addr, newLn)
+		}
 	}
 	if mgmtChanged {
 		s.stateMu.Lock()
@@ -240,7 +293,11 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 
 	mgr.StartHealthCheck(cfg.CheckInterval)
-	access.StartCleanup(5*time.Minute, 10*time.Minute)
+	for _, lr := range listenerRuntimes {
+		if lr.access != nil {
+			lr.access.StartCleanup(5*time.Minute, 10*time.Minute)
+		}
+	}
 	updater.Start(func() {
 		loaded, err := LoadConfig(s.cfgPath)
 		if err != nil {
@@ -252,13 +309,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		}
 	})
 
-	if newLn != nil && currentLn != nil {
-		_ = currentLn.Close()
-	}
 	if oldState != nil {
-		if oldState.access != nil {
-			oldState.access.StopCleanup()
-		}
 		if oldState.geoUpdate != nil {
 			oldState.geoUpdate.Stop()
 		}
@@ -268,6 +319,14 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		if oldState.router != nil {
 			oldState.router.Stop()
 		}
+		if oldState.trafficAccounter != nil {
+			oldState.trafficAccounter.Stop()
+		}
+		for _, lr := range oldState.listeners {
+			if lr.access != nil {
+				lr.access.StopCleanup()
+			}
+		}
 	}
 	if mgmtChanged && oldMgmt != nil {
 		oldMgmt.Stop()
@@ -275,7 +334,32 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	return nil
 }
 
+func oldListenerConfig(state *runtimeState, addr string) *ListenerConfig {
+	if state == nil || state.listeners == nil {
+		return nil
+	}
+	lr, ok := state.listeners[addr]
+	if !ok {
+		return nil
+	}
+	return &lr.config
+}
+
+func (s *Server) currentListener(addr string) net.Listener {
+	s.listenersMu.Lock()
+	defer s.listenersMu.Unlock()
+	return s.listeners[addr]
+}
+
 func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
+	listenAddrs := make([]string, 0, len(cfg.Listeners))
+	for _, lc := range cfg.Listeners {
+		listenAddrs = append(listenAddrs, lc.Listen)
+	}
+	listen := cfg.Listen
+	if len(listenAddrs) > 0 {
+		listen = strings.Join(listenAddrs, ",")
+	}
 	mgmt := proxy.NewManagementServer(func() proxy.HealthStatus {
 		curCfg := s.Config()
 		if curCfg == nil {
@@ -283,7 +367,7 @@ func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
 		}
 		return proxy.HealthStatus{
 			Status:        "up",
-			Listen:        curCfg.Listen,
+			Listen:        listen,
 			UpstreamCount: len(curCfg.Upstreams),
 			ManagerReady:  s.Manager() != nil,
 			RouterReady:   s.Router() != nil,
@@ -291,6 +375,7 @@ func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
 	}, cfg.EnablePprof, cfg.ManagementAuthToken)
 	mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
 	mgmt.SetReload(s.reloadConfig)
+	mgmt.SetConfigEditor(newConfigEditor(s.cfgPath, s.reloadConfig))
 	return mgmt
 }
 
@@ -303,77 +388,84 @@ func (s *Server) LoadAndApply() error {
 	return s.applyConfig(cfg, false)
 }
 
-// Start 启动监听并处理连接
+// Start 启动所有监听并处理连接。
 func (s *Server) Start() error {
 	cfg := s.Config()
 	if cfg == nil {
 		return errors.New("server has no config")
 	}
 
-	ln, err := net.Listen("tcp", cfg.Listen)
-	if err != nil {
-		return err
+	listeners := make(map[string]net.Listener)
+	for _, lc := range cfg.Listeners {
+		ln, err := createListener(lc.Listen, lc.TLS, lc.TProxy)
+		if err != nil {
+			for _, l := range listeners {
+				_ = l.Close()
+			}
+			return err
+		}
+		listeners[lc.Listen] = ln
+		proxy.Logger().Infow("yigate listening", "address", lc.Listen, "tls", lc.TLS.CertFile != "", "tproxy", lc.TProxy.Enabled)
 	}
-	s.lnMu.Lock()
-	select {
-	case <-s.quit:
-		s.lnMu.Unlock()
-		ln.Close()
-		return nil
-	default:
-		s.ln = ln
-	}
-	s.lnMu.Unlock()
-	proxy.Logger().Infow("k5pw listening", "address", cfg.Listen)
+
+	s.listenersMu.Lock()
+	s.listeners = listeners
+	s.listenersMu.Unlock()
 
 	if err := s.watchConfig(); err != nil {
 		proxy.Logger().Warnw("watch config failed", "error", err)
 	}
 
-	for {
-		s.lnMu.Lock()
-		curLn := s.ln
-		s.lnMu.Unlock()
-		if curLn == nil {
-			select {
-			case <-s.quit:
-				return nil
-			default:
-				proxy.Logger().Warnw("listener is nil, waiting for new listener")
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-		}
+	for addr, ln := range listeners {
+		go s.serveListener(addr, ln)
+	}
 
-		conn, err := curLn.Accept()
+	<-s.quit
+	return nil
+}
+
+func (s *Server) serveListener(addr string, ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
 		if err != nil {
 			select {
 			case <-s.quit:
-				return nil
+				return
 			default:
-				// 监听地址可能被切换，检查是否已替换 listener
-				s.lnMu.Lock()
-				newLn := s.ln
-				s.lnMu.Unlock()
-				if newLn != curLn {
-					continue
+				if s.currentListener(addr) != ln {
+					// listener 已被替换，退出旧循环
+					return
 				}
-				proxy.Logger().Warnw("accept error", "error", err)
+				proxy.Logger().Warnw("accept error", "address", addr, "error", err)
 				continue
 			}
 		}
-		if !s.acquireConnSlot(conn) {
+		if !s.acquireConnSlot(conn, s.maxConnsForListener(addr)) {
 			continue
 		}
 		go func() {
 			defer s.releaseConnSlot(conn)
-			s.handle(conn)
+			s.handle(conn, addr)
 		}()
 	}
 }
 
-func (s *Server) acquireConnSlot(conn net.Conn) bool {
-	max := s.maxConns.Load()
+func (s *Server) maxConnsForListener(addr string) int64 {
+	state := s.currentRuntime()
+	if state == nil || state.listeners == nil {
+		return 0
+	}
+	lr, ok := state.listeners[addr]
+	if !ok {
+		return 0
+	}
+	max := lr.config.MaxConnections
+	if max <= 0 {
+		max = state.config.MaxConnections
+	}
+	return int64(max)
+}
+func (s *Server) acquireConnSlot(conn net.Conn, max int64) bool {
 	for {
 		cur := s.connCount.Load()
 		if max > 0 && cur >= max {
@@ -433,12 +525,12 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.activeMu.Lock()
 		s.stopping = true
 		s.activeMu.Unlock()
-		s.lnMu.Lock()
-		if s.ln != nil {
-			_ = s.ln.Close()
-			s.ln = nil
+		s.listenersMu.Lock()
+		for _, ln := range s.listeners {
+			_ = ln.Close()
 		}
-		s.lnMu.Unlock()
+		s.listeners = make(map[string]net.Listener)
+		s.listenersMu.Unlock()
 		s.watcherMu.Lock()
 		if s.watcher != nil {
 			_ = s.watcher.Close()
@@ -453,9 +545,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		mgmt := s.mgmt
 		s.stateMu.RUnlock()
 		if state != nil {
-			if state.access != nil {
-				state.access.StopCleanup()
-			}
 			if state.geoUpdate != nil {
 				state.geoUpdate.Stop()
 			}
@@ -464,6 +553,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			}
 			if state.router != nil {
 				state.router.Stop()
+			}
+			if state.trafficAccounter != nil {
+				state.trafficAccounter.Stop()
+			}
+			for _, lr := range state.listeners {
+				if lr.access != nil {
+					lr.access.StopCleanup()
+				}
 			}
 		}
 		if mgmt != nil {
@@ -568,29 +665,88 @@ func (s *Server) watchLoop(w *fsnotify.Watcher) {
 	}
 }
 
-func (s *Server) handle(conn net.Conn) {
-	// 连接关闭由 public handler 负责，避免重复关闭。
+// buildTLSConfig 根据 TLS 配置构造 *tls.Config，支持 mTLS。
+func buildTLSConfig(tlsCfg TLSConfig) (*tls.Config, error) {
+	if strings.TrimSpace(tlsCfg.CertFile) == "" || strings.TrimSpace(tlsCfg.KeyFile) == "" {
+		return nil, nil
+	}
+	cert, err := tls.LoadX509KeyPair(tlsCfg.CertFile, tlsCfg.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load TLS key pair: %w", err)
+	}
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	if strings.TrimSpace(tlsCfg.ClientCAFile) != "" {
+		caPEM, err := os.ReadFile(tlsCfg.ClientCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read client CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("failed to parse client CA certificate")
+		}
+		config.ClientCAs = pool
+		config.ClientAuth = tls.RequireAndVerifyClientCert
+	}
+	return config, nil
+}
+
+// createListener 根据 TLS 和 TPROXY 配置创建监听。
+func createListener(addr string, tlsCfg TLSConfig, tproxyCfg proxy.TProxyConfig) (net.Listener, error) {
+	// TPROXY 模式需要 IP_TRANSPARENT socket option
+	if tproxyCfg.Enabled && tproxyCfg.NormalizedMode() == "tproxy" {
+		return proxy.CreateTProxyListener(addr)
+	}
+	baseLn, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	config, err := buildTLSConfig(tlsCfg)
+	if err != nil {
+		_ = baseLn.Close()
+		return nil, err
+	}
+	if config == nil {
+		return baseLn, nil
+	}
+	return tls.NewListener(baseLn, config), nil
+}
+
+func (s *Server) handle(conn net.Conn, addr string) {
 	state := s.currentRuntime()
 	if state == nil || state.config == nil || state.manager == nil || state.router == nil {
 		conn.Close()
 		return
 	}
-	cfg := state.config
 	mgr := state.manager
 	router := state.router
-	access := state.access
 
-	if access != nil {
-		if !access.IsAllowedIP(conn.RemoteAddr()) {
+	lc := s.listenerContext(addr)
+	if lc == nil {
+		proxy.Logger().Warnw("no listener context", "address", addr)
+		conn.Close()
+		return
+	}
+
+	if lc.access != nil {
+		if !lc.access.IsAllowedIP(conn.RemoteAddr()) {
 			proxy.Logger().Warnw("connection denied by ACL", "remote", conn.RemoteAddr())
 			conn.Close()
 			return
 		}
-		if !access.AllowConn(conn.RemoteAddr()) {
+		if !lc.access.AllowConn(conn.RemoteAddr()) {
 			proxy.Logger().Warnw("connection rate limited", "remote", conn.RemoteAddr())
 			conn.Close()
 			return
 		}
+	}
+
+	// 透明代理模式：跳过协议检测，直接获取原始目标并隧道转发
+	if lc.config.TProxy.Enabled {
+		proxy.HandleTProxy(conn, mgr, router, lc.config.TProxy.NormalizedMode())
+		return
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(proxy.ProxyHandshakeTimeout())); err != nil {
@@ -607,8 +763,23 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	if b[0] == 0x05 {
-		proxy.HandleSOCKS(conn, br, cfg.Users, mgr, router, access, cfg.Socks5.AllowBind, cfg.Socks5.AllowUDPAssociate)
+		proxy.HandleSOCKS(conn, br, lc.config.Users, mgr, router, lc.access, lc.config.Socks5.AllowBind, lc.config.Socks5.AllowUDPAssociate)
 	} else {
-		proxy.HandleHTTP(conn, br, cfg.Users, mgr, router, access)
+		proxy.HandleHTTP(conn, br, lc.config.Users, mgr, router, lc.access)
+	}
+}
+
+func (s *Server) listenerContext(addr string) *listenerContext {
+	state := s.currentRuntime()
+	if state == nil || state.listeners == nil {
+		return nil
+	}
+	lr, ok := state.listeners[addr]
+	if !ok {
+		return nil
+	}
+	return &listenerContext{
+		config: lr.config,
+		access: lr.access,
 	}
 }

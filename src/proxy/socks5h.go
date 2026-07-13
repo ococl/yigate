@@ -42,7 +42,7 @@ func (r *Router) socks5hAvailable() bool {
 	return time.Now().UnixNano() > until
 }
 
-func (r *Router) DialSocks5H(target string, mgr *UpstreamManager) (net.Conn, error) {
+func (r *Router) DialSocks5H(target string, mgr *UpstreamManager, sourceIP ...string) (net.Conn, error) {
 	if r == nil || !r.socks5h.Enabled {
 		return nil, fmt.Errorf("socks5h redirect is disabled")
 	}
@@ -62,10 +62,19 @@ func (r *Router) DialSocks5H(target string, mgr *UpstreamManager) (net.Conn, err
 		}
 	}
 
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
 	var lastErr error
 	names := r.socks5h.Upstreams
 	for i := 0; i < mgr.Socks5AttemptCount(names); i++ {
-		up := mgr.SelectSocks5For(names)
+		var up *Upstream
+		if sip != "" {
+			up = mgr.SelectSocks5ForWithSourceIP(names, sip)
+		} else {
+			up = mgr.SelectSocks5For(names)
+		}
 		if up == nil {
 			break
 		}

@@ -2,8 +2,17 @@ package proxy
 
 import (
 	"bufio"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -78,20 +87,166 @@ func TestCheckHTTPProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if !checkHTTPProtocol(conn, up) {
+	if !checkHTTPProtocol(conn, up, 5*time.Second) {
 		t.Fatal("expected HTTP protocol check to pass")
 	}
 }
 
-func TestCheckSOCKS5Protocol(t *testing.T) {
-	proxyAddr := startMockSocks5Proxy(t)
-	up := &Upstream{URL: mustURL("socks5://" + proxyAddr)}
-	conn, err := net.Dial("tcp", proxyAddr)
+func TestCheckHTTPProtocolCustomPathAndCodes(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				br := bufio.NewReader(c)
+				req, _ := http.ReadRequest(br)
+				if req == nil {
+					return
+				}
+				if req.URL.Path == "/health" {
+					c.Write([]byte("HTTP/1.1 204 No Content\r\n\r\n"))
+				} else {
+					c.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+				}
+			}(conn)
+		}
+	}()
+
+	up := &Upstream{
+		URL: mustURL("http://" + ln.Addr().String()),
+		HealthCheck: HealthCheckConfig{
+			Type:          "http",
+			Path:          "/health",
+			ExpectedCodes: []int{204},
+			Timeout:       Duration(5 * time.Second),
+		},
+	}
+	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if !checkSOCKS5Protocol(conn, up) {
-		t.Fatal("expected SOCKS5 protocol check to pass")
+	if !checkHTTPProtocol(conn, up, 5*time.Second) {
+		t.Fatal("expected custom path/code check to pass")
 	}
+}
+
+func TestCheckTLSProtocol(t *testing.T) {
+	certFile, keyFile, _ := generateTestCerts(t)
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 1)
+				c.Read(buf)
+			}(conn)
+		}
+	}()
+
+	old := tlsConfigForHost
+	tlsConfigForHost = func(addr string) *tls.Config { return &tls.Config{InsecureSkipVerify: true} }
+	defer func() { tlsConfigForHost = old }()
+
+	up := &Upstream{URL: mustURL("https://" + ln.Addr().String())}
+	if !checkTLSUpstream(ln.Addr().String(), 5*time.Second) {
+		t.Fatal("expected TLS check to pass")
+	}
+	_ = up
+}
+
+func TestHealthCheckPerUpstreamFailureThreshold(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "dead", URL: "http://127.0.0.1:1", HealthCheck: HealthCheckConfig{FailureThreshold: 2}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.checkAll()
+	if mgr.byName["dead"].dead {
+		t.Fatal("expected dead upstream not marked dead after 1 failure")
+	}
+	mgr.checkAll()
+	if !mgr.byName["dead"].dead {
+		t.Fatal("expected dead upstream marked dead after 2 failures")
+	}
+}
+
+func generateTestCerts(t *testing.T) (certFile, keyFile, caFile string) {
+	t.Helper()
+	dir := t.TempDir()
+
+	ca := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{Organization: []string{"YiGate Test"}},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:         true,
+		BasicConstraintsValid: true,
+	}
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caBytes})
+	caFile = filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(caFile, caPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	serverCert := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "yigate"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"yigate"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	serverKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverBytes, err := x509.CreateCertificate(rand.Reader, serverCert, ca, &serverKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverBytes})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(serverKey)})
+	certFile = filepath.Join(dir, "server.crt")
+	keyFile = filepath.Join(dir, "server.key")
+	if err := os.WriteFile(certFile, certPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, keyPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	return certFile, keyFile, caFile
 }

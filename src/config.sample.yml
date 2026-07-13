@@ -1,6 +1,60 @@
-listen: "127.0.0.1:4479"
+# 多监听端口策略：每个 listener 可独立配置监听地址、TLS、用户认证、访问控制、SOCKS5 命令与最大连接数。
+# 当 listeners 非空时，顶层的 listen/users/access_control/socks5/tls/max_connections 仅作为旧版兼容默认值，
+# 实际代理入口由 listeners 定义。
+listeners:
+  - listen: "127.0.0.1:4479"
+    users:
+      username: "${K5PW_PROXY_PASSWORD}"
+    access_control:
+      allowed_clients: []
+      rate_limit:
+        connections_per_second: 0
+        burst: 0
+      max_conns_per_user: 0
+    max_connections: 1024
+    # TLS 服务端终止：配置后该端口升级为 HTTPS/SOCKS5 over TLS，并可选 mTLS 客户端认证。
+    # tls:
+    #   cert_file: "certs/server.crt"
+    #   key_file: "certs/server.key"
+    #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
+  - listen: "127.0.0.1:4480"
+    users:
+      service: "${K5PW_SERVICE_PASSWORD}"
+    max_connections: 512
+  # IPv6 监听示例：[::] 表示双栈监听（IPv4+IPv6），[::1] 仅监听 IPv6 回环。
+  # - listen: "[::]:4482"
+  #   users:
+  #     ipv6user: "${K5PW_IPV6_PASSWORD}"
+  #   max_connections: 256
+  # 透明代理 listener（Linux 专用）：配合 iptables/nftables 使用，无需客户端配置代理。
+  # - listen: ":4481"
+  #   tproxy:
+  #     enabled: true
+  #     mode: redirect  # redirect（SO_ORIGINAL_DST）或 tproxy（IP_TRANSPARENT，保留源 IP）
+
+# 旧版单监听端口配置（listeners 为空时生效，与上述多监听配置二选一）。
+# listen: "127.0.0.1:4479"
+# users:
+#   username: "${K5PW_PROXY_PASSWORD}"
 management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
 management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"  # 非空时所有管理端点要求 Authorization: Bearer <token>
+# 运行时配置 API：通过管理端口动态增删 upstream/规则/用户，变更持久化到 YAML 并热加载。
+# 所有端点均要求 management_auth_token 认证。
+#   GET    /api/v1/config/upstreams          列出上游（URL 脱敏）
+#   POST   /api/v1/config/upstreams          添加上游
+#   PUT    /api/v1/config/upstreams/{name}   更新上游
+#   DELETE /api/v1/config/upstreams/{name}   删除上游（同时清理路由规则中的引用）
+#   GET    /api/v1/config/rules              列出路由规则
+#   POST   /api/v1/config/rules              添加路由规则（追加到末尾）
+#   DELETE /api/v1/config/rules/{index}      删除路由规则
+#   GET    /api/v1/config/users              列出用户名（不含密码）
+#   POST   /api/v1/config/users              添加用户
+#   DELETE /api/v1/config/users/{username}   删除用户
+# TLS 服务端终止：配置后代理端口升级为 HTTPS/SOCKS5 over TLS，并可选 mTLS 客户端认证。
+# tls:
+#   cert_file: "certs/server.crt"
+#   key_file: "certs/server.key"
+#   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
 users:
   username: "${K5PW_PROXY_PASSWORD}"
 upstreams:
@@ -9,6 +63,16 @@ upstreams:
     types: ["http", "https", "socks5", "socks5h"]
     priority: 1
     weight: 5
+    # strategy 可选：weighted_round_robin（默认）、least_connections、consistent_hash、source_ip_hash
+    strategy: "weighted_round_robin"
+    # health_check 可选：未配置时按全局 check_interval 与默认 TCP/HTTP 探测。
+    health_check:
+      type: "http"              # tcp / http / https / tls
+      path: "/"                 # HTTP 检查路径
+      expected_codes: [200]     # HTTP 预期响应码
+      interval: 0               # 0 表示使用全局 check_interval
+      timeout: 5s
+      failure_threshold: 3
 routing:
   final: auto
   geosite:
@@ -32,6 +96,8 @@ routing:
         - "172.16.0.0/12"
         - "192.168.0.0/16"
         - "100.64.0.0/10"
+        - "fc00::/7"       # IPv6 ULA
+        - "fe80::/10"      # IPv6 link-local
       action: direct
     - type: domain_suffix
       values:
@@ -43,6 +109,22 @@ routing:
         - "docker.io"
         - "docker.com"
       action: proxy
+# DNS 安全解析：可选 DoH/DoT 替代系统 DNS，防止 DNS 污染与劫持。
+# type 为 system 时使用系统默认解析器（默认，向后兼容）。
+# type 为 doh 时通过 DNS-over-HTTPS 解析，需配置 doh_url。
+# type 为 dot 时通过 DNS-over-TLS 解析，需配置 dot_addr。
+# fallback 为 true 时，DoH/DoT 失败后回退到系统 DNS（默认 true）。
+dns:
+  type: system
+  # doh_url: "https://dns.google/dns-query"  # DoH 服务器 URL（type=doh 时必填）
+  # dot_addr: "dns.google:853"               # DoT 服务器地址（type=dot 时必填）
+  fallback: true
+  timeout: 5s
+  # ip_precedence 控制 DNS 解析后 IPv4/IPv6 的优先级：
+  #   ipv4_first（默认）：IPv4 优先，IPv6 兜底
+  #   ipv6_first：IPv6 优先，IPv4 兜底
+  #   system：保持 DNS 返回顺序
+  ip_precedence: ipv4_first
 # 目标地址访问策略：独立于路由，统一兜底拒绝回环/私网/链路本地/元数据等敏感地址，
 # 防止 SSRF 与内网横向访问。直连路径会在 DNS 解析后再次校验真实 IP。
 destination_policy:
@@ -81,3 +163,18 @@ log:
   compress: true
 check_interval: 30
 max_connections: 1024
+# 流量审计与配额：按 user/upstream/target 维度统计流量，支持配额限制。
+# 统计数据通过 /api/v1/traffic 端点查询，通过 /metrics 暴露 Prometheus 指标。
+# traffic_audit:
+#   enabled: true                # 启用流量审计
+#   per_user_quota: 0             # 每用户流量配额（字节），0 表示不限制
+#   per_upstream_quota: 0         # 每上游流量配额（字节），0 表示不限制
+#   quota_window: 1h              # 配额统计窗口，默认 1 小时
+# 透明代理 / TPROXY：Linux 下支持透明代理模式，配合 iptables/nftables 使用。
+# 支持两种模式：
+#   redirect: 使用 iptables REDIRECT + SO_ORIGINAL_DST 获取原始目标（简单，不保留源 IP）
+#   tproxy:   使用 iptables TPROXY + IP_TRANSPARENT，通过 conn.LocalAddr() 获取原始目标（保留源 IP）
+# 配置示例见 scripts/tproxy-redirect-iptables.sh、scripts/tproxy-tproxy-iptables.sh、scripts/tproxy-nftables.sh
+# tproxy:
+#   enabled: true
+#   mode: redirect  # 或 "tproxy"

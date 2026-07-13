@@ -42,7 +42,7 @@ func startTestHTTPServer(t *testing.T, router *Router) (string, func()) {
 }
 
 func TestHTTPProxyRequest(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	addr, stop := startTestHTTPServer(t, router)
 	defer stop()
 
@@ -67,7 +67,7 @@ func TestHTTPProxyRequest(t *testing.T) {
 }
 
 func TestHTTPProxyCONNECT(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	addr, stop := startTestHTTPServer(t, router)
 	defer stop()
 

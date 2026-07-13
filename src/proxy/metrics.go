@@ -101,6 +101,12 @@ func init() {
 		Type:   MetricCounter,
 		Labels: []string{"path"},
 	})
+	RegisterMetric(MetricDesc{
+		Name:   "k5pw_traffic_bytes_total",
+		Help:   "Total bytes transferred by user, upstream and target.",
+		Type:   MetricCounter,
+		Labels: []string{"direction", "user", "upstream", "target"},
+	})
 }
 
 // RegisterMetric 注册一个指标描述。

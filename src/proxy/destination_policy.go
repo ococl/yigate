@@ -221,6 +221,15 @@ func deniedErr(format string, args ...interface{}) error {
 	return NewError(CodeDestinationDenied, fmt.Sprintf(format, args...))
 }
 
+// lookupIPAddr 使用路由器关联的 DNS 解析器解析域名。
+// 若解析器为 nil 则回退到系统默认解析器。
+func (r *Router) lookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	if r != nil && r.resolver != nil {
+		return r.resolver.LookupIPAddr(ctx, host)
+	}
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
+
 // dialDirectChecked 执行直连拨号，并在解析后校验实际 IP，防止 DNS rebinding 绕过策略。
 func (r *Router) dialDirectChecked(target string) (net.Conn, error) {
 	return r.dialDirectCheckedTimeout(target, ProxyDialTimeout())
@@ -245,12 +254,12 @@ func (r *Router) dialDirectCheckedTimeout(target string, dialTimeout time.Durati
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	addrs, err := r.lookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, ClassifyDialError(target, err)
 	}
 	var lastErr error
-	for _, ip := range preferIPv4(addrs) {
+	for _, ip := range sortAddrsByPrecedence(addrs, r.ipPrecedence) {
 		if r.policy != nil {
 			port, _ := parsePort(portStr)
 			if err := r.policy.Check(host, port, ip); err != nil {

@@ -2,10 +2,13 @@ package proxy
 
 import (
 	"fmt"
+	"hash/fnv"
+	"net"
 	"net/url"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,6 +20,70 @@ const (
 	// deadProbeMaxInterval 是 dead 上游恢复探测的最大间隔。
 	deadProbeMaxInterval = 30 * time.Second
 )
+
+const (
+	StrategyRoundRobin       = "weighted_round_robin"
+	StrategyLeastConnections = "least_connections"
+	StrategyConsistentHash   = "consistent_hash"
+	StrategySourceIPHash     = "source_ip_hash"
+)
+
+func normalizeStrategy(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case StrategyLeastConnections:
+		return StrategyLeastConnections
+	case StrategyConsistentHash:
+		return StrategyConsistentHash
+	case StrategySourceIPHash:
+		return StrategySourceIPHash
+	default:
+		return StrategyRoundRobin
+	}
+}
+
+func validateStrategy(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", StrategyRoundRobin, StrategyLeastConnections, StrategyConsistentHash, StrategySourceIPHash:
+		return nil
+	default:
+		return fmt.Errorf("unsupported strategy %q", value)
+	}
+}
+
+// HealthCheckConfig 单个上游的健康检查配置。
+// 未显式配置的字段继承全局默认值。
+type HealthCheckConfig struct {
+	Type             string   `yaml:"type"`
+	Path             string   `yaml:"path"`
+	ExpectedCodes    []int    `yaml:"expected_codes"`
+	Interval         Duration `yaml:"interval"`
+	Timeout          Duration `yaml:"timeout"`
+	FailureThreshold int      `yaml:"failure_threshold"`
+}
+
+// normalizeHealthCheckType 根据上游类型推断默认健康检查类型。
+func normalizeHealthCheckType(value string, proxyType string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "tcp", "http", "https", "tls":
+		return strings.ToLower(strings.TrimSpace(value))
+	case "":
+		if proxyType == ProxyTypeHTTP || proxyType == ProxyTypeHTTPS {
+			return "http"
+		}
+		return "tcp"
+	default:
+		return "tcp"
+	}
+}
+
+func validateHealthCheckType(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "tcp", "http", "https", "tls":
+		return nil
+	default:
+		return fmt.Errorf("unsupported health check type %q", value)
+	}
+}
 
 const (
 	ProxyTypeHTTP    = "http"
@@ -127,20 +194,24 @@ func ValidateProxyTypes(values []string) error {
 
 // UpstreamConfig 单个上游代理配置
 type UpstreamConfig struct {
-	Name     string   `yaml:"name"`
-	URL      string   `yaml:"url"`
-	Types    []string `yaml:"types"`
-	Priority int      `yaml:"priority"`
-	Weight   int      `yaml:"weight"`
+	Name        string            `yaml:"name"`
+	URL         string            `yaml:"url"`
+	Types       []string          `yaml:"types"`
+	Priority    int               `yaml:"priority"`
+	Weight      int               `yaml:"weight"`
+	Strategy    string            `yaml:"strategy"`
+	HealthCheck HealthCheckConfig `yaml:"health_check"`
 }
 
 // Upstream 表示一个已解析的上游代理
 type Upstream struct {
-	Name     string
-	URL      *url.URL
-	Types    []string
-	Priority int
-	Weight   int
+	Name        string
+	URL         *url.URL
+	Types       []string
+	Priority    int
+	Weight      int
+	Strategy    string
+	HealthCheck HealthCheckConfig
 
 	typesMu sync.RWMutex
 	current int
@@ -150,7 +221,47 @@ type Upstream struct {
 	failures        int       // 连续失败次数
 	deadSince       time.Time // 最近一次被标记 dead 的时间
 	nextProbeAt     time.Time // 下次允许主动探测恢复的时间（指数退避）
+	nextCheckAt     time.Time // 下次健康检查时间（用于 per-upstream interval）
 	consecutiveDead int       // 连续处于 dead 的探测周期数（用于计算退避）
+
+	// activeConns 用于 least_connections 策略的当前活动连接计数。
+	activeConns atomic.Int64
+}
+
+// countedConn 包装 net.Conn，在关闭时回调减少活动连接计数。
+type countedConn struct {
+	net.Conn
+	onClose func()
+	once    sync.Once
+}
+
+func (c *countedConn) Close() error {
+	if c.onClose != nil {
+		c.once.Do(c.onClose)
+	}
+	return c.Conn.Close()
+}
+
+// trackConn 增加上游活动连接计数并返回包装后的连接。
+func (u *Upstream) trackConn(conn net.Conn) net.Conn {
+	if conn == nil || u == nil {
+		return conn
+	}
+	u.activeConns.Add(1)
+	return &countedConn{
+		Conn: conn,
+		onClose: func() {
+			u.activeConns.Add(-1)
+		},
+	}
+}
+
+// ActiveConns 返回上游当前活动连接数（用于测试与指标）。
+func (u *Upstream) ActiveConns() int64 {
+	if u == nil {
+		return 0
+	}
+	return u.activeConns.Load()
 }
 
 // UpstreamManager 管理多上游、优先级、负载均衡与健康检查
@@ -204,19 +315,44 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if _, exists := m.byName[name]; exists {
 			return nil, fmt.Errorf("duplicate upstream name %q", name)
 		}
+		if err := validateHealthCheckType(c.HealthCheck.Type); err != nil {
+			return nil, fmt.Errorf("upstreams[%d].health_check.type: %w", i, err)
+		}
 		types, _, err := normalizeProxyTypes(c.Types)
 		if err != nil {
 			return nil, fmt.Errorf("upstreams[%d].types: %w", i, err)
 		}
+		if err := validateStrategy(c.Strategy); err != nil {
+			return nil, fmt.Errorf("upstreams[%d].strategy: %w", i, err)
+		}
 		if len(types) == 0 {
 			types = []string{normalizeProxyType(u.Scheme)}
 		}
+		primaryType := normalizeProxyType(u.Scheme)
+		hc := c.HealthCheck
+		hc.Type = normalizeHealthCheckType(hc.Type, primaryType)
+		if hc.Path == "" {
+			hc.Path = "/"
+		}
+		if len(hc.ExpectedCodes) == 0 {
+			if hc.Type == "http" || hc.Type == "https" {
+				hc.ExpectedCodes = []int{200}
+			}
+		}
+		if hc.Timeout <= 0 {
+			hc.Timeout = Duration(5 * time.Second)
+		}
+		if hc.FailureThreshold <= 0 {
+			hc.FailureThreshold = deadFailureThreshold
+		}
 		up := &Upstream{
-			Name:     name,
-			URL:      u,
-			Types:    types,
-			Priority: c.Priority,
-			Weight:   c.Weight,
+			Name:        name,
+			URL:         u,
+			Types:       types,
+			Priority:    c.Priority,
+			Weight:      c.Weight,
+			Strategy:    normalizeStrategy(c.Strategy),
+			HealthCheck: hc,
 		}
 		if up.Weight <= 0 {
 			up.Weight = 1
@@ -232,13 +368,24 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 	return m, nil
 }
 
-// Select 按优先级选择可用上游，同优先级加权轮询
-// 所有上游均不可用时返回 nil。
-func (m *UpstreamManager) Select() *Upstream {
-	return m.selectFrom(nil)
+func selectKey(strategy, target, sourceIP string) string {
+	switch strategy {
+	case StrategySourceIPHash:
+		return sourceIP
+	case StrategyConsistentHash:
+		return target
+	default:
+		return target
+	}
 }
 
-func (m *UpstreamManager) selectFrom(allowed map[string]struct{}) *Upstream {
+// Select 按优先级选择可用上游，同优先级按配置策略选择。
+// 所有上游均不可用时返回 nil。
+func (m *UpstreamManager) Select() *Upstream {
+	return m.selectFrom(nil, "", "")
+}
+
+func (m *UpstreamManager) selectFrom(allowed map[string]struct{}, target, sourceIP string) *Upstream {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -259,14 +406,15 @@ func (m *UpstreamManager) selectFrom(allowed map[string]struct{}) *Upstream {
 		if len(alive) == 0 {
 			continue
 		}
-		return pickWeighted(alive)
+		strategy := groupStrategy(alive)
+		return pick(alive, selectKey(strategy, target, sourceIP))
 	}
 	return nil
 }
 
 // selectFromExcluding 类似 selectFrom，但跳过 exclude 集合中的上游，
 // 用于在单次 DialProxy 调用中避免重复选择已失败的上游。
-func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclude map[*Upstream]struct{}) *Upstream {
+func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclude map[*Upstream]struct{}, target, sourceIP string) *Upstream {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -292,19 +440,20 @@ func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclu
 		if len(alive) == 0 {
 			continue
 		}
-		return pickWeighted(alive)
+		strategy := groupStrategy(alive)
+		return pick(alive, selectKey(strategy, target, sourceIP))
 	}
 	return nil
 }
 
 func (m *UpstreamManager) SelectFor(names []string) *Upstream {
-	return m.selectFrom(namesToSet(names))
+	return m.selectFrom(namesToSet(names), "", "")
 }
 
 // SelectForExcluding 类似 SelectFor，但跳过 exclude 集合中的上游，
 // 用于在重试循环中避免重复选择同一失败上游。
 func (m *UpstreamManager) SelectForExcluding(names []string, exclude map[*Upstream]struct{}) *Upstream {
-	return m.selectFromExcluding(namesToSet(names), exclude)
+	return m.selectFromExcluding(namesToSet(names), exclude, "", "")
 }
 
 func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
@@ -329,7 +478,37 @@ func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
 		if len(alive) == 0 {
 			continue
 		}
-		return pickWeighted(alive)
+		strategy := groupStrategy(alive)
+		return pick(alive, selectKey(strategy, "", ""))
+	}
+	return nil
+}
+
+// SelectSocks5ForWithSourceIP 类似 SelectSocks5For，但支持按源 IP 会话保持。
+func (m *UpstreamManager) SelectSocks5ForWithSourceIP(names []string, sourceIP string) *Upstream {
+	allowed := namesToSet(names)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, p := range m.order {
+		group := m.groups[p]
+		alive := make([]*Upstream, 0, len(group))
+		for _, u := range group {
+			if !m.isSelectable(u) || !u.supportsProxyType(ProxyTypeSocks5) {
+				continue
+			}
+			if allowed != nil {
+				if _, ok := allowed[u.Name]; !ok {
+					continue
+				}
+			}
+			alive = append(alive, u)
+		}
+		if len(alive) == 0 {
+			continue
+		}
+		strategy := groupStrategy(alive)
+		return pick(alive, selectKey(strategy, "", sourceIP))
 	}
 	return nil
 }
@@ -370,6 +549,51 @@ func (m *UpstreamManager) Socks5ByName(name string) *Upstream {
 		return nil
 	}
 	return up
+}
+
+func groupStrategy(us []*Upstream) string {
+	if len(us) == 0 {
+		return StrategyRoundRobin
+	}
+	return us[0].Strategy
+}
+
+// pick 按组策略选择上游。
+func pick(us []*Upstream, key string) *Upstream {
+	if len(us) == 0 {
+		return nil
+	}
+	switch groupStrategy(us) {
+	case StrategyLeastConnections:
+		return pickLeastConnections(us)
+	case StrategyConsistentHash, StrategySourceIPHash:
+		return pickConsistentHash(us, key)
+	default:
+		return pickWeighted(us)
+	}
+}
+
+func pickLeastConnections(us []*Upstream) *Upstream {
+	var best *Upstream
+	var bestCount int64 = -1
+	for _, u := range us {
+		n := u.activeConns.Load()
+		if best == nil || n < bestCount {
+			best = u
+			bestCount = n
+		}
+	}
+	return best
+}
+
+func pickConsistentHash(us []*Upstream, key string) *Upstream {
+	if key == "" {
+		return pickWeighted(us)
+	}
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	idx := h.Sum32() % uint32(len(us))
+	return us[idx]
 }
 
 // pickWeighted 平滑加权轮询
@@ -419,7 +643,7 @@ func (m *UpstreamManager) markDead(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	up.failures++
-	if up.failures < deadFailureThreshold {
+	if up.failures < up.HealthCheckFailureThreshold() {
 		// 未达阈值，暂不标记 dead，但记录下次可快速重试的时间。
 		return
 	}
@@ -448,7 +672,7 @@ func (m *UpstreamManager) markDeadImmediate(up *Upstream) {
 		up.deadSince = time.Now()
 		up.consecutiveDead = 0
 	}
-	up.failures = deadFailureThreshold
+	up.failures = up.HealthCheckFailureThreshold()
 	up.consecutiveDead++
 	backoff := deadProbeBaseInterval * time.Duration(1<<uint(up.consecutiveDead-1))
 	if backoff > deadProbeMaxInterval {
@@ -465,4 +689,87 @@ func (m *UpstreamManager) markAlive(up *Upstream) {
 	up.dead = false
 	up.consecutiveDead = 0
 	up.nextProbeAt = time.Time{}
+}
+
+// HealthCheckType 返回上游的健康检查类型。
+func (u *Upstream) HealthCheckType() string {
+	if u == nil || u.HealthCheck.Type == "" {
+		return "tcp"
+	}
+	return u.HealthCheck.Type
+}
+
+// HealthCheckTimeout 返回上游健康检查超时。
+func (u *Upstream) HealthCheckTimeout() time.Duration {
+	if u == nil || u.HealthCheck.Timeout <= 0 {
+		return 5 * time.Second
+	}
+	return time.Duration(u.HealthCheck.Timeout)
+}
+
+// HealthCheckPath 返回 HTTP 健康检查路径。
+func (u *Upstream) HealthCheckPath() string {
+	if u == nil || u.HealthCheck.Path == "" {
+		return "/"
+	}
+	return u.HealthCheck.Path
+}
+
+// HealthCheckExpectedCodes 返回 HTTP 健康检查预期响应码。
+func (u *Upstream) HealthCheckExpectedCodes() []int {
+	if u == nil || len(u.HealthCheck.ExpectedCodes) == 0 {
+		return []int{200}
+	}
+	return u.HealthCheck.ExpectedCodes
+}
+
+// HealthCheckInterval 返回上游健康检查间隔，0 表示使用全局间隔。
+func (u *Upstream) HealthCheckInterval() time.Duration {
+	if u == nil || u.HealthCheck.Interval <= 0 {
+		return 0
+	}
+	return time.Duration(u.HealthCheck.Interval)
+}
+
+// HealthCheckFailureThreshold 返回上游健康检查失败阈值。
+func (u *Upstream) HealthCheckFailureThreshold() int {
+	if u == nil || u.HealthCheck.FailureThreshold <= 0 {
+		return deadFailureThreshold
+	}
+	return u.HealthCheck.FailureThreshold
+}
+
+func (m *UpstreamManager) SelectForWithSourceIP(names []string, sourceIP string) *Upstream {
+	return m.selectFrom(namesToSet(names), "", sourceIP)
+}
+
+// SelectForExcludingWithSourceIP 类似 SelectForExcluding，但支持按源 IP 会话保持。
+func (m *UpstreamManager) SelectForExcludingWithSourceIP(names []string, exclude map[*Upstream]struct{}, sourceIP string) *Upstream {
+	return m.selectFromExcluding(namesToSet(names), exclude, "", sourceIP)
+}
+
+// DialWithSourceIP 尝试通过上游建立连接，支持源 IP 会话保持。
+func (m *UpstreamManager) DialWithSourceIP(target, sourceIP string) (net.Conn, error) {
+	conn, _, err := m.DialProxyWithSourceIP(target, sourceIP, nil)
+	if err == nil {
+		return conn, nil
+	}
+	return DialTarget(target)
+}
+
+// clientSourceIP 从连接地址中提取客户端源 IP。
+func clientSourceIP(conn net.Conn) string {
+	if conn == nil {
+		return ""
+	}
+	addr := conn.RemoteAddr()
+	if addr == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		// 可能不是 host:port 格式，直接返回字符串
+		return addr.String()
+	}
+	return host
 }

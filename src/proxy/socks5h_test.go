@@ -12,7 +12,7 @@ func TestDialSocks5H(t *testing.T) {
 			Enabled:   true,
 			Upstreams: []string{"socks"},
 		},
-	})
+	}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestDialSocks5H(t *testing.T) {
 }
 
 func TestDialSocks5HDisabled(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	if _, err := router.DialSocks5H("example.com:80", nil); err == nil {
 		t.Fatal("expected error when disabled")
 	}
@@ -62,7 +62,7 @@ func TestSocks5HBreaker(t *testing.T) {
 		Socks5HRedirect: Socks5HConfig{
 			Enabled: true,
 		},
-	})
+	}, DNSConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

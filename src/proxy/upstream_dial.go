@@ -12,18 +12,30 @@ func (u *Upstream) Dial(target string) (net.Conn, error) {
 	if u == nil {
 		return nil, errors.New("nil upstream")
 	}
+	var conn net.Conn
+	var err error
 	switch u.primaryProxyType() {
 	case ProxyTypeHTTP, ProxyTypeHTTPS:
-		return u.dialHTTP(target)
+		conn, err = u.dialHTTP(target)
 	case ProxyTypeSocks5, ProxyTypeSocks5H:
-		return u.dialSOCKS5(target)
+		conn, err = u.dialSOCKS5(target)
+	default:
+		return nil, fmt.Errorf("unsupported upstream type %q", u.primaryProxyType())
 	}
-	return nil, fmt.Errorf("unsupported upstream type %q", u.primaryProxyType())
+	if err != nil {
+		return nil, err
+	}
+	return u.trackConn(conn), nil
 }
 
+
 // Dial 尝试通过上游建立连接，单个上游失败时尝试下一个，全部失败后回退自身直连
-func (m *UpstreamManager) Dial(target string) (net.Conn, error) {
-	conn, _, err := m.DialProxy(target, nil)
+func (m *UpstreamManager) Dial(target string, sourceIP ...string) (net.Conn, error) {
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
+	conn, _, err := m.DialProxyWithSourceIP(target, sip, nil)
 	if err == nil {
 		return conn, nil
 	}
@@ -31,7 +43,14 @@ func (m *UpstreamManager) Dial(target string) (net.Conn, error) {
 }
 
 // DialProxy 只通过上游建立连接，names 为空时使用全部上游。
+// 等价于 DialProxyWithSourceIP(target, "", names)。
 func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *Upstream, error) {
+	return m.DialProxyWithSourceIP(target, "", names)
+}
+
+// DialProxyWithSourceIP 只通过上游建立连接，names 为空时使用全部上游。
+// sourceIP 用于 source_ip_hash 策略的会话保持；其他策略忽略该值。
+func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names []string) (net.Conn, *Upstream, error) {
 	allowed := namesToSet(names)
 	attempts := len(m.upstreams)
 	if allowed != nil {
@@ -41,7 +60,7 @@ func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *U
 	tried := make(map[*Upstream]struct{})
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		up := m.selectFromExcluding(allowed, tried)
+		up := m.selectFromExcluding(allowed, tried, target, sourceIP)
 		if up == nil {
 			break
 		}
@@ -118,7 +137,7 @@ func (u *Upstream) DialSOCKS5Bind(target string) (net.Conn, string, error) {
 		return nil, "", err
 	}
 	_ = conn.SetDeadline(time.Time{})
-	return conn, listenAddr, nil
+	return u.trackConn(conn), listenAddr, nil
 }
 
 // DialSOCKS5UDP 通过 SOCKS5 上游建立 UDP ASSOCIATE 请求，返回到上游的 TCP 控制连接和上游 UDP 监听地址。
@@ -149,7 +168,7 @@ func (u *Upstream) DialSOCKS5UDP(target string) (net.Conn, *net.UDPAddr, error) 
 		return nil, nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
-	return conn, udpAddr, nil
+	return u.trackConn(conn), udpAddr, nil
 }
 
 // DialSOCKS5Bind 按优先级选择 SOCKS5 上游建立 BIND，失败时尝试下一个，全部失败返回错误。

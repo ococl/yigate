@@ -58,14 +58,15 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 }
 
 func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router, access *AccessController) {
+	sourceIP := clientSourceIP(client)
 	host, _, err := net.SplitHostPort(target)
 	if router != nil && router.Socks5HEnabled() && err == nil && net.ParseIP(host) != nil {
 		Logger().Infow("socks5 ip target will be handled with sniff/rewrite", "target", target)
-		handleSOCKS5ConnectWithSniff(client, target, mgr, router, access)
+		handleSOCKS5ConnectWithSniff(client, target, mgr, router, access, sourceIP)
 		return
 	}
 
-	targetConn, err := dialTargetForRequest(target, mgr, router)
+	targetConn, err := dialTargetForRequest(target, mgr, router, sourceIP)
 	if err != nil {
 		Logger().Warnw("socks5 connect failed", "target", target, "error", err)
 		socks5Reply(client, SOCKS5ReplyFromError(err))
@@ -83,7 +84,7 @@ func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target str
 	}
 
 	socks5Reply(client, 0x00)
-	Tunnel(client, clientReader, targetConn)
+	Tunnel(client, clientReader, targetConn, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
 }
 
 // HandleSOCKS is retained as a public alias for callers that use the old name.

@@ -43,6 +43,7 @@ type ManagementServer struct {
 	reload            func() error
 	enablePprof       bool
 	authToken         string
+	configEditor      ConfigEditor
 	mu                sync.Mutex
 	ln                net.Listener
 	srv               *http.Server
@@ -67,6 +68,8 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 	mux.HandleFunc("/metrics", m.handleMetrics)
 	mux.HandleFunc("/api/v1/status", m.handleStatus)
 	mux.HandleFunc("/api/v1/reload", m.handleReload)
+	mux.HandleFunc("/api/v1/config/", m.handleConfigAPI)
+	mux.HandleFunc("/api/v1/traffic", m.handleTraffic)
 	if enablePprof {
 		m.pprofHandlers = map[string]http.Handler{
 			"/debug/pprof/":             http.HandlerFunc(pprof.Index),
@@ -339,4 +342,22 @@ func (m *ManagementServer) handleReload(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (m *ManagementServer) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !m.requireAuth(w, r) {
+		return
+	}
+	MetricInc("k5pw_management_requests_total", "path=/api/v1/traffic")
+	snapshot := TrafficSnapshot{}
+	if globalTrafficAccounter != nil {
+		snapshot = globalTrafficAccounter.Snapshot()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(snapshot)
 }

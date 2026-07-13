@@ -2,10 +2,11 @@ package proxy
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
-	"strings"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -13,6 +14,7 @@ import (
 // StartHealthCheck 启动定时健康检查。
 // alive 上游按 interval 检查；dead 上游由独立的恢复探测器以更短间隔（2s）
 // 按指数退避调度检测，避免恢复延迟过大。
+// 若某个上游配置了 health_check.interval，则按该上游自己的间隔检查。
 func (m *UpstreamManager) StartHealthCheck(interval int) {
 	if interval <= 0 {
 		return
@@ -23,20 +25,26 @@ func (m *UpstreamManager) StartHealthCheck(interval int) {
 	m.checkInterval = interval
 	m.done = make(chan struct{})
 	done := m.done
+	now := time.Now()
+	for _, u := range m.upstreams {
+		u.nextCheckAt = now
+	}
 	m.wg.Add(2)
 	m.mu.Unlock()
 
-	// 常规健康检查：按配置间隔检查所有上游。
+	minInterval := m.minCheckInterval(interval)
+
+	// 常规健康检查：按最小间隔触发，但只检查已到期的上游。
 	go func() {
 		defer m.wg.Done()
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		ticker := time.NewTicker(minInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-done:
 				return
 			case <-ticker.C:
-				m.checkAll()
+				m.checkDue(interval)
 			}
 		}
 	}()
@@ -57,6 +65,81 @@ func (m *UpstreamManager) StartHealthCheck(interval int) {
 	}()
 }
 
+// minCheckInterval 计算健康检查的最小触发间隔。
+func (m *UpstreamManager) minCheckInterval(globalInterval int) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	min := time.Duration(globalInterval) * time.Second
+	if min <= 0 {
+		min = 2 * time.Second
+	}
+	for _, u := range m.upstreams {
+		iv := u.HealthCheckInterval()
+		if iv > 0 && iv < min {
+			min = iv
+		}
+	}
+	if min < 500*time.Millisecond {
+		min = 500 * time.Millisecond
+	}
+	return min
+}
+
+// checkDue 检查已到期的上游。
+func (m *UpstreamManager) checkDue(globalInterval int) {
+	now := time.Now()
+	var toCheck []*Upstream
+	m.mu.Lock()
+	globalIv := time.Duration(globalInterval) * time.Second
+	for _, u := range m.upstreams {
+		iv := u.HealthCheckInterval()
+		if iv <= 0 {
+			iv = globalIv
+		}
+		if now.After(u.nextCheckAt) {
+			toCheck = append(toCheck, u)
+			u.nextCheckAt = now.Add(iv)
+		}
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, u := range toCheck {
+		wg.Add(1)
+		go func(u *Upstream) {
+			defer wg.Done()
+			alive := m.check(u)
+			m.mu.Lock()
+			if u.dead && alive {
+				Logger().Infow("upstream recovered", "upstream", u.URL.Host, "name", u.Name)
+				u.failures = 0
+				u.dead = false
+				u.consecutiveDead = 0
+				u.nextProbeAt = time.Time{}
+			} else if !u.dead {
+				if alive {
+					u.failures = 0
+				} else {
+					u.failures++
+					if u.failures >= u.HealthCheckFailureThreshold() {
+						u.dead = true
+						u.deadSince = time.Now()
+						u.consecutiveDead = 1
+						u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
+						Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
+					}
+				}
+			}
+			status := 0.0
+			if alive || !u.dead {
+				status = 1.0
+			}
+			MetricSet("k5pw_upstream_health_status", status, "upstream="+u.Name)
+			m.mu.Unlock()
+		}(u)
+	}
+	wg.Wait()
+}
 // StopHealthCheck 停止健康检查
 func (m *UpstreamManager) StopHealthCheck() {
 	m.mu.Lock()
@@ -86,21 +169,22 @@ func (m *UpstreamManager) checkAll() {
 				u.dead = false
 				u.consecutiveDead = 0
 				u.nextProbeAt = time.Time{}
-			} else if !u.dead {
-				// alive 上游重置失败计数
-				if alive {
-					u.failures = 0
-				} else {
-					u.failures++
-					if u.failures >= deadFailureThreshold {
-						u.dead = true
-						u.deadSince = time.Now()
-						u.consecutiveDead = 1
-						u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
-						Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
-					}
+		} else if !u.dead {
+			// alive 上游重置失败计数
+			if alive {
+				u.failures = 0
+			} else {
+				u.failures++
+				if u.failures >= u.HealthCheckFailureThreshold() {
+					u.dead = true
+					u.deadSince = time.Now()
+					u.consecutiveDead = 1
+					u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
+					Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
 				}
 			}
+		}
+
 			status := 0.0
 			if alive || !u.dead {
 				status = 1.0
@@ -150,24 +234,55 @@ func (m *UpstreamManager) probeDeadUpstreams() {
 }
 
 func (m *UpstreamManager) check(u *Upstream) bool {
-	conn, err := dialProxyConn(u.URL, 5*time.Second)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
+	timeout := u.HealthCheckTimeout()
+	addr := proxyAddress(u.URL)
 
-	switch u.primaryProxyType() {
-	case ProxyTypeHTTP, ProxyTypeHTTPS:
-		return checkHTTPProtocol(conn, u)
+	switch u.HealthCheckType() {
+	case "tcp":
+		conn, err := dialProxyConn(u.URL, timeout)
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+		return true
+	case "tls":
+		return checkTLSUpstream(addr, timeout)
+	case "http", "https":
+		conn, err := dialProxyConn(u.URL, timeout)
+		if err != nil {
+			return false
+		}
+		defer conn.Close()
+		return checkHTTPProtocol(conn, u, timeout)
 	case ProxyTypeSocks5, ProxyTypeSocks5H:
-		return checkSOCKS5Protocol(conn, u)
+		conn, err := dialProxyConn(u.URL, timeout)
+		if err != nil {
+			return false
+		}
+		defer conn.Close()
+		return checkSOCKS5Protocol(conn, u, timeout)
 	default:
+		conn, err := dialProxyConn(u.URL, timeout)
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
 		return true
 	}
 }
 
-func checkHTTPProtocol(conn net.Conn, up *Upstream) bool {
-	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+func checkTLSUpstream(addr string, timeout time.Duration) bool {
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfigForHost(addr))
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func checkHTTPProtocol(conn net.Conn, up *Upstream, timeout time.Duration) bool {
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return false
 	}
 	defer conn.SetDeadline(time.Time{})
@@ -177,21 +292,32 @@ func checkHTTPProtocol(conn net.Conn, up *Upstream) bool {
 	if creds != "" {
 		auth = "Proxy-Authorization: Basic " + creds + "\r\n"
 	}
-	req := fmt.Sprintf("OPTIONS * HTTP/1.1\r\nHost: %s\r\n%s\r\n", up.URL.Host, auth)
+	path := up.HealthCheckPath()
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", path, up.URL.Host, auth)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		return false
 	}
 
 	br := bufio.NewReader(conn)
-	line, err := br.ReadString('\n')
+	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(line, "HTTP/1.")
+	defer resp.Body.Close()
+	codes := up.HealthCheckExpectedCodes()
+	if len(codes) == 0 {
+		return resp.StatusCode/100 == 2
+	}
+	for _, code := range codes {
+		if resp.StatusCode == code {
+			return true
+		}
+	}
+	return false
 }
 
-func checkSOCKS5Protocol(conn net.Conn, up *Upstream) bool {
-	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) bool {
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return false
 	}
 	defer conn.SetDeadline(time.Time{})

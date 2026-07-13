@@ -40,7 +40,7 @@ func startMockHTTPOrigin(t *testing.T) string {
 
 func TestHandleHTTPChunkedRequest(t *testing.T) {
 	origin := startMockHTTPOrigin(t)
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
 
 	c1, c2 := net.Pipe()
@@ -69,7 +69,7 @@ func TestHandleHTTPChunkedRequest(t *testing.T) {
 }
 
 func TestHandleHTTPAuthFailed(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
 	c1, c2 := net.Pipe()
 	go func() {
@@ -91,7 +91,7 @@ func TestHandleHTTPAuthFailed(t *testing.T) {
 
 func TestHandleHTTPConnect(t *testing.T) {
 	target := startMockTarget(t)
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
 	c1, c2 := net.Pipe()
 	go func() {
@@ -122,7 +122,7 @@ func TestHandleHTTPSocks5HRequest(t *testing.T) {
 		Final:           ActionDirect,
 		Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"socks5"}},
 		Auto:            AutoConfig{CacheTTL: Duration(time.Hour)},
-	})
+	}, DNSConfig{})
 
 	origin := startMockHTTPOrigin(t)
 	c1, c2 := net.Pipe()
@@ -146,7 +146,7 @@ func TestHandleHTTPSocks5HRequest(t *testing.T) {
 
 func TestHandleHTTPLargeRequestBodyStreamed(t *testing.T) {
 	origin := startMockHTTPOrigin(t)
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	mgr, _ := NewUpstreamManager([]UpstreamConfig{})
 
 	c1, c2 := net.Pipe()
@@ -181,7 +181,7 @@ func TestHandleHTTPSocks5HFailureFallsBackToRouting(t *testing.T) {
 	router, _ := NewRouter(RoutingConfig{
 		Final:           ActionDirect,
 		Socks5HRedirect: Socks5HConfig{Enabled: true, Upstreams: []string{"bad-socks"}},
-	})
+	}, DNSConfig{})
 
 	origin := startMockHTTPOrigin(t)
 	c1, c2 := net.Pipe()

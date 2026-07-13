@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -348,5 +349,137 @@ func TestManagementSetters(t *testing.T) {
 	_ = m.reload()
 	if !reloaded {
 		t.Fatal("expected reload called")
+	}
+}
+
+// ============================================================
+// /api/v1/traffic 端点测试
+// ============================================================
+
+func TestManagementTrafficEndpoint(t *testing.T) {
+	// 设置全局流量统计器
+	ta := NewTrafficAccounter(TrafficAuditConfig{Enabled: true})
+	SetGlobalTrafficAccounter(ta)
+	defer SetGlobalTrafficAccounter(nil)
+
+	// 记录一些流量
+	ta.Record(TrafficKey{User: "alice", Upstream: "up1", Target: "example.com"}, 100, 200)
+	ta.Record(TrafficKey{User: "bob", Upstream: "up2", Target: "test.com"}, 50, 150)
+
+	m := NewManagementServer(func() HealthStatus {
+		return HealthStatus{Status: "up", RouterReady: true, ManagerReady: true}
+	}, false)
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+
+	resp, err := http.Get("http://" + addr + "/api/v1/traffic")
+	if err != nil {
+		t.Fatalf("traffic GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("traffic status = %d, want 200", resp.StatusCode)
+	}
+	var snap TrafficSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+		t.Fatalf("decode traffic: %v", err)
+	}
+	if len(snap.Entries) != 2 {
+		t.Fatalf("expected 2 traffic entries, got %d", len(snap.Entries))
+	}
+	// 验证条目内容
+	found := false
+	for _, e := range snap.Entries {
+		if e.User == "alice" && e.Upstream == "up1" && e.Target == "example.com" {
+			if e.BytesIn != 100 || e.BytesOut != 200 || e.Total != 300 {
+				t.Fatalf("alice entry = %+v", e)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected alice traffic entry not found")
+	}
+}
+
+func TestManagementTrafficMethodNotAllowed(t *testing.T) {
+	m := NewManagementServer(nil, false)
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr+"/api/v1/traffic", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("traffic POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 405 {
+		t.Fatalf("traffic POST status = %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestManagementTrafficWithAuth(t *testing.T) {
+	m := NewManagementServer(nil, false, "traffic-token")
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+
+	// 无认证应 401
+	resp, err := http.Get("http://" + addr + "/api/v1/traffic")
+	if err != nil {
+		t.Fatalf("traffic no auth: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("traffic no auth status = %d, want 401", resp.StatusCode)
+	}
+
+	// 有认证应 200
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/traffic", nil)
+	req.Header.Set("Authorization", "Bearer traffic-token")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("traffic with auth: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("traffic with auth status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestManagementTrafficEmptyAccounter(t *testing.T) {
+	// 确保无全局流量统计器时返回空快照
+	SetGlobalTrafficAccounter(nil)
+	defer SetGlobalTrafficAccounter(nil)
+
+	m := NewManagementServer(nil, false)
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+
+	resp, err := http.Get("http://" + addr + "/api/v1/traffic")
+	if err != nil {
+		t.Fatalf("traffic empty: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("traffic empty status = %d, want 200", resp.StatusCode)
+	}
+	var snap TrafficSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(snap.Entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(snap.Entries))
 	}
 }

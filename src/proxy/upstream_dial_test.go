@@ -96,7 +96,7 @@ func startMockHTTPProxyWithOptions(t *testing.T, tlsEnabled bool, expectedAuth s
 
 func startMockSocks5Proxy(t *testing.T) string {
 	t.Helper()
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)

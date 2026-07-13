@@ -49,7 +49,7 @@ func startTestProxyWithUpstream(t *testing.T, upstreamAddr string) (string, func
 	if err != nil {
 		t.Fatalf("NewUpstreamManager: %v", err)
 	}
-	router, err := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, err := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestUDPRelayLocksClientEndpoint(t *testing.T) {
 }
 
 func TestSOCKS5Connect(t *testing.T) {
-	router, _ := NewRouter(RoutingConfig{Final: ActionDirect})
+	router, _ := NewRouter(RoutingConfig{Final: ActionDirect}, DNSConfig{})
 	addr, stop := startTestSOCKS5Server(t, router)
 	defer stop()
 

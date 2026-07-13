@@ -4,17 +4,96 @@
 
 ## 主要特性
 
+### 代理协议
+
 - HTTP、HTTPS CONNECT、SOCKS5 统一端口接入。
 - SOCKS5 支持 CONNECT、BIND、UDP ASSOCIATE。
 - 支持 HTTP、HTTPS、SOCKS5、SOCKS5H 上游代理。
+- 支持 socks5h 重定向与 TLS SNI / HTTP Host 目标恢复。
+
+### TLS 服务端终止
+
+- 代理端口支持 HTTPS / SOCKS5 over TLS。
+- 支持 mTLS 客户端认证（`client_ca_file`）。
+- 可在全局或 per-listener 级别配置。
+
+### 负载均衡
+
 - 多上游支持优先级与加权轮询。
+- 支持最少连接（`least_connections`）策略。
+- 支持一致性哈希（`consistent_hash`）会话保持。
+- 支持源 IP 哈希（`source_ip_hash`）会话保持。
+- 支持熔断与失败转移。
+
+### 健康检查
+
+- 支持 TCP、HTTP、HTTPS、TLS 四种检查类型。
+- HTTP 检查支持自定义路径与预期响应码。
+- TLS 检查支持对上游做 TLS 握手探测。
+- 检查间隔、超时、失败阈值支持 per-upstream 配置。
+- 失败上游临时摘除与自动恢复。
+
+### 多监听端口
+
+- 每个端口可独立配置 TLS、用户认证、访问控制、SOCKS5 命令和最大连接数。
+- 向后兼容单端口 `listen` 配置。
+
+### DNS 安全解析
+
+- 内置 DoH（DNS-over-HTTPS）解析器。
+- 内置 DoT（DNS-over-TLS）解析器。
+- 可配置 fallback 到系统 DNS。
+- 支持 IPv4/IPv6 优先级策略（`ip_precedence`）。
+- 内置 60 秒 TTL DNS 缓存。
+
+### 运行时配置 API
+
+- 通过 REST API 动态增删查改 upstream、路由规则、用户。
+- 变更持久化到 YAML 配置文件并自动热加载。
+- 上游 URL 脱敏输出，不暴露凭证。
+- 所有端点要求管理 Token 认证。
+
+### 流量审计与配额
+
+- 按用户、上游、目标域名三维统计流量。
+- 支持每用户和每上游流量配额限制。
+- 支持可配置的配额统计窗口。
+- 通过 `/api/v1/traffic` 端点查询流量快照。
+- 通过 Prometheus 指标暴露流量统计。
+
+### 透明代理 / TPROXY
+
+- Linux 下支持 TPROXY 透明代理模式。
+- 支持 `redirect`（SO_ORIGINAL_DST）和 `tproxy`（IP_TRANSPARENT）两种模式。
+- 提供 iptables/nftables 配置示例脚本。
+
+### IPv6 支持
+
+- 监听地址支持 IPv6（`[::]:port` 双栈，`[::1]:port` 单栈）。
+- DNS 解析支持 IPv6（A + AAAA 并行查询）。
+- 路由规则支持 IPv6 CIDR。
+- SOCKS5 支持 IPv6 地址类型。
+- 目标策略保护 IPv6 敏感地址段。
+
+### 目标地址访问策略
+
+- SSRF 防护：拒绝回环、RFC1918 私网、ULA、链路本地、元数据等敏感地址。
+- 支持 deny/allow CIDR、域名、端口列表。
+- 直连路径在 DNS 解析后再次校验真实 IP。
+
+### 路由与规则
+
 - 支持 direct、proxy、auto 三种路由动作。
 - 支持域名、后缀、关键词、正则、IP CIDR、GEOSITE 与 match 规则。
 - 支持 `geosite.dat` 自动更新。
-- 支持 socks5h 重定向与 TLS SNI / HTTP Host 目标恢复。
+- 路由规则按顺序匹配，首个命中规则生效。
+
+### 运维与管理
+
 - 支持配置文件保存后自动热加载。
 - 支持 IP 白名单、单 IP 速率限制、单用户并发限制。
-- 支持 `/health`、`/metrics`、`/api/v1/status`、`/api/v1/reload` 管理接口。
+- 支持 `/health`、`/metrics`、`/api/v1/status`、`/api/v1/reload`、`/api/v1/traffic` 管理接口。
+- 支持运行时配置 API（`/api/v1/config/*`）。
 - 支持可选 `/debug/pprof` 调试端点。
 - 支持 JSON / console 日志、文件输出和日志滚动。
 - 支持 Linux systemd 服务和 Docker 运行。
@@ -26,11 +105,28 @@
 ├── src/                 # Go 源码、默认配置、Dockerfile
 │   ├── main.go          # CLI 入口与服务命令
 │   ├── config.go        # 配置加载、默认值与校验
+│   ├── config_api_impl.go # 运行时配置 API 实现
 │   ├── server.go        # TCP 监听、协议识别、热加载
 │   ├── service.go       # 系统服务集成
 │   └── proxy/           # 协议处理、路由、上游、管理接口
+│       ├── http.go          # HTTP 请求和 CONNECT 隧道
+│       ├── socks.go         # SOCKS5 协商和命令分发
+│       ├── socks_bind.go    # SOCKS5 BIND 和 UDP ASSOCIATE
+│       ├── socks_sniff.go   # TLS SNI / HTTP Host 目标恢复
+│       ├── router.go        # 路由规则编译与匹配
+│       ├── upstream.go      # 上游代理管理
+│       ├── upstream_health.go # 健康检查
+│       ├── destination_policy.go # 目标地址访问策略
+│       ├── dns.go           # DoH/DoT DNS 解析器
+│       ├── tproxy.go        # 透明代理
+│       ├── traffic_audit.go # 流量审计与配额
+│       ├── config_api.go    # 运行时配置 API
+│       ├── management.go    # 管理接口
+│       ├── metrics.go       # Prometheus 指标
+│       ├── access.go        # 访问控制
+│       └── logging.go       # 结构化日志
 ├── dist/                # Docker/systemd 分发配置
-├── scripts/             # 发布脚本
+├── scripts/             # 发布构建脚本与 TPROXY 示例
 └── pyscripts/           # 代理联调脚本
 ```
 
@@ -38,6 +134,7 @@
 
 - Go 1.21+
 - Linux/macOS/Windows 均可构建；systemd 安装脚本面向 Linux。
+- TPROXY 透明代理仅支持 Linux。
 - Docker 运行需要 Docker Compose。
 
 ## 快速开始
@@ -83,22 +180,66 @@ sudo ./k5pw -config /etc/k5pw/config.yml uninstall
 
 参考 `src/config.sample.yml`。核心字段如下：
 
-- `listen`：代理监听地址。
+### 监听与认证
+
+- `listen`：代理监听地址（旧版单端口，与 `listeners` 二选一）。
+- `listeners`：多监听端口列表，每个端口独立配置 TLS、用户、访问控制等。
+- `users`：下游代理认证用户表；为空表示允许匿名访问。
+- `tls`：TLS 服务端终止配置（`cert_file`/`key_file`/`client_ca_file`）。
+
+### 管理接口
+
 - `management`：管理接口监听地址；为空则不启用。
 - `management_auth_token`：管理接口 Bearer Token；管理端口绑定非回环地址时必须配置。
-- `users`：下游代理认证用户表；为空表示允许匿名访问。
+- `enable_pprof`：是否启用 pprof 管理端点。
+
+### 上游与路由
+
 - `upstreams`：上游代理列表，支持 `http`、`https`、`socks5`、`socks5h`。
+- `upstreams[].strategy`：负载均衡策略（`weighted_round_robin`/`least_connections`/`consistent_hash`/`source_ip_hash`）。
+- `upstreams[].health_check`：per-upstream 健康检查配置。
 - `routing.final`：未命中规则时的默认动作，支持 `direct`、`proxy`、`auto`。
 - `routing.rules`：按顺序匹配的路由规则。
 - `routing.geosite`：`geosite.dat` 路径与自动更新配置。
 - `routing.auto`：自动模式策略、直连探测超时和缓存时间。
 - `routing.socks5h_redirect`：优先使用 SOCKS5H 上游进行远端解析。
+
+### DNS 解析
+
+- `dns.type`：DNS 解析模式（`system`/`doh`/`dot`）。
+- `dns.doh_url`：DoH 服务器 URL（`type=doh` 时必填）。
+- `dns.dot_addr`：DoT 服务器地址（`type=dot` 时必填）。
+- `dns.fallback`：DoH/DoT 失败后回退到系统 DNS（默认 true）。
+- `dns.ip_precedence`：IPv4/IPv6 优先级（`ipv4_first`/`ipv6_first`/`system`）。
+
+### 目标策略
+
+- `destination_policy.protect_private`：拒绝回环/私网/链路本地等敏感地址（默认 true）。
+- `destination_policy.default_action`：非受保护地址默认动作（`allow`/`deny`）。
+- `destination_policy.deny_cidrs`/`allow_cidrs`：CIDR 黑白名单。
+- `destination_policy.deny_domains`/`allow_domains`：域名黑白名单。
+- `destination_policy.deny_ports`/`allow_ports`：端口黑白名单。
+
+### 流量审计
+
+- `traffic_audit.enabled`：启用流量审计。
+- `traffic_audit.per_user_quota`：每用户流量配额（字节），0 表示不限制。
+- `traffic_audit.per_upstream_quota`：每上游流量配额（字节），0 表示不限制。
+- `traffic_audit.quota_window`：配额统计窗口，默认 1 小时。
+
+### 透明代理
+
+- `tproxy.enabled`：启用透明代理（仅 Linux）。
+- `tproxy.mode`：透明代理模式（`redirect`/`tproxy`）。
+- 也可在 `listeners[].tproxy` 中 per-listener 配置。
+
+### 其他
+
 - `access_control`：客户端白名单、速率限制和用户并发限制。
 - `timeouts`：拨号、握手、HTTP 交换和隧道空闲超时。
 - `log`：日志级别、格式、输出位置和滚动策略。
 - `check_interval`：上游健康检查间隔，单位秒。
 - `max_connections`：全局最大下游连接数；为 0 表示不限制。
-- `enable_pprof`：是否启用 pprof 管理端点。
 
 配置中的密码、Token、上游地址可使用环境变量，例如 `${K5PW_PROXY_PASSWORD}`。引用的环境变量未设置或为空时，配置加载会失败。
 
@@ -106,11 +247,20 @@ sudo ./k5pw -config /etc/k5pw/config.yml uninstall
 
 启用 `management` 后可访问：
 
-- `GET /health`：健康检查。
-- `GET /metrics`：Prometheus 指标。
-- `GET /api/v1/status`：运行状态摘要。
-- `POST /api/v1/reload`：手动重新加载配置。
-- `/debug/pprof/*`：当 `enable_pprof: true` 时启用。
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/metrics` | GET | Prometheus 指标 |
+| `/api/v1/status` | GET | 运行状态摘要 |
+| `/api/v1/reload` | POST | 手动重新加载配置 |
+| `/api/v1/traffic` | GET | 流量统计快照 |
+| `/api/v1/config/upstreams` | GET / POST | 列出 / 添加上游 |
+| `/api/v1/config/upstreams/{name}` | PUT / DELETE | 更新 / 删除上游 |
+| `/api/v1/config/rules` | GET / POST | 列出 / 添加路由规则 |
+| `/api/v1/config/rules/{index}` | DELETE | 删除路由规则 |
+| `/api/v1/config/users` | GET / POST | 列出 / 添加用户 |
+| `/api/v1/config/users/{username}` | DELETE | 删除用户 |
+| `/debug/pprof/*` | GET | pprof 调试端点（需 `enable_pprof: true`） |
 
 配置了 `management_auth_token` 时，请携带请求头：
 
@@ -126,6 +276,21 @@ docker compose up --build
 ```
 
 `dist/docker-compose.yml` 使用 `../src/Dockerfile` 构建镜像，并将 `dist/k5` 挂载到容器内 `/k5`。
+
+## 透明代理部署
+
+透明代理需要 Linux 内核支持，配合 iptables 或 nftables 使用：
+
+```bash
+# REDIRECT 模式（简单，不保留源 IP）
+bash scripts/tproxy-redirect-iptables.sh
+
+# TPROXY 模式（保留源 IP）
+bash scripts/tproxy-tproxy-iptables.sh
+
+# nftables 模式
+bash scripts/tproxy-nftables.sh
+```
 
 ## 测试
 
@@ -196,3 +361,5 @@ git push origin v1.2.0
 - 管理端口如绑定非回环地址必须配置 `management_auth_token`。
 - 不要把真实密码、Token、上游账号写入仓库；优先使用环境变量。
 - `enable_pprof` 仅建议在排障时临时开启。
+- `destination_policy.protect_private` 建议保持开启，防止 SSRF 攻击。
+- 透明代理模式需要 root 权限配置 iptables/nftables，生产环境注意最小权限原则。

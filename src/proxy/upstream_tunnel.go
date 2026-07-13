@@ -32,7 +32,9 @@ func (c *bufferedConn) CloseRead() error {
 
 // Tunnel 在客户端与目标连接之间双向转发数据
 // clientReader 使用 bufio.Reader 是为了保留已经预读的字节
-func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn) {
+// trafficKey 用于流量审计统计（可选，为零值时不统计）
+// accounter 用于流量审计（可选，为 nil 时不统计）
+func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn, trafficKey TrafficKey, accounter *TrafficAccounter) {
 	defer targetConn.Close()
 	defer clientConn.Close()
 
@@ -47,7 +49,7 @@ func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn
 		} else {
 			src = clientConn
 		}
-		dr := &deadlineReader{r: src, conn: clientConn, timeout: TunnelIdleTimeout(), metricDirection: "client_to_target"}
+		dr := &deadlineReader{r: src, conn: clientConn, timeout: TunnelIdleTimeout(), metricDirection: "client_to_target", trafficKey: trafficKey, accounter: accounter, auditDirection: "in"}
 		dst := &deadlineWriter{w: targetConn, conn: targetConn, timeout: TunnelIdleTimeout()}
 		_, _ = io.Copy(dst, dr)
 		closeWrite(targetConn)
@@ -56,7 +58,7 @@ func Tunnel(clientConn net.Conn, clientReader *bufio.Reader, targetConn net.Conn
 
 	go func() {
 		defer wg.Done()
-		src := &deadlineReader{r: targetConn, conn: targetConn, timeout: TunnelIdleTimeout(), metricDirection: "target_to_client"}
+		src := &deadlineReader{r: targetConn, conn: targetConn, timeout: TunnelIdleTimeout(), metricDirection: "target_to_client", trafficKey: trafficKey, accounter: accounter, auditDirection: "out"}
 		dst := &deadlineWriter{w: clientConn, conn: clientConn, timeout: TunnelIdleTimeout()}
 		_, _ = io.Copy(dst, src)
 		closeWrite(clientConn)

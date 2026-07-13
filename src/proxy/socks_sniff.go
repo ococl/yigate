@@ -11,9 +11,13 @@ import (
 
 const socks5SniffTimeout = 2 * time.Second
 
-func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router, access *AccessController) {
+func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router, access *AccessController, sourceIP ...string) {
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
 	if !shouldSniffSOCKS5Target(target, mgr, router) {
-		remote, err := dialTargetForRequest(target, mgr, router)
+		remote, err := dialTargetForRequest(target, mgr, router, sip)
 		if err != nil {
 			writeSOCKS5ConnectReply(client, SOCKS5ReplyFromError(err))
 			return
@@ -22,7 +26,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 		if !writeSOCKS5ConnectReply(client, 0x00) {
 			return
 		}
-		Tunnel(client, nil, remote)
+		Tunnel(client, nil, remote, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
 		return
 	}
 
@@ -34,7 +38,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 	initial := readInitialClientBytes(client)
 	rewritten := rewriteSOCKS5TargetFromInitial(target, initial)
 	Logger().Infow("socks5 sniff target", "target", target, "rewritten", rewritten, "initial_bytes", len(initial))
-	remote, err := dialSOCKS5RecoveredTarget(rewritten, target, mgr, router)
+	remote, err := dialSOCKS5RecoveredTarget(rewritten, target, mgr, router, sip)
 	if err != nil {
 		Logger().Warnw("socks5 connect failed", "target", rewritten, "error", err)
 		client.Close()
@@ -49,27 +53,35 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 			return
 		}
 	}
-	Tunnel(client, nil, remote)
+	Tunnel(client, nil, remote, TrafficKey{Target: targetHostFromAddr(rewritten)}, globalTrafficAccounter)
 }
 
-func dialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
+func dialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
 	if rewritten != original {
 		// 优先使用域名本身走路由（socks5h / domain_suffix 规则），避免本地 DNS 污染
 		// 导致解析到虚假 IP 后 TCP 握手成功但无响应。
-		if conn, err := dialTargetForRequest(rewritten, mgr, router); err == nil {
+		if conn, err := dialTargetForRequest(rewritten, mgr, router, sip); err == nil {
 			Logger().Infow("socks5 dial domain succeeded", "target", rewritten)
 			return conn, nil
 		}
 		// 域名路由失败后再尝试本地解析兜底。
-		if conn, err := dialLocalResolvedTarget(rewritten, mgr, router); err == nil {
+		if conn, err := dialLocalResolvedTarget(rewritten, mgr, router, sip); err == nil {
 			Logger().Infow("socks5 local re-resolve succeeded", "target", rewritten)
 			return conn, nil
 		}
 	}
-	return dialTargetForRequest(original, mgr, router)
+	return dialTargetForRequest(original, mgr, router, sip)
 }
 
-func dialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
+func dialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
 	host, port, err := net.SplitHostPort(target)
 	if err != nil {
 		return nil, err
@@ -79,16 +91,20 @@ func dialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	addrs, err := router.lookupIPAddr(ctx, host)
 	if err != nil {
 		Logger().Warnw("socks5 local resolve failed", "host", host, "error", err)
 		return nil, err
 	}
 	Logger().Infow("socks5 local resolve succeeded", "host", host, "addrs", addrs)
 	var lastErr error
-	for _, ip := range preferIPv4(addrs) {
+	prec := IPPrecedenceIPv4First
+	if router != nil {
+		prec = router.ipPrecedence
+	}
+	for _, ip := range sortAddrsByPrecedence(addrs, prec) {
 		dialTarget := net.JoinHostPort(ip.String(), port)
-		conn, err := dialTargetForRequest(dialTarget, mgr, router)
+		conn, err := dialTargetForRequest(dialTarget, mgr, router, sip)
 		if err == nil {
 			Logger().Infow("socks5 dial succeeded", "target", dialTarget)
 			return conn, nil
@@ -102,21 +118,56 @@ func dialLocalResolvedTarget(target string, mgr *UpstreamManager, router *Router
 	return nil, lastErr
 }
 
-func preferIPv4(addrs []net.IPAddr) []net.IP {
-	ordered := make([]net.IP, 0, len(addrs))
-	for _, addr := range addrs {
-		if ip4 := addr.IP.To4(); ip4 != nil {
-			ordered = append(ordered, ip4)
-		}
-	}
-	for _, addr := range addrs {
-		if addr.IP.To4() == nil {
-			if ip16 := addr.IP.To16(); ip16 != nil {
-				ordered = append(ordered, ip16)
+// sortAddrsByPrecedence 根据 IP 优先级策略对 DNS 解析结果排序。
+// ipv4_first（默认）：IPv4 优先，IPv6 兜底
+// ipv6_first：IPv6 优先，IPv4 兜底
+// system：保持 DNS 返回顺序
+func sortAddrsByPrecedence(addrs []net.IPAddr, precedence string) []net.IP {
+	switch precedence {
+	case IPPrecedenceSystem:
+		ordered := make([]net.IP, 0, len(addrs))
+		for _, addr := range addrs {
+			if ip := addr.IP.To16(); ip != nil {
+				ordered = append(ordered, ip)
 			}
 		}
+		return ordered
+	case IPPrecedenceIPv6First:
+		ordered := make([]net.IP, 0, len(addrs))
+		for _, addr := range addrs {
+			if addr.IP.To4() == nil {
+				if ip16 := addr.IP.To16(); ip16 != nil {
+					ordered = append(ordered, ip16)
+				}
+			}
+		}
+		for _, addr := range addrs {
+			if ip4 := addr.IP.To4(); ip4 != nil {
+				ordered = append(ordered, ip4)
+			}
+		}
+		return ordered
+	default: // ipv4_first
+		ordered := make([]net.IP, 0, len(addrs))
+		for _, addr := range addrs {
+			if ip4 := addr.IP.To4(); ip4 != nil {
+				ordered = append(ordered, ip4)
+			}
+		}
+		for _, addr := range addrs {
+			if addr.IP.To4() == nil {
+				if ip16 := addr.IP.To16(); ip16 != nil {
+					ordered = append(ordered, ip16)
+				}
+			}
+		}
+		return ordered
 	}
-	return ordered
+}
+
+// preferIPv4 保留为向后兼容的别名，默认 IPv4 优先。
+func preferIPv4(addrs []net.IPAddr) []net.IP {
+	return sortAddrsByPrecedence(addrs, IPPrecedenceIPv4First)
 }
 
 func shouldSniffSOCKS5Target(target string, mgr *UpstreamManager, router *Router) bool {
@@ -134,7 +185,17 @@ func shouldSniffSOCKS5Target(target string, mgr *UpstreamManager, router *Router
 }
 
 func writeSOCKS5ConnectReply(conn net.Conn, rep byte) bool {
-	_, err := conn.Write([]byte{0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+	// 根据连接的本地地址族选择回复地址类型，避免 IPv6 客户端收到 IPv4 回复。
+	host, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+			// IPv6 连接：使用 IPv6 地址类型 (0x04)
+			_, err := conn.Write([]byte{0x05, rep, 0x00, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
+			return err == nil
+		}
+	}
+	// IPv4 连接或无法确定：使用 IPv4 地址类型 (0x01)
+	_, err = conn.Write([]byte{0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 	return err == nil
 }
 

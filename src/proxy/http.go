@@ -134,11 +134,12 @@ func serveOneHTTPRequest(client net.Conn, req *http.Request, reqReader *bufio.Re
 		return false
 	}
 
-	return handleHTTPRequest(client, req, mgr, router)
+	return handleHTTPRequest(client, req, mgr, router, clientSourceIP(client))
 }
 
 func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager, router *Router) {
-	targetConn, err := dialTargetForRequest(target, mgr, router)
+	sourceIP := clientSourceIP(client)
+	targetConn, err := dialTargetForRequest(target, mgr, router, sourceIP)
 	if err != nil {
 		Logger().Warnw("connect failed", "target", target, "error", err)
 		status := HTTPStatusFromError(err)
@@ -156,18 +157,22 @@ func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, u
 		return
 	}
 	writeResponse(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	Tunnel(client, clientReader, targetConn)
+	Tunnel(client, clientReader, targetConn, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
 }
 
-func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router) (net.Conn, error) {
+func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {
+	sip := ""
+	if len(sourceIP) > 0 {
+		sip = sourceIP[0]
+	}
 	if router != nil && router.Socks5HEnabled() {
-		conn, err := router.DialSocks5H(target, mgr)
+		conn, err := router.DialSocks5H(target, mgr, sip)
 		if err == nil {
 			return conn, nil
 		}
 		Logger().Warnw("socks5h redirect failed, fallback to routing", "target", target, "error", err)
 	}
-	return router.Dial(target, mgr)
+	return router.Dial(target, mgr, sip)
 }
 
 func writeResponse(w io.Writer, statusLine string) {
