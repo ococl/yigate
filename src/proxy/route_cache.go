@@ -18,7 +18,13 @@ type RouteCache struct {
 	entries map[string]RouteCacheEntry
 	order   []string
 	cap     int
+
+	stop chan struct{}
+	wg   sync.WaitGroup
 }
+
+// defaultRouteCacheCleanupInterval 是后台过期清理的周期。
+const defaultRouteCacheCleanupInterval = time.Minute
 
 func NewRouteCache() *RouteCache {
 	return NewRouteCacheWithCap(defaultRouteCacheCap)
@@ -28,7 +34,67 @@ func NewRouteCacheWithCap(cap int) *RouteCache {
 	if cap <= 0 {
 		cap = defaultRouteCacheCap
 	}
-	return &RouteCache{entries: make(map[string]RouteCacheEntry), cap: cap}
+	return &RouteCache{
+		entries: make(map[string]RouteCacheEntry),
+		cap:     cap,
+		stop:    make(chan struct{}),
+	}
+}
+
+// StartCleanup 启动后台过期清理 goroutine。
+// 注意：构造函数不会自动启动，必须显式调用（由 Router.Start 在运行时调用），
+// 这样测试直接构造 RouteCache / Router 时不会泄漏 goroutine。
+func (c *RouteCache) StartCleanup(interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultRouteCacheCleanupInterval
+	}
+	c.wg.Add(1)
+	go c.cleanupLoop(interval)
+}
+
+// Stop 停止后台清理并等待退出，避免热加载后残留 goroutine。
+func (c *RouteCache) Stop() {
+	if c == nil {
+		return
+	}
+	select {
+	case <-c.stop:
+		return
+	default:
+		close(c.stop)
+	}
+	c.wg.Wait()
+}
+
+func (c *RouteCache) cleanupLoop(interval time.Duration) {
+	defer c.wg.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stop:
+			return
+		case <-ticker.C:
+			c.evictExpired()
+		}
+	}
+}
+
+// evictExpired 删除所有已过期的条目，回收长期驻留但不再被访问的内存。
+func (c *RouteCache) evictExpired() {
+	c.mu.Lock()
+	now := time.Now()
+	expired := make([]string, 0, len(c.entries))
+	for k, e := range c.entries {
+		if !e.ExpiresAt.IsZero() && now.After(e.ExpiresAt) {
+			expired = append(expired, k)
+		}
+	}
+	for _, k := range expired {
+		delete(c.entries, k)
+		c.removeFromOrderLocked(k)
+	}
+	c.mu.Unlock()
 }
 
 func (c *RouteCache) Get(key string) (RouteCacheEntry, bool) {

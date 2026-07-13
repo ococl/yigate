@@ -223,6 +223,13 @@ func deniedErr(format string, args ...interface{}) error {
 
 // dialDirectChecked 执行直连拨号，并在解析后校验实际 IP，防止 DNS rebinding 绕过策略。
 func (r *Router) dialDirectChecked(target string) (net.Conn, error) {
+	return r.dialDirectCheckedTimeout(target, ProxyDialTimeout())
+}
+
+// dialDirectCheckedTimeout 与 dialDirectChecked 行为一致，但允许调用方指定拨号超时。
+// 它在 DNS 解析后逐个校验实际 IP，防止通过 DNS rebinding 绕过 DestinationPolicy，
+// 这也是直连转发（普通 HTTP 代理请求）复用同一防护路径的关键。
+func (r *Router) dialDirectCheckedTimeout(target string, dialTimeout time.Duration) (net.Conn, error) {
 	host, portStr, err := net.SplitHostPort(target)
 	if err != nil {
 		return nil, WrapError(CodeProtocolError, fmt.Sprintf("invalid target %q", target), err)
@@ -234,7 +241,7 @@ func (r *Router) dialDirectChecked(target string) (net.Conn, error) {
 				return nil, err
 			}
 		}
-		return DialTargetTimeout(target, ProxyDialTimeout())
+		return DialTargetTimeout(target, dialTimeout)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -251,7 +258,7 @@ func (r *Router) dialDirectChecked(target string) (net.Conn, error) {
 				continue
 			}
 		}
-		conn, derr := DialTargetTimeout(net.JoinHostPort(ip.String(), portStr), ProxyDialTimeout())
+		conn, derr := DialTargetTimeout(net.JoinHostPort(ip.String(), portStr), dialTimeout)
 		if derr == nil {
 			return conn, nil
 		}

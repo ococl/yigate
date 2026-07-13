@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,41 @@ import (
 )
 
 func TestLoadConfigWithRouting(t *testing.T) {
-	cfg, err := LoadConfig("config.yml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	cfgYAML := `listen: 127.0.0.1:8891
+upstreams:
+  - name: u1
+    url: socks5://127.0.0.1:1080
+    types:
+      - socks5
+routing:
+  final: auto
+  geosite:
+    path: data/geosite.dat
+    auto_update: true
+    update_url: https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat
+  socks5h_redirect:
+    enabled: true
+    upstreams:
+      - u1
+  rules:
+    - type: domain_suffix
+      values:
+        - example.com
+      action: proxy
+      upstreams:
+        - u1
+timeouts:
+  dial: 5
+  handshake: 5
+  http_exchange: 60
+  tunnel_idle: 300
+`
+	if err := os.WriteFile(path, []byte(cfgYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
@@ -53,11 +88,29 @@ func TestLoadConfigWithRouting(t *testing.T) {
 }
 
 func TestConfigGeoSiteCNRouting(t *testing.T) {
-	if _, err := os.Stat("geosite.dat"); err != nil {
+	geositePath, err := filepath.Abs("geosite.dat")
+	if err != nil || !fileExists(geositePath) {
 		t.Skip("geosite.dat is not available")
 	}
 
-	cfg, err := LoadConfig("config.yml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	cfgYAML := fmt.Sprintf(`listen: 127.0.0.1:8891
+routing:
+  final: proxy
+  geosite:
+    path: %s
+  rules:
+    - type: geosite
+      values:
+        - CN
+      action: direct
+`, geositePath)
+	if err := os.WriteFile(path, []byte(cfgYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
@@ -74,6 +127,11 @@ func TestConfigGeoSiteCNRouting(t *testing.T) {
 	if got := router.Decide("github.com:443").Action; got != proxy.ActionProxy {
 		t.Fatalf("github.com action = %q, want %q", got, proxy.ActionProxy)
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func TestValidateConfigListen(t *testing.T) {

@@ -297,6 +297,28 @@ func (r *Router) Policy() *DestinationPolicy {
 	return r.policy
 }
 
+// Start 启动路由器的后台任务（当前为路由缓存过期清理）。
+// 由服务在创建路由器后立即调用；测试通常不调用，以避免泄漏 goroutine。
+func (r *Router) Start() {
+	if r == nil {
+		return
+	}
+	if r.cache != nil {
+		r.cache.StartCleanup(defaultRouteCacheCleanupInterval)
+	}
+}
+
+// Stop 释放路由器持有的后台资源（如路由缓存的过期清理 goroutine）。
+// 应在热加载替换旧路由器或进程关闭时调用。
+func (r *Router) Stop() {
+	if r == nil {
+		return
+	}
+	if r.cache != nil {
+		r.cache.Stop()
+	}
+}
+
 func (r *Router) dialAuto(target string, mgr *UpstreamManager) (net.Conn, error) {
 	key := routeCacheKey(target)
 	if entry, ok := r.cache.Get(key); ok {

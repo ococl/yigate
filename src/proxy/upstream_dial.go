@@ -48,6 +48,9 @@ func (m *UpstreamManager) DialProxy(target string, names []string) (net.Conn, *U
 		tried[up] = struct{}{}
 		conn, err := up.Dial(target)
 		if err == nil {
+			// 拨号成功即视为上游恢复健康，清除 dead 状态，使故障转移后能自愈，
+			// 即使关闭了主动健康检查（check_interval=0）也生效。
+			m.markAlive(up)
 			return conn, up, nil
 		}
 		lastErr = err

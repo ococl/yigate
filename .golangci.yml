@@ -1,0 +1,39 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - misspell
+    - revive
+    - bodyclose
+    - unconvert
+
+linters-settings:
+  gosec:
+    # 代理需读取/构造原始请求，以下规则易误报，按需调整。
+    excludes:
+      - G104 # 忽略未检查的错误（部分写操作错误仅记日志）
+      - G407 # 随机数用于退避，非安全敏感
+      - G114 # 使用 net/http 默认客户端仅用于 geosite 下载
+  revive:
+    rules:
+      - name: exported
+        disabled: true
+
+issues:
+  exclude-rules:
+    # 测试文件中允许使用点导入与未导出检查的部分宽松规则。
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0

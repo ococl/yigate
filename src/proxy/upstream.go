@@ -3,7 +3,6 @@ package proxy
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -166,6 +165,16 @@ type UpstreamManager struct {
 	checkInterval int
 }
 
+// redactURLString 返回去除用户凭证（userinfo）的 URL 字符串，用于日志与错误信息，
+// 避免把代理账号密码泄露到日志文件。
+func redactURLString(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<redacted>"
+	}
+	return u.Redacted()
+}
+
 // NewUpstreamManager 根据配置创建上游管理器
 func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 	m := &UpstreamManager{
@@ -176,16 +185,17 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if c.URL == "" {
 			continue
 		}
-		expandedURL := os.ExpandEnv(c.URL)
-		u, err := url.Parse(expandedURL)
+		// config.go 已用严格的环境展开处理过 URL（缺失/空值会启动失败），
+		// 这里直接使用，避免二次非严格展开把字面量 ${...} 静默清空成非法 URL。
+		u, err := url.Parse(c.URL)
 		if err != nil {
-			return nil, fmt.Errorf("parse upstream %q: %w", c.URL, err)
+			return nil, fmt.Errorf("parse upstream %q: %w", redactURLString(c.URL), err)
 		}
 		if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5" && u.Scheme != "socks5h" {
-			return nil, fmt.Errorf("unsupported upstream scheme %q in %q", u.Scheme, c.URL)
+			return nil, fmt.Errorf("unsupported upstream scheme %q in %q", u.Scheme, redactURLString(c.URL))
 		}
 		if u.Host == "" {
-			return nil, fmt.Errorf("upstream host missing in %q", c.URL)
+			return nil, fmt.Errorf("upstream host missing in %q", redactURLString(c.URL))
 		}
 		name := strings.TrimSpace(c.Name)
 		if name == "" {
@@ -236,7 +246,7 @@ func (m *UpstreamManager) selectFrom(allowed map[string]struct{}) *Upstream {
 		group := m.groups[p]
 		alive := make([]*Upstream, 0, len(group))
 		for _, u := range group {
-			if u.dead {
+			if !m.isSelectable(u) {
 				continue
 			}
 			if allowed != nil {
@@ -264,7 +274,7 @@ func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclu
 		group := m.groups[p]
 		alive := make([]*Upstream, 0, len(group))
 		for _, u := range group {
-			if u.dead {
+			if !m.isSelectable(u) {
 				continue
 			}
 			if exclude != nil {
@@ -306,7 +316,7 @@ func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
 		group := m.groups[p]
 		alive := make([]*Upstream, 0, len(group))
 		for _, u := range group {
-			if u.dead || !u.supportsProxyType(ProxyTypeSocks5) {
+			if !m.isSelectable(u) || !u.supportsProxyType(ProxyTypeSocks5) {
 				continue
 			}
 			if allowed != nil {
@@ -356,7 +366,7 @@ func (m *UpstreamManager) Socks5ByName(name string) *Upstream {
 	defer m.mu.Unlock()
 
 	up := m.byName[name]
-	if up == nil || up.dead || !up.supportsProxyType(ProxyTypeSocks5) {
+	if up == nil || !m.isSelectable(up) || !up.supportsProxyType(ProxyTypeSocks5) {
 		return nil
 	}
 	return up
@@ -386,14 +396,28 @@ func pickWeighted(us []*Upstream) *Upstream {
 	return us[chosen]
 }
 
+// isSelectable 判断上游是否可被选中用于本次拨号尝试。
+// 未标记 dead 的始终可选；已 dead 但退避期已过的也允许被选中，
+// 以便通过一次真实请求探测其恢复（自愈）。这样即使关闭主动健康检查
+// （check_interval=0），基于实时拨号失败的故障转移与恢复仍然有效。
+func (m *UpstreamManager) isSelectable(up *Upstream) bool {
+	if up == nil {
+		return false
+	}
+	if !up.dead {
+		return true
+	}
+	if up.nextProbeAt.IsZero() {
+		return true
+	}
+	return time.Now().After(up.nextProbeAt)
+}
+
 // markDead 记录一次失败。连续失败达到阈值才标记 dead，
 // 并按指数退避调度下次主动恢复探测。
 func (m *UpstreamManager) markDead(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.checkInterval <= 0 {
-		return
-	}
 	up.failures++
 	if up.failures < deadFailureThreshold {
 		// 未达阈值，暂不标记 dead，但记录下次可快速重试的时间。
@@ -419,9 +443,6 @@ func (m *UpstreamManager) markDead(up *Upstream) {
 func (m *UpstreamManager) markDeadImmediate(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.checkInterval <= 0 {
-		return
-	}
 	if !up.dead {
 		up.dead = true
 		up.deadSince = time.Now()

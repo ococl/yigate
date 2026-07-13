@@ -33,20 +33,28 @@ func requestViaSocks5H(req *http.Request, mgr *UpstreamManager, router *Router, 
 	return resp, nil
 }
 
-func directRequest(req *http.Request) (*http.Response, error) {
-	return directRequestWithDeadlines(req, ProxyDialTimeout(), HTTPExchangeTimeout(), HTTPExchangeTimeout())
+func directRequest(req *http.Request, router *Router) (*http.Response, error) {
+	return directRequestWithDeadlines(req, ProxyDialTimeout(), HTTPExchangeTimeout(), HTTPExchangeTimeout(), router)
 }
 
-func directRequestWithTimeout(req *http.Request, timeout time.Duration) (*http.Response, error) {
-	return directRequestWithDeadlines(req, timeout, timeout, HTTPExchangeTimeout())
+func directRequestWithTimeout(req *http.Request, timeout time.Duration, router *Router) (*http.Response, error) {
+	return directRequestWithDeadlines(req, timeout, timeout, HTTPExchangeTimeout(), router)
 }
 
-func directRequestWithDeadlines(req *http.Request, dialTimeout, headerTimeout, bodyTimeout time.Duration) (*http.Response, error) {
+func directRequestWithDeadlines(req *http.Request, dialTimeout, headerTimeout, bodyTimeout time.Duration, router *Router) (*http.Response, error) {
 	target := targetHost(req)
 	if target == "" {
 		return nil, errors.New("missing target host")
 	}
-	conn, err := DialTargetTimeout(target, dialTimeout)
+	// 直连转发必须经过 DestinationPolicy 校验（含 DNS rebinding 防护），
+	// 与 CONNECT 路径使用同一拨号实现，避免普通 HTTP 请求绕过内网/SSRF 防护。
+	var conn net.Conn
+	var err error
+	if router != nil {
+		conn, err = router.dialDirectCheckedTimeout(target, dialTimeout)
+	} else {
+		conn, err = DialTargetTimeout(target, dialTimeout)
+	}
 	if err != nil {
 		return nil, err
 	}

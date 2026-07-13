@@ -202,6 +202,12 @@ func validateConfig(cfg *Config) error {
 	if cfg.Management != "" && !isLoopbackListen(cfg.Management) && cfg.ManagementAuthToken == "" {
 		return fmt.Errorf("management_auth_token is required when management listens on a non-loopback address")
 	}
+	if cfg.EnablePprof && cfg.ManagementAuthToken == "" {
+		// pprof 端点会暴露堆栈、内存与 goroutine 等敏感信息，免认证时仅允许绑定回环地址。
+		if cfg.Management != "" && !isLoopbackListen(cfg.Management) {
+			return fmt.Errorf("management_auth_token is required when enable_pprof is true and management listens on a non-loopback address")
+		}
+	}
 	if err := proxy.ValidateLogConfig(cfg.Log); err != nil {
 		return fmt.Errorf("log: %w", err)
 	}

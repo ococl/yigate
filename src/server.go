@@ -145,9 +145,23 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
 	if initialLoad && cfg.Routing.GeoSite.AutoUpdate && cfg.Routing.GeoSite.Path != "" {
 		if _, err := os.Stat(cfg.Routing.GeoSite.Path); os.IsNotExist(err) {
-			if err := updater.UpdateOnce(); err != nil {
-				proxy.Logger().Warnw("initial geosite update failed", "error", err)
-			}
+			// 首次加载且文件缺失时改为后台异步下载，避免阻塞启动
+			// （尤其在隔离网络或国内网络下下载可能很慢甚至失败）。
+			go func() {
+				if err := updater.UpdateOnce(); err != nil {
+					proxy.Logger().Warnw("initial geosite update failed", "error", err)
+					return
+				}
+				// 下载成功后重新加载配置以应用最新的 geosite 数据。
+				loaded, lerr := LoadConfig(s.cfgPath)
+				if lerr != nil {
+					proxy.Logger().Warnw("load config after initial geosite update failed", "error", lerr)
+					return
+				}
+				if aerr := s.applyConfig(loaded, false); aerr != nil {
+					proxy.Logger().Warnw("reload config after initial geosite update failed", "error", aerr)
+				}
+			}()
 		}
 	}
 	policy, err := proxy.NewDestinationPolicy(cfg.DestinationPolicy)
@@ -162,6 +176,8 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	if err := proxy.InitLogger(cfg.Log); err != nil {
 		return err
 	}
+	// 启动路由器后台任务（路由缓存过期清理）。其对应的 Stop 由热加载与关闭流程负责。
+	router.Start()
 
 	oldState := s.currentRuntime()
 	newState := &runtimeState{
@@ -248,6 +264,9 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		}
 		if oldState.manager != nil {
 			oldState.manager.StopHealthCheck()
+		}
+		if oldState.router != nil {
+			oldState.router.Stop()
 		}
 	}
 	if mgmtChanged && oldMgmt != nil {
@@ -442,6 +461,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			}
 			if state.manager != nil {
 				state.manager.StopHealthCheck()
+			}
+			if state.router != nil {
+				state.router.Stop()
 			}
 		}
 		if mgmt != nil {

@@ -12,14 +12,15 @@ import (
 
 const maxBufferedRequestBody = 1 << 20 // 1 MiB
 
-func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) {
+// handleHTTPRequest 处理单个非 CONNECT 的 HTTP 请求，将响应写回客户端。
+// 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
+func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) bool {
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 
 	// Chunked 或超大请求体无法缓冲重试，直接透传。
 	if isChunkedRequest(req) || req.ContentLength < 0 || req.ContentLength > maxBufferedRequestBody {
-		handleStreamedRequest(client, req, mgr, router)
-		return
+		return handleStreamedRequest(client, req, mgr, router)
 	}
 	var bodyBytes []byte
 	if req.Body != nil {
@@ -28,12 +29,12 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		if err != nil {
 			Logger().Warnw("read request body failed", "error", err)
 			writeResponse(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
-			return
+			return false
 		}
 		if len(bodyBytes) > maxBufferedRequestBody {
 			Logger().Warnw("request body too large", "size", len(bodyBytes), "max", maxBufferedRequestBody)
 			writeResponse(client, "HTTP/1.1 413 Payload Too Large\r\n\r\n")
-			return
+			return false
 		}
 	}
 	resetBody := func() {
@@ -58,12 +59,13 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 			defer resp.Body.Close()
 			if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 				Logger().Warnw("set response deadline failed", "error", err)
-				return
+				return false
 			}
 			if err := resp.Write(client); err != nil {
 				Logger().Warnw("write response to client failed", "error", err)
+				return false
 			}
-			return
+			return !req.Close
 		}
 		Logger().Warnw("socks5h request failed, fallback to routing", "error", err)
 	}
@@ -71,7 +73,7 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 	switch decision.Action {
 	case ActionDirect:
 		resetBody()
-		resp, err = directRequest(req)
+		resp, err = directRequest(req, router)
 	case ActionProxy:
 		resp, err = requestViaProxy(req, mgr, router, decision.Upstreams, resetBody)
 	default:
@@ -81,16 +83,18 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		Logger().Warnw("forward request failed", "target", targetHost(req), "error", err)
 		status := HTTPStatusFromError(err)
 		writeResponse(client, fmt.Sprintf("HTTP/1.1 %d %s\r\n\r\n", status, HTTPStatusText(status)))
-		return
+		return false
 	}
 	defer resp.Body.Close()
 	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 		Logger().Warnw("set response deadline failed", "error", err)
-		return
+		return false
 	}
 	if err := resp.Write(client); err != nil {
 		Logger().Warnw("write response to client failed", "error", err)
+		return false
 	}
+	return !req.Close
 }
 
 func isChunkedRequest(req *http.Request) bool {
@@ -102,8 +106,9 @@ func isChunkedRequest(req *http.Request) bool {
 	return false
 }
 
-// 处理无法缓冲重试的流式请求（chunked 或超大请求体）。
-func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) {
+// handleStreamedRequest 处理无法缓冲重试的流式请求（chunked 或超大请求体）。
+// 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
+func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router) bool {
 	var resp *http.Response
 	var err error
 	if router.Socks5HEnabled() {
@@ -112,12 +117,13 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 			defer resp.Body.Close()
 			if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 				Logger().Warnw("set streamed response deadline failed", "error", err)
-				return
+				return false
 			}
 			if err := resp.Write(client); err != nil {
 				Logger().Warnw("write streamed response to client failed", "error", err)
+				return false
 			}
-			return
+			return !req.Close
 		}
 		Logger().Warnw("socks5h streamed request failed, fallback to routing", "error", err)
 	}
@@ -125,11 +131,11 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 	decision := router.Decide(targetHost(req))
 	switch decision.Action {
 	case ActionDirect:
-		resp, err = directRequest(req)
+		resp, err = directRequest(req, router)
 	case ActionProxy:
 		resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams)
 	default:
-		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout)
+		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout, router)
 		if err != nil {
 			resp, err = requestViaProxyNoRetry(req, mgr, router, nil)
 		}
@@ -138,16 +144,18 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 		Logger().Warnw("forward streamed request failed", "target", targetHost(req), "error", err)
 		status := HTTPStatusFromError(err)
 		writeResponse(client, fmt.Sprintf("HTTP/1.1 %d %s\r\n\r\n", status, HTTPStatusText(status)))
-		return
+		return false
 	}
 	defer resp.Body.Close()
 	if err := setConnDeadline(client, HTTPExchangeTimeout()); err != nil {
 		Logger().Warnw("set streamed response deadline failed", "error", err)
-		return
+		return false
 	}
 	if err := resp.Write(client); err != nil {
 		Logger().Warnw("write streamed response to client failed", "error", err)
+		return false
 	}
+	return !req.Close
 }
 
 func requestViaProxyNoRetry(req *http.Request, mgr *UpstreamManager, router *Router, names []string) (*http.Response, error) {
@@ -169,7 +177,7 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 		switch entry.Action {
 		case ActionDirect:
 			resetBody()
-			resp, err := directRequestWithTimeout(req, router.auto.DirectTimeout)
+			resp, err := directRequestWithTimeout(req, router.auto.DirectTimeout, router)
 			if err == nil {
 				return resp, nil
 			}
@@ -189,7 +197,7 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 			return resp, nil
 		}
 		resetBody()
-		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout)
+		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout, router)
 		if err == nil {
 			router.cache.SetDirect(key, router.auto.CacheTTL)
 		}
@@ -197,7 +205,7 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 	}
 
 	resetBody()
-	resp, directErr := directRequestWithTimeout(req, router.auto.DirectTimeout)
+	resp, directErr := directRequestWithTimeout(req, router.auto.DirectTimeout, router)
 	if directErr == nil {
 		router.cache.SetDirect(key, router.auto.CacheTTL)
 		return resp, nil
