@@ -46,15 +46,31 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
 PLATFORMS=(
+  # Linux (most common server / embedded targets)
   "linux/amd64"
   "linux/arm64"
   "linux/386"
   "linux/arm/v7"
+  "linux/riscv64"
+  "linux/ppc64le"
+  "linux/s390x"
+  "linux/mips64"
+  "linux/mips64le"
+  # macOS
   "darwin/amd64"
   "darwin/arm64"
+  # Windows
   "windows/amd64"
   "windows/386"
+  "windows/arm64"
+  # FreeBSD
   "freebsd/amd64"
+  "freebsd/386"
+  "freebsd/arm64"
+  # OpenBSD / NetBSD
+  "openbsd/amd64"
+  "openbsd/arm64"
+  "netbsd/amd64"
 )
 
 for platform in "${PLATFORMS[@]}"; do

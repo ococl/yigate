@@ -136,13 +136,59 @@ GOPROXY=https://goproxy.cn,direct go test ./...
 
 代理联调脚本位于 `pyscripts/`，运行前需要先启动对应端口的代理服务。
 
-## 发布构建
+## 交叉编译与发布
+
+项目纯 Go 实现，无 CGO 依赖，可交叉编译到常见平台。
+
+### 支持的目标平台
+
+| OS | 架构 |
+|---|---|
+| Linux | amd64、arm64、386、armv7、riscv64、ppc64le、s390x、mips64、mips64le |
+| macOS | amd64、arm64 |
+| Windows | amd64、386、arm64 |
+| FreeBSD | amd64、386、arm64 |
+| OpenBSD | amd64、arm64 |
+| NetBSD | amd64 |
+
+> 注：`install/start/stop/restart/uninstall` 系统服务命令依赖 `kardianos/service`，在 Linux、macOS、Windows 与 FreeBSD 上完整支持；其他 BSD 平台可运行 `run` 模式作为前台代理。
+
+### 本地发布构建（Linux / macOS）
 
 ```bash
+# 使用 Makefile 一次性交叉编译所有平台
+make cross
+
+# 结果位于 build/ 目录
+ls build/
+
+# 使用 release.sh 构建并自动创建 Git tag
 ./scripts/release.sh 1.2.0
 ```
 
-脚本会生成多平台二进制到 `build/`，并创建对应 Git tag。
+### 本地发布构建（Windows）
+
+```powershell
+# 使用 PowerShell 脚本验证所有目标平台
+.\scripts\build.ps1 -Version 1.2.0
+
+# 结果位于 build/ 目录
+Get-ChildItem build\
+```
+
+### 自动发布（GitHub Actions）
+
+仓库已配置 CI/CD：
+
+- `.github/workflows/ci.yml`：每次 Push / PR 自动运行 `go test ./...` 并交叉编译全部目标平台，上传构建产物。
+- `.github/workflows/release.yml`：推送形如 `v1.2.0` 的 tag 时自动运行 `scripts/release.sh`，并将二进制与校验和发布到 GitHub Release。
+
+发布流程：
+
+```bash
+git tag -a v1.2.0 -m "Release v1.2.0"
+git push origin v1.2.0
+```
 
 ## 安全建议
 

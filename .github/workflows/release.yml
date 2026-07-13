@@ -10,23 +10,37 @@ permissions:
 
 jobs:
   build:
+    name: Build release artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache-dependency-path: ./src/go.sum
+
+      - name: Download dependencies
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        working-directory: ./src
+        run: go mod download
 
       - name: Run quality gates
-        working-directory: src
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        working-directory: ./src
         run: |
           go test -race ./...
           go vet ./...
 
       - name: Build release binaries
+        env:
+          GOPROXY: https://goproxy.cn,direct
         run: ./scripts/release.sh "${GITHUB_REF_NAME#v}"
 
       - name: Smoke test Linux binary
@@ -39,10 +53,16 @@ jobs:
           format: spdx-json
           output-file: ./build/k5pw-${{ github.ref_name }}.spdx.json
 
-      - name: Upload artifacts to release
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: build/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: build/*
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          fail_on_unmatched_files: true
