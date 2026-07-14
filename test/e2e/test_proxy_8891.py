@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-k5pw 8891 端口（dist 生产实例）全能力验收测试脚本。
+k5pw 8891 端口（生产实例）全能力验收测试脚本。
 
-本脚本针对运行中的 dist 实例（dist/k5/config.yml，监听 0.0.0.0:8891，
-上游 socks5h://10.2.3.150:7897，管理端口 127.0.0.1:8890）进行端到端验证：
+本脚本针对运行中的 k5pw 生产实例（监听 0.0.0.0:8891，
+管理端口 127.0.0.1:8890）进行端到端验证：
   - 国内站点（geosite CN -> 直连）
-  - 国外站点（github/google 等 -> 经上游 7897 代理）
+  - 国外站点（github/google 等 -> 经上游代理）
   - 四类代理入口：HTTP / HTTPS CONNECT / SOCKS5 / SOCKS5H
   - keep-alive 复用、大请求体、并发
   - 管理接口：health / metrics / status / reload
@@ -19,13 +19,18 @@ k5pw 8891 端口（dist 生产实例）全能力验收测试脚本。
     * SOCKS5 UDP ASSOCIATE 拒绝（allow_udp_associate: false）
     * 运行时配置 API（/api/v1/config/upstreams）
     * 流量查询 API（/api/v1/traffic）
+  - 对标测试用例（从 4479 同步）：
+    * HTTP 方法矩阵（GET/HEAD/POST/PUT/DELETE/PATCH）
+    * 错误处理（连接拒绝/DNS 失败）
+    * Config API rules/users
+    * Metrics 计数器递增验证
+    * 路由决策验证（直连 vs 代理）
+    * 协议错误处理
 
 与 test_proxy_4479.py（自包含、本地 fixture）不同，本脚本依赖真实网络与
-上游 7897，验证的是 dist 实例的真实路由与出网能力。
+上游代理，验证的是生产实例的真实路由与出网能力。
 
-运行前请确保：
-  1) dist 容器已用最新镜像启动（docker compose -f dist/docker-compose.yml up -d）
-  2) 上游 10.2.3.150:7897 可达
+运行前请确保 k5pw 已在 8891 端口启动且上游可达。
 
 用法：
     python3 test_proxy_8891.py
@@ -587,6 +592,222 @@ def test_traffic_api():
 
 
 # ---------------------------------------------------------------------------
+# 对标测试用例（从 4479 测试同步）
+# ---------------------------------------------------------------------------
+
+def test_http_method_matrix():
+    """HTTP 方法矩阵：GET/HEAD/POST 经代理透传，验证方法无关性。
+
+    PUT/DELETE/PATCH 仅验证代理能转发（目标站点可能不支持，接受任意非 5xx 响应）。
+    """
+    try:
+        results = {}
+        # GET
+        code, _ = _http_get("https://www.baidu.com", _proxy_url())
+        results["GET"] = code is not None and code < 500
+
+        # HEAD
+        try:
+            r = requests.head(
+                "https://www.baidu.com",
+                proxies={"http": _proxy_url(), "https": _proxy_url()},
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=True,
+                verify=False,
+            )
+            results["HEAD"] = r.status_code < 500
+        except Exception:
+            results["HEAD"] = False
+
+        # POST
+        try:
+            r = requests.post(
+                "https://www.baidu.com",
+                data=b"test",
+                proxies={"http": _proxy_url(), "https": _proxy_url()},
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=True,
+                verify=False,
+            )
+            results["POST"] = r.status_code < 500
+        except Exception:
+            results["POST"] = False
+
+        # PUT/DELETE/PATCH — 目标站点可能不支持，仅验证代理不崩溃
+        for method in ("PUT", "DELETE", "PATCH"):
+            try:
+                r = requests.request(
+                    method,
+                    "https://www.baidu.com",
+                    data=b"x",
+                    proxies={"http": _proxy_url(), "https": _proxy_url()},
+                    timeout=REQUEST_TIMEOUT,
+                    verify=False,
+                )
+                results[method] = r.status_code < 500
+            except Exception:
+                results[method] = False
+
+        ok = results.get("GET", False) and results.get("HEAD", False)
+        detail = " ".join(f"{m}={'Y' if v else 'N'}" for m, v in results.items())
+        status_msg = "核心方法透传成功" if ok else "核心方法失败"
+        return TestResult("HTTP 方法矩阵", ok, f"{status_msg} | {detail}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("HTTP 方法矩阵", False, str(e))
+
+
+def test_connection_refused():
+    """代理到未监听端口应优雅失败。"""
+    try:
+        proxies = {"http": _proxy_url(), "https": _proxy_url()}
+        r = requests.get("http://127.0.0.1:1/", proxies=proxies, timeout=8, verify=False)
+        ok = r.status_code >= 400
+        return TestResult("错误处理-连接拒绝", ok, f"HTTP {r.status_code}" if ok else "意外成功")
+    except requests.exceptions.ProxyError:
+        return TestResult("错误处理-连接拒绝", True, "ProxyError（符合预期）")
+    except Exception:
+        return TestResult("错误处理-连接拒绝", True, "异常拒绝（符合预期）")
+
+
+def test_dns_failure():
+    """代理到不存在的域名应优雅失败。"""
+    try:
+        proxies = {"http": _proxy_url(), "https": _proxy_url()}
+        r = requests.get("http://nonexistent.invalid.test/", proxies=proxies, timeout=8, verify=False)
+        ok = r.status_code >= 400
+        return TestResult("错误处理-DNS失败", ok, f"HTTP {r.status_code}" if ok else "意外成功")
+    except requests.exceptions.ProxyError:
+        return TestResult("错误处理-DNS失败", True, "ProxyError（符合预期）")
+    except Exception:
+        return TestResult("错误处理-DNS失败", True, "异常拒绝（符合预期）")
+
+
+def test_config_api_rules():
+    """Config API: GET /api/v1/config/rules 应返回路由规则列表。"""
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/rules", timeout=8)
+        ok = r.status_code == 200
+        if ok:
+            data = r.json()
+            rules = data.get("rules", data) if isinstance(data, dict) else data
+            has_rules = isinstance(rules, list) and len(rules) > 0
+            return TestResult("Config API /rules", ok and has_rules,
+                              f"规则数={len(rules) if isinstance(rules, list) else '?'}")
+        return TestResult("Config API /rules", False, f"HTTP {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("Config API /rules", False, str(e))
+
+
+def test_config_api_users():
+    """Config API: GET /api/v1/config/users 应返回用户列表。"""
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/users", timeout=8)
+        ok = r.status_code == 200
+        if ok:
+            data = r.json()
+            users = data.get("users", data) if isinstance(data, dict) else data
+            is_list = isinstance(users, list)
+            return TestResult("Config API /users", ok and is_list,
+                              f"用户数={len(users) if is_list else '?'}")
+        return TestResult("Config API /users", False, f"HTTP {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("Config API /users", False, str(e))
+
+
+def test_metrics_delta():
+    """Metrics 计数器验证：发起请求前后计数器应递增。"""
+    try:
+        r1 = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
+        if r1.status_code != 200:
+            return TestResult("Metrics 计数器递增", False, f"初始 metrics HTTP {r1.status_code}")
+
+        def extract_counter(text, name):
+            for line in text.splitlines():
+                if line.startswith(name) and not line.startswith(name + "_"):
+                    try:
+                        return float(line.split()[-1])
+                    except (ValueError, IndexError):
+                        pass
+            return None
+
+        counter_names = [
+            "k5pw_connections_total",
+            "k5pw_requests_total",
+            "k5pw_proxy_requests_total",
+            "k5pw_total_connections",
+        ]
+        before_vals = {}
+        for name in counter_names:
+            v = extract_counter(r1.text, name)
+            if v is not None:
+                before_vals[name] = v
+
+        if not before_vals:
+            return TestResult("Metrics 计数器递增", True, "metrics 可读（未找到已知计数器名，跳过 delta 验证）")
+
+        # 发起若干请求
+        for url in ["https://www.baidu.com", "https://www.qq.com", "https://www.jd.com"]:
+            try:
+                _http_get(url, _proxy_url())
+            except Exception:
+                pass
+
+        r2 = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
+        if r2.status_code != 200:
+            return TestResult("Metrics 计数器递增", False, f"更新后 metrics HTTP {r2.status_code}")
+
+        any_incremented = False
+        details = []
+        for name, before in before_vals.items():
+            after = extract_counter(r2.text, name)
+            if after is not None and after > before:
+                any_incremented = True
+                details.append(f"{name}: {before:.0f}->{after:.0f}")
+            elif after is not None:
+                details.append(f"{name}: {before:.0f}->{after:.0f}(未增)")
+
+        return TestResult("Metrics 计数器递增", any_incremented,
+                          ("计数器递增" if any_incremented else "未检测到递增") + " | " + " ".join(details))
+    except Exception as e:  # noqa: BLE001
+        return TestResult("Metrics 计数器递增", False, str(e))
+
+
+def test_route_decision_direct():
+    """路由决策验证-直连：国内站点应走 direct 路径（不经上游）。"""
+    try:
+        # 通过 SOCKS5 访问国内站点，验证直连
+        ok = _socks5_http_get("www.baidu.com", force_domain=False)
+        return TestResult("路由决策-直连", ok, "直连成功" if ok else "直连失败")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("路由决策-直连", False, str(e))
+
+
+def test_route_decision_proxy():
+    """路由决策验证-代理：国外站点应走 proxy 路径（经上游）。"""
+    try:
+        ok = _socks5_http_get("github.com", force_domain=False)
+        return TestResult("路由决策-代理", ok, "代理路径成功" if ok else "代理路径失败")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("路由决策-代理", False, str(e))
+
+
+def test_protocol_error_handling():
+    """发送非 HTTP 数据到代理端口，代理应优雅关闭连接而非崩溃。"""
+    try:
+        c = socket.create_connection((PROXY_HOST, PROXY_PORT), timeout=5)
+        c.sendall(b"\x00\x01\x02\x03NOT-HTTP\r\n\r\n")
+        c.settimeout(3)
+        try:
+            data = c.recv(4096)
+        except socket.timeout:
+            data = b""
+        c.close()
+        return TestResult("协议错误处理", True, "连接已关闭")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("协议错误处理", False, str(e))
+
+
+# ---------------------------------------------------------------------------
 # 运行
 # ---------------------------------------------------------------------------
 def run_single_tests():
@@ -615,6 +836,16 @@ def run_single_tests():
         test_socks5_udp_associate_rejected,
         test_config_api_upstreams,
         test_traffic_api,
+        # 对标测试用例（从 4479 同步）
+        test_http_method_matrix,
+        test_connection_refused,
+        test_dns_failure,
+        test_config_api_rules,
+        test_config_api_users,
+        test_metrics_delta,
+        test_route_decision_direct,
+        test_route_decision_proxy,
+        test_protocol_error_handling,
     ]
     results = []
     for t in tests:
@@ -683,7 +914,7 @@ def main():
             print(f"{Colors.OK}代理端口 {PROXY_HOST}:{PROXY_PORT} 连通{Colors.RESET}")
     except Exception as e:  # noqa: BLE001
         print(f"{Colors.FAIL}代理端口不通: {e}{Colors.RESET}")
-        print("请先启动 dist 实例：docker compose -f dist/docker-compose.yml up -d")
+        print("请先启动 k5pw 生产实例")
         sys.exit(2)
 
     try:

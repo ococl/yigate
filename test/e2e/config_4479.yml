@@ -1,6 +1,6 @@
 # k5pw 4479 端口全能力自包含测试配置
 # 设计目标：不依赖真实外网或真实上游，全部使用本地可控的
-# 目标服务器与本地上游代理（见 pyscripts/test_proxy_4479.py）。
+# 目标服务器与本地上游代理（见 test/e2e/test_proxy_4479.py）。
 #
 # - listen: 测试脚本连接的统一代理端口
 # - management: 独立管理端口（回环 + 空 token，无需鉴权）
@@ -20,7 +20,7 @@ users: {}
 upstreams:
   - name: "local-upstream"
     url: "http://127.0.0.1:8893"
-    types: ["http", "https", "socks5", "socks5h"]
+    types: ["http", "https"]
     priority: 1
     weight: 5
 
