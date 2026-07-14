@@ -102,32 +102,14 @@
 
 ```text
 .
-├── src/                 # Go 源码、默认配置、Dockerfile
-│   ├── main.go          # CLI 入口与服务命令
-│   ├── config.go        # 配置加载、默认值与校验
-│   ├── config_api_impl.go # 运行时配置 API 实现
-│   ├── server.go        # TCP 监听、协议识别、热加载
-│   ├── service.go       # 系统服务集成
-│   └── proxy/           # 协议处理、路由、上游、管理接口
-│       ├── http.go          # HTTP 请求和 CONNECT 隧道
-│       ├── socks.go         # SOCKS5 协商和命令分发
-│       ├── socks_bind.go    # SOCKS5 BIND 和 UDP ASSOCIATE
-│       ├── socks_sniff.go   # TLS SNI / HTTP Host 目标恢复
-│       ├── router.go        # 路由规则编译与匹配
-│       ├── upstream.go      # 上游代理管理
-│       ├── upstream_health.go # 健康检查
-│       ├── destination_policy.go # 目标地址访问策略
-│       ├── dns.go           # DoH/DoT DNS 解析器
-│       ├── tproxy.go        # 透明代理
-│       ├── traffic_audit.go # 流量审计与配额
-│       ├── config_api.go    # 运行时配置 API
-│       ├── management.go    # 管理接口
-│       ├── metrics.go       # Prometheus 指标
-│       ├── access.go        # 访问控制
-│       └── logging.go       # 结构化日志
-├── dist/                # Docker/systemd 分发配置
-├── scripts/             # 发布构建脚本与 TPROXY 示例
-└── pyscripts/           # 代理联调脚本
+├── src/                 # Go 源码、模块文件和 Go 测试
+├── deploy/              # Docker/systemd 部署模板和公开配置
+│   ├── docker/
+│   ├── systemd/
+│   └── config/
+├── test/e2e/            # 联调和基准测试脚本
+├── scripts/             # 构建、发布和 TPROXY 示例脚本
+└── docs/
 ```
 
 ## 环境要求
@@ -143,13 +125,13 @@
 cd src
 GOPROXY=https://goproxy.cn,direct go mod download
 GOPROXY=https://goproxy.cn,direct go build -o k5pw .
-./k5pw -config config.sample.yml run
+./k5pw -config ../deploy/config/config.local.yml run
 ```
 
 默认命令为 `run`，也可以省略：
 
 ```bash
-./k5pw -config config.sample.yml
+./k5pw -config ../deploy/config/config.local.yml
 ```
 
 查看版本：
@@ -268,14 +250,25 @@ sudo ./k5pw -config /etc/k5pw/config.yml uninstall
 Authorization: Bearer <token>
 ```
 
-## Docker 运行
+## Docker 部署
+
+本机匿名模式（仅回环监听）：
 
 ```bash
-cd dist
-docker compose up --build
+cd deploy/docker
+docker compose -f compose.local.yml up --build
 ```
 
-`dist/docker-compose.yml` 使用 `../src/Dockerfile` 构建镜像，并将 `dist/k5` 挂载到容器内 `/k5`。
+局域网认证模式（需设置环境变量）：
+
+```bash
+export K5PW_PROXY_PASSWORD=yourpassword
+export K5PW_MANAGEMENT_TOKEN=yourtoken
+cd deploy/docker
+docker compose -f compose.lan.yml up --build
+```
+
+> **安全提示：** 本机模板仅监听 127.0.0.1，允许匿名代理。对外暴露前请使用局域网模板并配置认证。自行配置非回环匿名代理的风险由部署者承担。
 
 ## 透明代理部署
 
@@ -299,7 +292,7 @@ cd src
 GOPROXY=https://goproxy.cn,direct go test ./...
 ```
 
-代理联调脚本位于 `pyscripts/`，运行前需要先启动对应端口的代理服务。
+代理联调脚本位于 `test/e2e/`，运行前需要先启动对应端口的代理服务。
 
 ## 交叉编译与发布
 
@@ -321,14 +314,29 @@ GOPROXY=https://goproxy.cn,direct go test ./...
 ### 本地发布构建（Linux / macOS）
 
 ```bash
-# 使用 Makefile 一次性交叉编译所有平台
+# 使用 Makefile 一次性交叉编译所有平台（开发验证）
 make cross
 
 # 结果位于 build/ 目录
 ls build/
+```
 
-# 使用 release.sh 构建并自动创建 Git tag
+### 正式发布
+
+正式发布从已有 Git tag 构建，拒绝脏工作区：
+
+```bash
+# 前置：确保 Git 工作区干净，已创建并推送 tag
+git tag v1.2.0
+git push origin v1.2.0
+# CI 自动构建并发布
+```
+
+本地验证：
+
+```bash
 ./scripts/release.sh 1.2.0
+./scripts/check-release-files.sh 1.2.0
 ```
 
 ### 本地发布构建（Windows）
@@ -345,15 +353,8 @@ Get-ChildItem build\
 
 仓库已配置 CI/CD：
 
-- `.github/workflows/ci.yml`：每次 Push / PR 自动运行 `go test ./...` 并交叉编译全部目标平台，上传构建产物。
-- `.github/workflows/release.yml`：推送形如 `v1.2.0` 的 tag 时自动运行 `scripts/release.sh`，并将二进制与校验和发布到 GitHub Release。
-
-发布流程：
-
-```bash
-git tag -a v1.2.0 -m "Release v1.2.0"
-git push origin v1.2.0
-```
+- `.github/workflows/ci.yml`：每次 Push / PR 自动运行测试、交叉编译全部目标平台，并验证 Docker 镜像和部署模板。
+- `.github/workflows/release.yml`：推送形如 `v1.2.0` 的 tag 时自动运行完整质量门禁，调用 `scripts/release.sh` 生成正式制品并发布到 GitHub Release。
 
 ## 安全建议
 

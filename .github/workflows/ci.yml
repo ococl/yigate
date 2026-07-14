@@ -123,15 +123,44 @@ jobs:
           IFS='/' read -r GOOS GOARCH GOARM <<< "${{ matrix.platform }}"
           export GOOS GOARCH
           export GOARM="${GOARM#v}"
-          OUTPUT="k5pw-${{ matrix.platform }}"
-          if [[ "${GOOS}" == "windows" ]]; then
-            OUTPUT="${OUTPUT}.exe"
-          fi
-          go build -trimpath -ldflags '-s -w' -o "${OUTPUT}" .
+          SUFFIX="${GOOS}-${GOARCH}"
+          if [[ "$GOARCH" == "arm" && "$GOARM" == "7" ]]; then SUFFIX="${GOOS}-armv7"; fi
+          OUTPUT="k5pw-${SUFFIX}"
+          if [[ "${GOOS}" == "windows" ]]; then OUTPUT="${OUTPUT}.exe"; fi
+          go build -trimpath -mod=readonly -ldflags '-s -w' -o "${OUTPUT}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: k5pw-${{ matrix.platform }}
-          path: ./src/k5pw-${{ matrix.platform }}*
+          name: k5pw-build-${{ matrix.platform }}
+          path: ./src/k5pw-*
           if-no-files-found: error
+
+  docker:
+    name: Docker and config validation
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: ./src/go.sum
+
+      - name: Check release configs
+        run: ./scripts/check-release-configs.sh
+
+      - name: Build local Docker image
+        run: |
+          docker build \
+            --build-arg VERSION=ci --build-arg COMMIT=ci --build-arg BUILD_TIME=ci \
+            -f deploy/docker/Dockerfile -t k5pw:local .
+
+      - name: Validate local compose
+        run: |
+          cd deploy/docker
+          docker compose -f compose.local.yml config --quiet
+          docker compose -f compose.lan.yml config --quiet

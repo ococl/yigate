@@ -34,11 +34,16 @@
 │   ├── server.go        # 统一 TCP Server、协议识别、配置热加载、多监听器
 │   ├── service.go       # system service 封装
 │   ├── config.sample.yml
-│   ├── Dockerfile
 │   └── proxy/           # 代理核心
-├── dist/                # Docker Compose、systemd、运行目录示例
-├── scripts/             # 发布构建脚本、TPROXY iptables/nftables 示例
-└── pyscripts/           # 联调脚本
+├── deploy/              # Docker/systemd 部署模板和公开配置
+│   ├── docker/
+│   ├── systemd/
+│   └── config/
+├── test/e2e/            # 联调和基准测试脚本
+├── scripts/             # 构建、发布和 TPROXY 示例脚本
+├── build/               # 普通构建中间产物（忽略）
+├── release/             # 正式发布 staging（忽略，每次重建）
+└── .local/              # 本地运行配置、日志和数据（忽略）
 ```
 
 ## 核心模块
@@ -103,8 +108,8 @@ GOPROXY=https://goproxy.cn,direct go build -o k5pw .
 Docker：
 
 ```bash
-cd dist
-docker compose up --build
+cd deploy/docker
+docker compose -f compose.local.yml up --build
 ```
 
 发布构建：

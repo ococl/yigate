@@ -1,0 +1,17 @@
+.git
+.github
+.local
+build
+release
+test
+.codebuddy
+docs/superpowers
+**/*_test.go
+**/*.log
+**/*.prof
+**/coverage.*
+**/__pycache__
+**/*.pyc
+**/__debug_bin*
+.env
+.env.*

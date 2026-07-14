@@ -9,9 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build release artifacts
+  test:
+    name: Quality gates
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./src
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,42 +30,83 @@ jobs:
       - name: Download dependencies
         env:
           GOPROXY: https://goproxy.cn,direct
-        working-directory: ./src
         run: go mod download
 
-      - name: Run quality gates
-        env:
-          GOPROXY: https://goproxy.cn,direct
-        working-directory: ./src
-        run: |
-          go test -race ./...
-          go vet ./...
+      - name: Mod verify
+        run: go mod verify
 
-      - name: Build release binaries
+      - name: Test
         env:
           GOPROXY: https://goproxy.cn,direct
+        run: go test ./...
+
+      - name: Race detector
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: go test -race ./...
+
+      - name: Vet
+        env:
+          GOPROXY: https://goproxy.cn,direct
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59
+          working-directory: ./src
+
+      - name: Vulnerability scan
+        uses: golang/govulncheck-action@v1
+        with:
+          go-package: ./...
+          work-dir: ./src
+
+      - name: Check release configs
+        working-directory: .
+        run: ./scripts/check-release-configs.sh
+
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: ./src/go.sum
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Build release
         run: ./scripts/release.sh "${GITHUB_REF_NAME#v}"
 
-      - name: Smoke test Linux binary
-        run: ./build/k5pw-${GITHUB_REF_NAME#v}-linux-amd64 -version
+      - name: Check release files
+        run: ./scripts/check-release-files.sh "${GITHUB_REF_NAME#v}"
 
-      - name: Generate SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          path: ./src
-          format: spdx-json
-          output-file: ./build/k5pw-${{ github.ref_name }}.spdx.json
+      - name: Smoke test Linux binary
+        run: ./release/k5pw-${GITHUB_REF_NAME#v}-linux-amd64 -version
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-binaries
-          path: build/*
+          path: release/*
           if-no-files-found: error
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/*
+          files: |
+            release/k5pw-*
+            release/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -5,11 +5,19 @@ k5pw
 *.out
 bin/
 
-# Logs
+# Generated artifacts
+/build/
+/release/
+/tmp/
+
+# Local runtime state
+/.local/
+.env
+.env.*
+
+# Logs and downloaded data
 logs/
 *.log
-
-# Downloaded routing data
 geosite.dat
 upstream-types.txt
 *.tmp
@@ -35,25 +43,9 @@ __pycache__/
 *.swo
 *~
 
-# Build / dist
-dist/*
-!dist/docker-compose.yml
-!dist/k5/
-dist/k5/*
-!dist/k5/config.yml
-dist/k5/logs/
-build/
-tmp/
-
 # OS
 .DS_Store
 Thumbs.db
 
 # Test artifacts
 .last_proxy_test_summary
-pyscripts/test_proxy_7897.py
-
-# Local env/config
-.env
-.env.*
-src/config.yml

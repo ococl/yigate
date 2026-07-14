@@ -34,7 +34,8 @@ func TestVersionCommandOutputsBuildMetadata(t *testing.T) {
 func TestDeliveryArtifactsSmoke(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(".."))
 
-	dockerfile, err := os.ReadFile(filepath.Join(repoRoot, "src", "Dockerfile"))
+	// Dockerfile 已迁移至 deploy/docker/
+	dockerfile, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", "Dockerfile"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +43,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		"FROM golang:1.21-alpine AS builder",
 		"FROM alpine:3.20",
 		"go mod download",
-		"CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct go build",
+		"CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct",
 		"adduser -D -u 1000 k5pw",
 		"COPY --from=builder /build/k5pw /usr/local/bin/k5pw",
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
@@ -55,33 +56,49 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		}
 	}
 
-	compose, err := os.ReadFile(filepath.Join(repoRoot, "dist", "docker-compose.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"services:", "k5pw:", "build:", "context: ../src", "dockerfile: Dockerfile", "network_mode: host", "volumes:", "restart: unless-stopped", "healthcheck:"} {
-		if !bytes.Contains(compose, []byte(want)) {
-			t.Fatalf("docker-compose.yml missing %q", want)
+	// Compose 模板已拆分至 deploy/docker/
+	for _, composeFile := range []string{"compose.local.yml", "compose.lan.yml"} {
+		compose, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "docker", composeFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"services:", "k5pw:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "restart: unless-stopped", "healthcheck:"} {
+			if !bytes.Contains(compose, []byte(want)) {
+				t.Fatalf("%s missing %q", composeFile, want)
+			}
 		}
 	}
 
-	serviceUnit, err := os.ReadFile(filepath.Join(repoRoot, "dist", "k5pw.service"))
+	// systemd unit 已迁移至 deploy/systemd/
+	serviceUnit, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "systemd", "k5pw.service"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/k5pw -config /etc/k5pw/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "SuccessExitStatus=1 2 8 SIGKILL", "User=k5pw", "Group=k5pw", "WantedBy=multi-user.target"} {
+	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/k5pw -config /var/lib/k5pw/config/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "SuccessExitStatus=1 2 8 SIGKILL", "User=k5pw", "Group=k5pw", "WantedBy=multi-user.target"} {
 		if !bytes.Contains(serviceUnit, []byte(want)) {
 			t.Fatalf("k5pw.service missing %q", want)
 		}
 	}
 
+	// release.sh 已重写，使用 platforms.sh 作为唯一平台清单
 	release, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "release.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"set -euo pipefail", "PLATFORMS=(", "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "freebsd/amd64", "-X main.version", "-X main.commit", "-X main.buildTime", "go build -trimpath", "git -C"} {
+	for _, want := range []string{"set -euo pipefail", "source", "platforms.sh", "go build -trimpath", "-X main.version", "-X main.commit", "-X main.buildTime", "git -C"} {
 		if !bytes.Contains(release, []byte(want)) {
 			t.Fatalf("release.sh missing %q", want)
+		}
+	}
+
+	// platforms.sh 是唯一平台清单
+	platforms, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "platforms.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"K5PW_PLATFORMS=(", "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "freebsd/amd64"} {
+		if !bytes.Contains(platforms, []byte(want)) {
+			t.Fatalf("platforms.sh missing %q", want)
 		}
 	}
 }

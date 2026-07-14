@@ -1,111 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# release.sh — build multi-platform k5pw binaries and create a Git tag.
-# Usage: ./scripts/release.sh [VERSION]
-# Example: ./scripts/release.sh 1.2.0
+# release.sh — 从已有 Git tag 构建正式发布制品。
+# 用法: ./scripts/release.sh <version>
+# 前置: Git 工作区干净，tag v<version> 已存在且指向当前 commit。
+# 不创建、修改或推送 Git tag。
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/src"
-DIST_DIR="${REPO_ROOT}/dist"
-BUILD_DIR="${REPO_ROOT}/build"
+RELEASE_DIR="${REPO_ROOT}/release"
+SCRIPTS_DIR="${REPO_ROOT}/scripts"
+
+source "${SCRIPTS_DIR}/platforms.sh"
 
 VERSION="${1:-}"
-if [[ "${VERSION}" == "-h" || "${VERSION}" == "--help" ]]; then
-  echo "Usage: $0 <version>"
-  echo "Example: $0 1.2.0"
-  exit 0
-fi
 if [[ -z "${VERSION}" ]]; then
-  echo "Usage: $0 <version>" >&2
-  echo "Example: $0 1.2.0" >&2
+  echo "用法: $0 <version>" >&2
   exit 1
 fi
 
-# Validate version format (x.y.z or vx.y.z)
-if [[ ! "${VERSION}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: version must be semver like 1.2.0 or v1.2.0" >&2
+# 校验版本格式
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "error: 版本号必须为 x.y.z 格式" >&2
   exit 1
 fi
 
-# Normalize to "v" prefix for the tag
-TAG_VERSION="${VERSION#v}"
-TAG="v${TAG_VERSION}"
+TAG="v${VERSION}"
 
-COMMIT="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# 前置校验：工作区干净
+if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
+  echo "error: Git 工作区不干净，拒绝发布" >&2
+  exit 1
+fi
 
-LDFLAGS="-s -w \
-  -X main.version=${TAG_VERSION} \
-  -X main.commit=${COMMIT} \
-  -X main.buildTime=${BUILD_TIME}"
+# 前置校验：tag 存在且指向当前 commit
+if ! git -C "${REPO_ROOT}" rev-parse "${TAG}" >/dev/null 2>&1; then
+  echo "error: tag ${TAG} 不存在" >&2
+  exit 1
+fi
 
-echo "Building k5pw ${TAG} (commit ${COMMIT}, built ${BUILD_TIME})"
+TAG_COMMIT="$(git -C "${REPO_ROOT}" rev-list -n1 "${TAG}")"
+HEAD_COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+if [[ "${TAG_COMMIT}" != "${HEAD_COMMIT}" ]]; then
+  echo "error: tag ${TAG} 指向 ${TAG_COMMIT:0:8}，但 HEAD 为 ${HEAD_COMMIT:0:8}" >&2
+  exit 1
+fi
 
-rm -rf "${BUILD_DIR}"
-mkdir -p "${BUILD_DIR}"
+# 版本元数据
+COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+BUILD_TIME="$(git -C "${REPO_ROOT}" log -1 --format=%cI "${TAG}")"
 
-PLATFORMS=(
-  # Linux (most common server / embedded targets)
-  "linux/amd64"
-  "linux/arm64"
-  "linux/386"
-  "linux/arm/v7"
-  "linux/riscv64"
-  "linux/ppc64le"
-  "linux/s390x"
-  "linux/mips64"
-  "linux/mips64le"
-  # macOS
-  "darwin/amd64"
-  "darwin/arm64"
-  # Windows
-  "windows/amd64"
-  "windows/386"
-  "windows/arm64"
-  # FreeBSD
-  "freebsd/amd64"
-  "freebsd/386"
-  "freebsd/arm64"
-  # OpenBSD / NetBSD
-  "openbsd/amd64"
-  "openbsd/arm64"
-  "netbsd/amd64"
+LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
+
+echo "Building k5pw ${TAG} (commit ${COMMIT:0:12}, built ${BUILD_TIME})"
+
+# 清空并重建 release staging
+rm -rf "${RELEASE_DIR}"
+mkdir -p "${RELEASE_DIR}"
+
+# 依赖校验
+(
+  cd "${SRC_DIR}"
+  GOPROXY=https://goproxy.cn,direct go mod verify
 )
 
-for platform in "${PLATFORMS[@]}"; do
-  IFS='/' read -r GOOS GOARCH GOARM <<< "${platform}"
-  GOARM="${GOARM:-}"
-  output_name="k5pw-${TAG_VERSION}-${GOOS}-${GOARCH}"
-  if [[ "${GOARCH}" == "arm" && "${GOARM}" == "v7" ]]; then
-    output_name="k5pw-${TAG_VERSION}-${GOOS}-armv7"
-  fi
-  if [[ "${GOOS}" == "windows" ]]; then
-    output_name="${output_name}.exe"
-  fi
-
-  echo "Building ${output_name}..."
+# 跨平台构建
+for platform in $(all_platforms); do
+  name="$(output_name "${VERSION}" "${platform}")"
+  env_str="$(build_env "${platform}")"
+  echo "Building ${name}..."
   (
     cd "${SRC_DIR}"
-    env GOOS="${GOOS}" GOARCH="${GOARCH}" GOARM="${GOARM}" \
-      go build -trimpath -ldflags "${LDFLAGS}" -o "${BUILD_DIR}/${output_name}" .
+    env ${env_str} CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct \
+      go build -trimpath -mod=readonly -ldflags "${LDFLAGS}" \
+      -o "${RELEASE_DIR}/${name}" .
   )
 done
 
+# 生成 Linux 安装包
+for platform in $(linux_platforms); do
+  suffix="$(normalize_platform "${platform}")"
+  "${SCRIPTS_DIR}/package-linux.sh" "${VERSION}" "${suffix}"
+done
+
+# 生成 SBOM
+syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/k5pw-${VERSION}.spdx.json"
+
+# 生成校验和
 (
-  cd "${BUILD_DIR}"
-  sha256sum k5pw-* > SHA256SUMS
+  cd "${RELEASE_DIR}"
+  sha256sum k5pw-* k5pw-*.spdx.json > SHA256SUMS
+  sha256sum -c SHA256SUMS
 )
 
-echo "Release artifacts written to ${BUILD_DIR}"
-
-# Create Git tag if it does not already exist
-if git -C "${REPO_ROOT}" rev-parse "${TAG}" >/dev/null 2>&1; then
-  echo "Tag ${TAG} already exists."
-else
-  echo "Creating Git tag ${TAG}..."
-  git -C "${REPO_ROOT}" tag -a "${TAG}" -m "Release ${TAG}"
-  echo "Push the tag with: git push origin ${TAG}"
-fi
-
-echo "Done."
+echo "Release artifacts written to ${RELEASE_DIR}"

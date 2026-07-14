@@ -1,0 +1,36 @@
+services:
+  k5pw:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: k5pw:lan
+    container_name: k5pw-lan
+    environment:
+      - K5PW_PROXY_PASSWORD
+      - K5PW_MANAGEMENT_TOKEN
+      - K5PW_TEMPLATE=lan
+    ports:
+      - "8891:8891"
+      - "127.0.0.1:8890:8890"
+    volumes:
+      - ../config/config.lan.yml:/etc/k5pw/config.lan.yml:ro
+      - k5pw-data:/var/lib/k5pw
+      - k5pw-logs:/var/log/k5pw
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8890/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  k5pw-data:
+  k5pw-logs:

@@ -1,0 +1,42 @@
+# k5pw 局域网认证代理模板
+# 监听所有接口，要求用户认证和管理 Token，适合局域网或受信网络部署。
+# 启动前必须设置环境变量 K5PW_PROXY_PASSWORD 和 K5PW_MANAGEMENT_TOKEN。
+# 请按实际可信网段修改 allowed_clients。
+
+listen: "0.0.0.0:8891"
+users:
+  proxy: "${K5PW_PROXY_PASSWORD}"
+management: "127.0.0.1:8890"
+management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"
+upstreams: []
+routing:
+  final: direct
+  geosite:
+    path: "geosite.dat"
+    auto_update: false
+destination_policy:
+  protect_private: true
+  default_action: allow
+access_control:
+  allowed_clients:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  rate_limit:
+    connections_per_second: 0
+    burst: 0
+  max_conns_per_user: 0
+socks5:
+  allow_bind: false
+  allow_udp_associate: false
+timeouts:
+  dial: 10s
+  handshake: 10s
+  http_exchange: 60s
+  tunnel_idle: 5m
+log:
+  level: info
+  format: json
+  output: stdout
+check_interval: 30
+max_connections: 1024
