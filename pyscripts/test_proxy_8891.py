@@ -10,6 +10,15 @@ k5pw 8891 端口（dist 生产实例）全能力验收测试脚本。
   - 四类代理入口：HTTP / HTTPS CONNECT / SOCKS5 / SOCKS5H
   - keep-alive 复用、大请求体、并发
   - 管理接口：health / metrics / status / reload
+  - 从 4479 测试吸取的新特性用例：
+    * SSRF 防护（元数据地址不可达）
+    * SOCKS5 匿名认证
+    * HTTP CONNECT 隧道（原始 socket）
+    * SOCKS5 并发连接
+    * SOCKS5 BIND 拒绝（allow_bind: false）
+    * SOCKS5 UDP ASSOCIATE 拒绝（allow_udp_associate: false）
+    * 运行时配置 API（/api/v1/config/upstreams）
+    * 流量查询 API（/api/v1/traffic）
 
 与 test_proxy_4479.py（自包含、本地 fixture）不同，本脚本依赖真实网络与
 上游 7897，验证的是 dist 实例的真实路由与出网能力。
@@ -418,6 +427,166 @@ def test_management_reload():
 
 
 # ---------------------------------------------------------------------------
+# 从 4479 测试吸取的新特性用例
+# ---------------------------------------------------------------------------
+
+def test_ssrf_metadata_unreachable():
+    """SSRF 防护：元数据地址 169.254.169.254 不应被成功代理访问。
+
+    dist 配置 protect_private: true，应拒绝云元数据等敏感地址。
+    """
+    try:
+        proxies = {"http": _proxy_url(), "https": _proxy_url()}
+        r = requests.get(
+            "http://169.254.169.254/latest/meta-data/",
+            proxies=proxies,
+            timeout=8,
+            verify=False,
+        )
+        if r.status_code == 200:
+            return TestResult("SSRF 元数据地址不可达", False, f"意外可访问: HTTP {r.status_code}")
+        return TestResult("SSRF 元数据地址不可达", True, f"被正确拒绝: HTTP {r.status_code}")
+    except Exception:
+        return TestResult("SSRF 元数据地址不可达", True, "连接失败（符合预期，地址被拒绝）")
+
+
+def test_socks5_anonymous_auth():
+    """SOCKS5 匿名认证：dist 配置 users 为空，应接受匿名 SOCKS5。"""
+    try:
+        c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
+        c.handshake()
+        c.request(0x01, "www.baidu.com:80", force_domain=True)
+        c.close()
+        return TestResult("SOCKS5 匿名认证", True, "接受匿名")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("SOCKS5 匿名认证", False, str(e))
+
+
+def test_http_connect_tunnel():
+    """HTTP CONNECT 隧道（原始 socket）：验证 CONNECT 路径字节完整性。"""
+    try:
+        c = socket.create_connection((PROXY_HOST, PROXY_PORT), timeout=10)
+        c.sendall(b"CONNECT www.baidu.com:80 HTTP/1.1\r\nHost: www.baidu.com\r\n\r\n")
+        resp = c.recv(4096)
+        if b"200" not in resp:
+            return TestResult("HTTP CONNECT 隧道(原始)", False, f"CONNECT 失败: {resp[:60]!r}")
+        c.sendall(b"GET / HTTP/1.1\r\nHost: www.baidu.com\r\nConnection: close\r\n\r\n")
+        data = b""
+        c.settimeout(REQUEST_TIMEOUT)
+        while True:
+            try:
+                chunk = c.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            except socket.timeout:
+                break
+        c.close()
+        ok = b"HTTP/" in data
+        return TestResult("HTTP CONNECT 隧道(原始)", ok, "隧道回显匹配" if ok else "回显缺失")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("HTTP CONNECT 隧道(原始)", False, str(e))
+    finally:
+        try:
+            c.close()
+        except Exception:
+            pass
+
+
+def test_concurrent_socks5():
+    """并发建立多个 SOCKS5 CONNECT，验证 SOCKS5 并发处理能力。"""
+    def one(_):
+        try:
+            c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
+            c.handshake()
+            c.request(0x01, "www.baidu.com:80")
+            c.sock.sendall(b"GET / HTTP/1.1\r\nHost: www.baidu.com\r\nConnection: close\r\n\r\n")
+            c.sock.settimeout(REQUEST_TIMEOUT)
+            data = b""
+            try:
+                while True:
+                    ch = c.sock.recv(4096)
+                    if not ch:
+                        break
+                    data += ch
+            except socket.timeout:
+                pass
+            c.close()
+            return b"HTTP/" in data
+        except Exception:
+            return False
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+            results = list(ex.map(one, range(6)))
+        ok = all(results)
+        return TestResult("SOCKS5 并发连接 x6", ok, f"全部成功 {sum(results)}/6" if ok else f"部分失败 {sum(results)}/6")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("SOCKS5 并发连接 x6", False, str(e))
+
+
+def test_socks5_bind_rejected():
+    """SOCKS5 BIND 应被拒绝：dist 配置 socks5.allow_bind: false。"""
+    try:
+        c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
+        c.handshake()
+        try:
+            c.request(0x02, "127.0.0.1:54321")
+            c.close()
+            return TestResult("SOCKS5 BIND 拒绝", False, "BIND 未被拒绝（配置 allow_bind: false）")
+        except ConnectionError as e:
+            c.close()
+            return TestResult("SOCKS5 BIND 拒绝", True, f"被正确拒绝: {e}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("SOCKS5 BIND 拒绝", False, str(e))
+
+
+def test_socks5_udp_associate_rejected():
+    """SOCKS5 UDP ASSOCIATE 应被拒绝：dist 配置 socks5.allow_udp_associate: false。"""
+    try:
+        c = SOCKS5RawClient(PROXY_HOST, PROXY_PORT)
+        c.handshake()
+        try:
+            c.request(0x03, "0.0.0.0:0")
+            c.close()
+            return TestResult("SOCKS5 UDP ASSOC 拒绝", False, "UDP ASSOCIATE 未被拒绝（配置 allow_udp_associate: false）")
+        except ConnectionError as e:
+            c.close()
+            return TestResult("SOCKS5 UDP ASSOC 拒绝", True, f"被正确拒绝: {e}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("SOCKS5 UDP ASSOC 拒绝", False, str(e))
+
+
+def test_config_api_upstreams():
+    """运行时配置 API：GET /api/v1/config/upstreams 应返回上游列表。"""
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/upstreams", timeout=8)
+        ok = r.status_code == 200
+        if ok:
+            data = r.json()
+            upstreams = data.get("upstreams", data) if isinstance(data, dict) else data
+            has_upstream = isinstance(upstreams, list) and len(upstreams) > 0
+            return TestResult("配置 API /upstreams", ok and has_upstream,
+                              f"HTTP {r.status_code} 上游数={len(upstreams) if isinstance(upstreams, list) else '?'}")
+        return TestResult("配置 API /upstreams", False, f"HTTP {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("配置 API /upstreams", False, str(e))
+
+
+def test_traffic_api():
+    """流量查询 API：GET /api/v1/traffic 应返回流量快照。"""
+    try:
+        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/traffic", timeout=8)
+        ok = r.status_code == 200
+        if ok:
+            data = r.json()
+            return TestResult("流量 API /traffic", True, f"HTTP {r.status_code} keys={list(data.keys()) if isinstance(data, dict) else 'list'}")
+        return TestResult("流量 API /traffic", False, f"HTTP {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        return TestResult("流量 API /traffic", False, str(e))
+
+
+# ---------------------------------------------------------------------------
 # 运行
 # ---------------------------------------------------------------------------
 def run_single_tests():
@@ -437,6 +606,15 @@ def run_single_tests():
         test_management_metrics,
         test_management_status,
         test_management_reload,
+        # 从 4479 测试吸取的新特性用例
+        test_ssrf_metadata_unreachable,
+        test_socks5_anonymous_auth,
+        test_http_connect_tunnel,
+        test_concurrent_socks5,
+        test_socks5_bind_rejected,
+        test_socks5_udp_associate_rejected,
+        test_config_api_upstreams,
+        test_traffic_api,
     ]
     results = []
     for t in tests:
