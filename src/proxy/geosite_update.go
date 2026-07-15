@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -15,12 +16,19 @@ const (
 	minGeoSiteDatSize      = 1024
 	maxGeoSiteDatSize      = 64 << 20
 	geoSiteDownloadTimeout = 5 * time.Minute
+
+	// 缺失文件恢复参数
+	maxMissingFileDownloadsPerDay = 10
+	missingFileCheckInterval      = 30 * time.Minute
 )
 
 type GeoSiteUpdater struct {
-	cfg  GeoSiteConfig
-	mgr  *UpstreamManager
-	done chan struct{}
+	cfg           GeoSiteConfig
+	mgr           *UpstreamManager
+	done          chan struct{}
+	downloadMu    sync.Mutex
+	downloadCount int
+	downloadDate  string
 }
 
 func NormalizeGeoSiteConfig(cfg *GeoSiteConfig) {
@@ -185,4 +193,87 @@ func writeGeoSiteAtomically(path string, body io.Reader) error {
 		return fmt.Errorf("downloaded geosite dat is too small: %d bytes", written)
 	}
 	return os.Rename(tmp, path)
+}
+
+// IsFileAvailable returns true if the geosite dat file exists and has a valid size.
+func (u *GeoSiteUpdater) IsFileAvailable() bool {
+	if u == nil || u.cfg.Path == "" {
+		return false
+	}
+	info, err := os.Stat(u.cfg.Path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Size() >= minGeoSiteDatSize
+}
+
+// StartMissingFileRecovery starts a background loop that periodically checks
+// whether geosite.dat is available. If the file appears (user-provided) or is
+// auto-downloaded (max maxMissingFileDownloadsPerDay times per day, requires
+// auto_update), it triggers onUpdated to reload the router and restore geosite
+// matching.
+func (u *GeoSiteUpdater) StartMissingFileRecovery(onUpdated func()) {
+	if u == nil || u.cfg.Path == "" {
+		return
+	}
+	go u.missingFileLoop(onUpdated)
+}
+
+func (u *GeoSiteUpdater) missingFileLoop(onUpdated func()) {
+	ticker := time.NewTicker(missingFileCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-u.done:
+			return
+		case <-ticker.C:
+			if u.IsFileAvailable() {
+				Logger().Infow("geosite dat file is now available, reloading", "path", u.cfg.Path)
+				if onUpdated != nil {
+					onUpdated()
+				}
+				return
+			}
+			if !u.cfg.AutoUpdate {
+				continue
+			}
+			if !u.canDownloadToday() {
+				Logger().Warnw("geosite dat auto-download daily limit reached",
+					"limit", maxMissingFileDownloadsPerDay)
+				continue
+			}
+			u.recordDownload()
+			if err := u.UpdateOnce(); err != nil {
+				Logger().Warnw("geosite dat auto-download failed", "error", err)
+				continue
+			}
+			Logger().Infow("geosite dat auto-download succeeded", "path", u.cfg.Path)
+			if onUpdated != nil {
+				onUpdated()
+			}
+			return
+		}
+	}
+}
+
+func (u *GeoSiteUpdater) canDownloadToday() bool {
+	u.downloadMu.Lock()
+	defer u.downloadMu.Unlock()
+	today := time.Now().Format("2006-01-02")
+	if u.downloadDate != today {
+		u.downloadDate = today
+		u.downloadCount = 0
+	}
+	return u.downloadCount < maxMissingFileDownloadsPerDay
+}
+
+func (u *GeoSiteUpdater) recordDownload() {
+	u.downloadMu.Lock()
+	defer u.downloadMu.Unlock()
+	today := time.Now().Format("2006-01-02")
+	if u.downloadDate != today {
+		u.downloadDate = today
+		u.downloadCount = 0
+	}
+	u.downloadCount++
 }

@@ -238,3 +238,57 @@ func TestLoadGeoSiteDatInvalid(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+// TestNewRouterGeoSiteMissingFile verifies that NewRouter does not fail when
+// geosite.dat is missing. Instead, geosite rules are silently disabled.
+func TestNewRouterGeoSiteMissingFile(t *testing.T) {
+	r, err := NewRouter(RoutingConfig{
+		Final: ActionDirect,
+		GeoSite: GeoSiteConfig{
+			Path: filepath.Join(t.TempDir(), "nonexistent.dat"),
+		},
+		Rules: []RouteRule{
+			{Type: "geosite", Values: []string{"CN"}, Action: ActionDirect},
+		},
+	}, DNSConfig{})
+	if err != nil {
+		t.Fatalf("NewRouter should not fail on missing geosite.dat: %v", err)
+	}
+	// geosite rule should not match since matcher is nil
+	if got := r.Decide("www.qq.com:443").Action; got != ActionDirect {
+		t.Fatalf("expected final direct (geosite disabled), got %q", got)
+	}
+}
+
+// TestNewRouterGeoSiteEmptyPath verifies that NewRouter does not fail when
+// geosite rules are used but path is empty.
+func TestNewRouterGeoSiteEmptyPath(t *testing.T) {
+	r, err := NewRouter(RoutingConfig{
+		Final: ActionProxy,
+		Rules: []RouteRule{
+			{Type: "geosite", Values: []string{"CN"}, Action: ActionDirect},
+		},
+	}, DNSConfig{})
+	if err != nil {
+		t.Fatalf("NewRouter should not fail on empty geosite path: %v", err)
+	}
+	// geosite rule should not match; should fall through to final=proxy
+	if got := r.Decide("www.qq.com:443").Action; got != ActionProxy {
+		t.Fatalf("expected final proxy (geosite disabled), got %q", got)
+	}
+}
+
+func TestHasGeoSiteRules(t *testing.T) {
+	if HasGeoSiteRules(nil) {
+		t.Fatal("expected false for nil rules")
+	}
+	if HasGeoSiteRules([]RouteRule{}) {
+		t.Fatal("expected false for empty rules")
+	}
+	if !HasGeoSiteRules([]RouteRule{{Type: "geosite", Values: []string{"CN"}}}) {
+		t.Fatal("expected true for geosite rule")
+	}
+	if HasGeoSiteRules([]RouteRule{{Type: "domain", Values: []string{"example.com"}}}) {
+		t.Fatal("expected false for non-geosite rule")
+	}
+}

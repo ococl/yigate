@@ -158,12 +158,14 @@ func NewRouter(cfg RoutingConfig, dnsCfg DNSConfig) (*Router, error) {
 	var matcher *GeoSiteMatcher
 	if len(codes) > 0 {
 		if strings.TrimSpace(cfg.GeoSite.Path) == "" {
-			return nil, fmt.Errorf("routing.geosite.path is required when geosite rules are used")
-		}
-		var err error
-		matcher, err = LoadGeoSiteDat(cfg.GeoSite.Path, codes)
-		if err != nil {
-			return nil, err
+			Logger().Warnw("routing.geosite.path is empty but geosite rules are used, geosite matching disabled")
+		} else {
+			var err error
+			matcher, err = LoadGeoSiteDat(cfg.GeoSite.Path, codes)
+			if err != nil {
+				Logger().Warnw("load geosite dat failed, geosite matching disabled until file is available",
+					"path", cfg.GeoSite.Path, "error", err)
+			}
 		}
 	}
 
@@ -583,4 +585,9 @@ func geositeCodes(rules []RouteRule) []string {
 		}
 	}
 	return codes
+}
+
+// HasGeoSiteRules returns true if any routing rule uses the geosite type.
+func HasGeoSiteRules(rules []RouteRule) bool {
+	return len(geositeCodes(rules)) > 0
 }
