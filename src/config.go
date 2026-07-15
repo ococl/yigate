@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 // TLSConfig 配置代理端口的 TLS 服务端终止。

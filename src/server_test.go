@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 func writeTestConfig(t *testing.T, dir string, content string) string {

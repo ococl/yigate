@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-k5pw 代理服务器全能力测试脚本（自包含版）
+yigate 代理服务器全能力测试脚本（自包含版）
 
 设计目标：不依赖真实外网或真实上游，全部使用本地可控的目标服务器与
 本地上游代理，使测试在隔离环境中也能 100% 稳定通过，并覆盖：
@@ -13,7 +13,7 @@ k5pw 代理服务器全能力测试脚本（自包含版）
 - 管理接口（/health、/metrics、/api/v1/status）
 - SSRF 防护冒烟（元数据地址不可达）
 
-运行前请确保 k5pw 已监听 127.0.0.1:4479（见同目录 config_4479.yml），
+运行前请确保 yigate 已监听 127.0.0.1:4479（见同目录 config_4479.yml），
 且 /etc/hosts 中存在 `127.0.0.1 foreign.test`（脚本会自动尝试写入）。
 """
 
@@ -155,7 +155,7 @@ def http_request_with_retry(method, url, proxies=None, timeout=15, retries=2, **
     raise last_err
 
 
-def start_local_http_server(host="127.0.0.1", port=0, body=b'{"origin": "k5pw-test", "status": "ok"}'):
+def start_local_http_server(host="127.0.0.1", port=0, body=b'{"origin": "yigate-test", "status": "ok"}'):
     """启动一个简单 HTTP 响应服务器，返回 (server, addr)。body 可定制以区分直连/代理。"""
     import http.server
     from socketserver import ThreadingMixIn
@@ -569,7 +569,7 @@ def test_http_get():
             f"http://127.0.0.1:{addr[1]}/get",
             proxies=proxies,
             timeout=15,
-            headers={"User-Agent": "k5pw-test/1.0"},
+            headers={"User-Agent": "yigate-test/1.0"},
         )
         r.raise_for_status()
         ok = r.status_code == 200
@@ -589,14 +589,14 @@ def test_http_post():
     try:
         server, addr = start_local_http_server()
         proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
-        payload = b"k5pw-test-body"
+        payload = b"yigate-test-body"
         r = http_request_with_retry(
             "POST",
             f"http://127.0.0.1:{addr[1]}/post",
             data=payload,
             proxies=proxies,
             timeout=15,
-            headers={"User-Agent": "k5pw-test/1.0"},
+            headers={"User-Agent": "yigate-test/1.0"},
         )
         r.raise_for_status()
         ok = (b"ECHO:" + payload).decode() in r.text
@@ -630,7 +630,7 @@ def test_http_connect():
                 break
             data += chunk
         c.close()
-        ok = b"k5pw-test" in data
+        ok = b"yigate-test" in data
         return TestResult("HTTP CONNECT 隧道", ok, "隧道回显匹配" if ok else "回显缺失")
     except Exception as e:
         return TestResult("HTTP CONNECT 隧道", False, str(e))
@@ -654,18 +654,18 @@ def test_direct_local_http():
         url = f"http://127.0.0.1:{addr[1]}/direct"
         proxies = {"http": f"http://{PROXY_HOST}:{PROXY_PORT}"}
         r = http_request_with_retry(
-            "GET", url, proxies=proxies, timeout=15, headers={"User-Agent": "k5pw-test/1.0"}
+            "GET", url, proxies=proxies, timeout=15, headers={"User-Agent": "yigate-test/1.0"}
         )
         r.raise_for_status()
-        get_ok = "k5pw-test" in r.text
-        payload = b"k5pw-direct-body"
+        get_ok = "yigate-test" in r.text
+        payload = b"yigate-direct-body"
         r2 = http_request_with_retry(
             "POST",
             url,
             data=payload,
             proxies=proxies,
             timeout=15,
-            headers={"User-Agent": "k5pw-test/1.0"},
+            headers={"User-Agent": "yigate-test/1.0"},
         )
         r2.raise_for_status()
         post_ok = r2.text == (b"ECHO:" + payload).decode()
@@ -692,7 +692,7 @@ def test_proxy_upstream_path():
             f"http://foreign.test:{foreign_port}/proxy",
             proxies=proxies,
             timeout=15,
-            headers={"User-Agent": "k5pw-test/1.0"},
+            headers={"User-Agent": "yigate-test/1.0"},
         )
         r.raise_for_status()
         ok = "FOREIGN-PROXY-OK" in r.text
@@ -880,9 +880,9 @@ def test_concurrent_requests():
                     url,
                     proxies=proxies,
                     timeout=15,
-                    headers={"User-Agent": f"k5pw-test/1.0-{i}"},
+                    headers={"User-Agent": f"yigate-test/1.0-{i}"},
                 )
-                return r.status_code == 200 and "k5pw-test" in r.text
+                return r.status_code == 200 and "yigate-test" in r.text
             except Exception:
                 return False
 
@@ -919,7 +919,7 @@ def test_keepalive_reuse():
                 f"Host: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n".encode()
             )
             status, body = read_http_response(c)
-            if "k5pw-test" not in body.decode("latin1", "replace"):
+            if "yigate-test" not in body.decode("latin1", "replace"):
                 ok_all = False
                 break
         c.close()
@@ -952,7 +952,7 @@ def test_large_post():
             data=payload,
             proxies=proxies,
             timeout=30,
-            headers={"User-Agent": "k5pw-test/1.0"},
+            headers={"User-Agent": "yigate-test/1.0"},
         )
         r.raise_for_status()
         ok = r.text == (b"ECHO:" + payload).decode("latin1")
@@ -1001,7 +1001,7 @@ def test_management_health():
 def test_management_metrics():
     try:
         r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
-        ok = r.status_code == 200 and "k5pw_" in r.text
+        ok = r.status_code == 200 and "yigate_" in r.text
         return TestResult("管理接口 /metrics", ok, f"HTTP {r.status_code}")
     except Exception as e:
         return TestResult("管理接口 /metrics", False, str(e))
@@ -1034,7 +1034,7 @@ def test_http_method_matrix():
 
         # GET
         r = http_request_with_retry("GET", f"{base}/get", proxies=proxies, timeout=15)
-        results["GET"] = r.status_code == 200 and "k5pw-test" in r.text
+        results["GET"] = r.status_code == 200 and "yigate-test" in r.text
 
         # POST
         payload = b"post-body"
@@ -1167,7 +1167,7 @@ def test_traffic_api():
 
 
 def test_metrics_delta():
-    """Metrics 计数器验证：发起请求前后 k5pw_connections_total 应递增。"""
+    """Metrics 计数器验证：发起请求前后 yigate_connections_total 应递增。"""
     try:
         # 1) 读取初始 metrics
         r1 = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
@@ -1185,10 +1185,10 @@ def test_metrics_delta():
 
         # 尝试多个可能的计数器名称
         counter_names = [
-            "k5pw_connections_total",
-            "k5pw_requests_total",
-            "k5pw_proxy_requests_total",
-            "k5pw_total_connections",
+            "yigate_connections_total",
+            "yigate_requests_total",
+            "yigate_proxy_requests_total",
+            "yigate_total_connections",
         ]
         before_vals = {}
         for name in counter_names:
@@ -1340,7 +1340,7 @@ def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
                 site["url"],
                 proxies=proxies,
                 timeout=15,
-                headers={"User-Agent": "k5pw-test/1.0"},
+                headers={"User-Agent": "yigate-test/1.0"},
                 allow_redirects=True,
                 verify=False,
                 retries=2,
@@ -1424,10 +1424,10 @@ def stop_fixtures():
 # ---------------------------------------------------------------------------
 
 def wait_for_proxy_ready(timeout=60):
-    """等待 k5pw 就绪且本地上游被健康检查发现（proxy 路径可用）。
+    """等待 yigate 就绪且本地上游被健康检查发现（proxy 路径可用）。
 
     注意：在代理尚未发现本地上游的 dead 窗口内，若直接轮询 foreign（穿透代理发请求），
-    每次失败都会让 k5pw 把上游 markDead，形成死亡螺旋。因此本函数先确认直连就绪，
+    每次失败都会让 yigate 把上游 markDead，形成死亡螺旋。因此本函数先确认直连就绪，
     再留出上游健康检查发现的时间（check_interval + 余量），最后才确认 foreign 可达。
     """
     domestic_url = f"http://127.0.0.1:{FIXTURES['domestic_port']}/"
@@ -1661,7 +1661,7 @@ def summarize(single_results, site_results, strict=False):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="k5pw 4479 端口全能力验收测试（自包含版）")
+    parser = argparse.ArgumentParser(description="yigate 4479 端口全能力验收测试（自包含版）")
     parser.add_argument("--strict", action="store_true", help="将站点关键词警告（WARN）也视为失败")
     parser.add_argument("--port", type=int, default=4479, help="代理监听端口，默认 4479")
     return parser.parse_args()
@@ -1673,7 +1673,7 @@ def main():
     global PROXY_PORT
     PROXY_PORT = args.port
 
-    print(f"{Colors.INFO}k5pw 代理服务器全能力测试: {PROXY_HOST}:{PROXY_PORT}{Colors.RESET}")
+    print(f"{Colors.INFO}yigate 代理服务器全能力测试: {PROXY_HOST}:{PROXY_PORT}{Colors.RESET}")
     ensure_hosts_entry()
     start_fixtures()
     print(f"{Colors.INFO}等待代理与本地上游就绪...{Colors.RESET}")

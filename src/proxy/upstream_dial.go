@@ -73,7 +73,7 @@ func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names [
 		}
 		lastErr = err
 		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
-		MetricInc("k5pw_upstream_dial_failures_total", "upstream="+up.Name)
+		MetricInc("yigate_upstream_dial_failures_total", "upstream="+up.Name)
 		m.markDead(up)
 	}
 	if lastErr == nil {

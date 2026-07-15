@@ -246,7 +246,7 @@ func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 	// Reset registry for clean test
 	registry.mu.Lock()
 	for k := range registry.values {
-		if strings.Contains(k, "k5pw_traffic_bytes_total") {
+		if strings.Contains(k, "yigate_traffic_bytes_total") {
 			delete(registry.values, k)
 		}
 	}
@@ -259,11 +259,11 @@ func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 	_ = a.Record(key, 100, 200)
 
 	// Check that Prometheus metrics were recorded
-	inVal := MetricValue("k5pw_traffic_bytes_total", "direction=client_to_target", "user=alice", "upstream=up1", "target=example.com")
+	inVal := MetricValue("yigate_traffic_bytes_total", "direction=client_to_target", "user=alice", "upstream=up1", "target=example.com")
 	if inVal != 100 {
 		t.Errorf("expected in=100, got %f", inVal)
 	}
-	outVal := MetricValue("k5pw_traffic_bytes_total", "direction=target_to_client", "user=alice", "upstream=up1", "target=example.com")
+	outVal := MetricValue("yigate_traffic_bytes_total", "direction=target_to_client", "user=alice", "upstream=up1", "target=example.com")
 	if outVal != 200 {
 		t.Errorf("expected out=200, got %f", outVal)
 	}

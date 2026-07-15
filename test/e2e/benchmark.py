@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-benchmark.py — k5pw 压力与基准测试脚本。
+benchmark.py — yigate 压力与基准测试脚本。
 
 用法示例：
     # 直接测试目标站点
     python3 pyscripts/benchmark.py --url http://127.0.0.1:8080/ --requests 1000 --concurrency 50
 
-    # 通过 k5pw HTTP 代理
+    # 通过 yigate HTTP 代理
     python3 pyscripts/benchmark.py --url http://127.0.0.1:8080/ \
         --proxy http://127.0.0.1:4479 --requests 1000 --concurrency 50
 
-    # 通过 k5pw SOCKS5 代理
+    # 通过 yigate SOCKS5 代理
     python3 pyscripts/benchmark.py --url http://127.0.0.1:8080/ \
         --proxy socks5://127.0.0.1:4479 --requests 1000 --concurrency 50
 
@@ -30,7 +30,7 @@ from queue import Queue
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="k5pw benchmark tool")
+    parser = argparse.ArgumentParser(description="yigate benchmark tool")
     parser.add_argument("--url", required=True, help="目标 URL，用于测试请求")
     parser.add_argument("--proxy", default="", help="代理地址，例如 http://127.0.0.1:4479 或 socks5://127.0.0.1:4479")
     parser.add_argument("--requests", type=int, default=1000, help="总请求数")

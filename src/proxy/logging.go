@@ -297,7 +297,7 @@ func (w *dailyRotateWriter) reopen() {
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
 	if err != nil {
 		// 文件打开失败时回退到 stderr，避免日志完全丢失
-		fmt.Fprintf(os.Stderr, "k5pw: failed to open log file %s: %v (falling back to stderr)\n", w.path, err)
+		fmt.Fprintf(os.Stderr, "yigate: failed to open log file %s: %v (falling back to stderr)\n", w.path, err)
 		w.file = nil
 		return
 	}

@@ -18,7 +18,7 @@ LDFLAGS := -s -w \
 all: build
 
 build:
-	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BUILD_DIR)/k5pw .
+	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BUILD_DIR)/yigate .
 
 test:
 	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) test ./...

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # 服务管理生命周期真机（本机 systemd）测试脚本
 #
-# 在 root + systemd 环境中，真实演练 k5pw 的服务管理生命周期：
+# 在 root + systemd 环境中，真实演练 yigate 的服务管理生命周期：
 #   install -> (自动启动) -> status(running) -> health -> stop -> status(stopped)
 #   -> start -> status(running) -> restart -> status(running) -> uninstall
 #
 # 每一步均使用三方交叉验证：
-#   1) `k5pw -config <cfg> status` 命令输出
-#   2) `systemctl is-active/is-enabled k5pw` 系统状态
+#   1) `yigate -config <cfg> status` 命令输出
+#   2) `systemctl is-active/is-enabled yigate` 系统状态
 #   3) 管理端口 /health 端点可达性（仅运行态）
 # 并在卸载前读取真实生成的 systemd 单元文件，断言跨平台重启策略已注入。
 #
@@ -20,11 +20,11 @@ set -o pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="$REPO_ROOT/src"
-UNIT_NAME="k5pw"
-TMP_DIR="$(mktemp -d /tmp/k5pw-svc-test.XXXXXX)"
-BIN="$TMP_DIR/k5pw"
+UNIT_NAME="yigate"
+TMP_DIR="$(mktemp -d /tmp/yigate-svc-test.XXXXXX)"
+BIN="$TMP_DIR/yigate"
 CFG="$TMP_DIR/config.yml"
-LOG="$TMP_DIR/k5pw.log"
+LOG="$TMP_DIR/yigate.log"
 
 LISTEN_PORT=18971
 MGMT_PORT=18970
@@ -67,7 +67,7 @@ wait_down() {
   return 1
 }
 
-# 查询 k5pw status 命令输出（running/stopped/unknown）
+# 查询 yigate status 命令输出（running/stopped/unknown）
 kv_status() {
   "$BIN" -config "$CFG" status 2>/dev/null | sed -n 's/.*service: //p'
 }
@@ -81,7 +81,7 @@ expect_running() {
   local label="$1" ok=1
   local ks sys
   ks="$(kv_status)"; sys="$(sys_active)"
-  if [ "$ks" = "running" ]; then pass "$label: k5pw status=running"; else fail "$label" "k5pw status='$ks'"; ok=0; fi
+  if [ "$ks" = "running" ]; then pass "$label: yigate status=running"; else fail "$label" "yigate status='$ks'"; ok=0; fi
   if [ "$sys" = "active" ];  then pass "$label: systemctl is-active=active"; else fail "$label" "systemctl is-active='$sys'"; ok=0; fi
   if wait_health;            then pass "$label: /health reachable"; else fail "$label" "/health unreachable"; ok=0; fi
   [ "$ok" -eq 1 ]
@@ -92,7 +92,7 @@ expect_stopped() {
   local label="$1" ok=1
   local ks sys
   ks="$(kv_status)"; sys="$(sys_active)"
-  if [ "$ks" = "stopped" ]; then pass "$label: k5pw status=stopped"; else fail "$label" "k5pw status='$ks'"; ok=0; fi
+  if [ "$ks" = "stopped" ]; then pass "$label: yigate status=stopped"; else fail "$label" "yigate status='$ks'"; ok=0; fi
   if [ "$sys" = "inactive" ] || [ "$sys" = "unknown" ]; then pass "$label: systemctl is-active=$sys"; else fail "$label" "systemctl is-active='$sys'"; ok=0; fi
   if wait_down;              then pass "$label: /health unreachable"; else fail "$label" "/health still reachable"; ok=0; fi
   [ "$ok" -eq 1 ]
@@ -104,7 +104,7 @@ expect_installed() {
   local en ks
   en="$(sys_enabled)"; ks="$(kv_status)"
   if [ "$en" = "enabled" ]; then pass "$label: systemctl is-enabled=enabled"; else fail "$label" "systemctl is-enabled='$en'"; ok=0; fi
-  if [ "$ks" != "running" ]; then pass "$label: k5pw status=$ks (未运行，符合预期)"; else fail "$label" "install 后不应自动运行"; ok=0; fi
+  if [ "$ks" != "running" ]; then pass "$label: yigate status=$ks (未运行，符合预期)"; else fail "$label" "install 后不应自动运行"; ok=0; fi
   if wait_down;              then pass "$label: /health 不可达（未运行）"; else fail "$label" "/health 竟可达"; ok=0; fi
   [ "$ok" -eq 1 ]
 }
@@ -140,7 +140,7 @@ fi
 # ---------------------------------------------------------------------------
 # 1. 构建二进制
 # ---------------------------------------------------------------------------
-log "== 1. 构建 k5pw 二进制 =="
+log "== 1. 构建 yigate 二进制 =="
 if (cd "$SRC_DIR" && GOPROXY=https://goproxy.cn,direct go build -o "$BIN" .) 2>"$TMP_DIR/build.log"; then
   pass "go build 成功 -> $BIN"
 else
@@ -190,7 +190,7 @@ else
 fi
 
 sleep 2
-log "    [install 后] k5pw status=$(kv_status) | systemctl is-active=$(sys_active) | enabled=$(sys_enabled)"
+log "    [install 后] yigate status=$(kv_status) | systemctl is-active=$(sys_active) | enabled=$(sys_enabled)"
 expect_installed "install后" || exit 5
 
 # ---------------------------------------------------------------------------
@@ -224,7 +224,7 @@ else
   fail "start" "$out"
 fi
 sleep 2
-log "    [start 后] k5pw status=$(kv_status) | systemctl is-active=$(sys_active)"
+log "    [start 后] yigate status=$(kv_status) | systemctl is-active=$(sys_active)"
 expect_running "start后" || true
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ if [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && [ "$new_pid" != "0" ]; t
 else
   fail "restart PID" "PID 未变化 (old=$old_pid new=$new_pid)"
 fi
-log "    [restart 后] k5pw status=$(kv_status) | systemctl is-active=$(sys_active)"
+log "    [restart 后] yigate status=$(kv_status) | systemctl is-active=$(sys_active)"
 expect_running "restart后" || true
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,7 @@ else
   fail "stop" "$out"
 fi
 sleep 2
-log "    [stop 后] k5pw status=$(kv_status) | systemctl is-active=$(sys_active)"
+log "    [stop 后] yigate status=$(kv_status) | systemctl is-active=$(sys_active)"
 expect_stopped "stop后" || true
 
 # ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ if systemctl list-unit-files 2>/dev/null | grep -q "^${UNIT_NAME}\\.service"; th
 else
   pass "uninstall 后单元已移除"
 fi
-if [ "$(kv_status 2>/dev/null)" = "unknown" ]; then pass "uninstall 后 k5pw status=unknown"; else log "    [uninstall 后] k5pw status=$(kv_status)"; fi
+if [ "$(kv_status 2>/dev/null)" = "unknown" ]; then pass "uninstall 后 yigate status=unknown"; else log "    [uninstall 后] yigate status=$(kv_status)"; fi
 
 # ---------------------------------------------------------------------------
 # 汇总

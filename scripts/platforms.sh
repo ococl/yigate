@@ -2,7 +2,7 @@
 # 唯一的平台清单和产物命名逻辑，供 release.sh、Makefile、CI 和 build.ps1 复用。
 
 # 平台清单：每行 "GOOS/GOARCH[/GOARM]"
-K5PW_PLATFORMS=(
+YIGATE_PLATFORMS=(
   linux/amd64
   linux/arm64
   linux/386
@@ -45,7 +45,7 @@ output_name() {
   local platform="$2"
   local suffix
   suffix="$(normalize_platform "$platform")"
-  local name="k5pw-${version}-${suffix}"
+  local name="yigate-${version}-${suffix}"
   local goos
   goos="$(echo "$platform" | cut -d/ -f1)"
   if [[ "$goos" == "windows" ]]; then
@@ -56,14 +56,14 @@ output_name() {
 
 # 输出所有平台标识，每行一个。
 all_platforms() {
-  for p in "${K5PW_PLATFORMS[@]}"; do
+  for p in "${YIGATE_PLATFORMS[@]}"; do
     echo "$p"
   done
 }
 
 # 输出所有 Linux 平台标识（用于安装包）。
 linux_platforms() {
-  for p in "${K5PW_PLATFORMS[@]}"; do
+  for p in "${YIGATE_PLATFORMS[@]}"; do
     if [[ "$p" == linux/* ]]; then
       echo "$p"
     fi

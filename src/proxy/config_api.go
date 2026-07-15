@@ -141,7 +141,7 @@ func (m *ManagementServer) handleConfigAPI(w http.ResponseWriter, r *http.Reques
 }
 
 func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Request, editor ConfigEditor, rest []string) {
-	MetricInc("k5pw_management_requests_total", "path=/api/v1/config/upstreams")
+	MetricInc("yigate_management_requests_total", "path=/api/v1/config/upstreams")
 	switch r.Method {
 	case http.MethodGet:
 		if len(rest) > 0 {
@@ -247,7 +247,7 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 }
 
 func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request, editor ConfigEditor, rest []string) {
-	MetricInc("k5pw_management_requests_total", "path=/api/v1/config/rules")
+	MetricInc("yigate_management_requests_total", "path=/api/v1/config/rules")
 	switch r.Method {
 	case http.MethodGet:
 		if len(rest) > 0 {
@@ -324,7 +324,7 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 }
 
 func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request, editor ConfigEditor, rest []string) {
-	MetricInc("k5pw_management_requests_total", "path=/api/v1/config/users")
+	MetricInc("yigate_management_requests_total", "path=/api/v1/config/users")
 	switch r.Method {
 	case http.MethodGet:
 		if len(rest) > 0 {

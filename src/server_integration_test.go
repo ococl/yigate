@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 // findFreePort 返回一个当前可用的 TCP 端口。
@@ -323,8 +323,8 @@ func TestIntegrationManagementMetrics(t *testing.T) {
 		t.Fatalf("metrics status = %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "k5pw_") {
-		t.Fatalf("metrics body missing k5pw_ prefix: %s", body)
+	if !strings.Contains(string(body), "yigate_") {
+		t.Fatalf("metrics body missing yigate_ prefix: %s", body)
 	}
 }
 
@@ -978,16 +978,16 @@ func TestIntegrationMetricsAfterTraffic(t *testing.T) {
 	metricsStr := string(body)
 
 	// 应该有连接计数指标
-	if !strings.Contains(metricsStr, "k5pw_connections_total") {
-		t.Fatal("missing k5pw_connections_total metric")
+	if !strings.Contains(metricsStr, "yigate_connections_total") {
+		t.Fatal("missing yigate_connections_total metric")
 	}
 	// 应该有活跃连接指标
-	if !strings.Contains(metricsStr, "k5pw_connections_active") {
-		t.Fatal("missing k5pw_connections_active metric")
+	if !strings.Contains(metricsStr, "yigate_connections_active") {
+		t.Fatal("missing yigate_connections_active metric")
 	}
 	// 应该有路由决策指标
-	if !strings.Contains(metricsStr, "k5pw_routing_decisions_total") {
-		t.Fatal("missing k5pw_routing_decisions_total metric")
+	if !strings.Contains(metricsStr, "yigate_routing_decisions_total") {
+		t.Fatal("missing yigate_routing_decisions_total metric")
 	}
 }
 

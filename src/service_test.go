@@ -77,9 +77,9 @@ func TestPlatformServiceOptions(t *testing.T) {
 
 func TestServiceStatusString(t *testing.T) {
 	cases := map[service.Status]string{
-		service.StatusRunning: "k5pw service: running",
-		service.StatusStopped: "k5pw service: stopped",
-		service.StatusUnknown: "k5pw service: unknown (not installed or status unavailable)",
+		service.StatusRunning: "yigate service: running",
+		service.StatusStopped: "yigate service: stopped",
+		service.StatusUnknown: "yigate service: unknown (not installed or status unavailable)",
 	}
 	for st, want := range cases {
 		if got := serviceStatusString(st); got != want {

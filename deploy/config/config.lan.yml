@@ -1,13 +1,13 @@
-# k5pw 局域网认证代理模板
+# yigate 局域网认证代理模板
 # 监听所有接口，要求用户认证和管理 Token，适合局域网或受信网络部署。
-# 启动前必须设置环境变量 K5PW_PROXY_PASSWORD 和 K5PW_MANAGEMENT_TOKEN。
+# 启动前必须设置环境变量 YIGATE_PROXY_PASSWORD 和 YIGATE_MANAGEMENT_TOKEN。
 # 请按实际可信网段修改 allowed_clients。
 
 listen: "0.0.0.0:8891"
 users:
-  proxy: "${K5PW_PROXY_PASSWORD}"
+  proxy: "${YIGATE_PROXY_PASSWORD}"
 management: "127.0.0.1:8890"
-management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"
+management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"
 upstreams: []
 routing:
   final: direct

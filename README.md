@@ -1,15 +1,15 @@
-# k5pw
+# YiGate
 
-`k5pw` 是一个轻量级 Go 代理服务器，支持 HTTP、HTTPS CONNECT 与 SOCKS5 共用同一个监听端口。项目提供多上游级联、规则分流、GEOSITE、socks5h 远端解析、配置热加载、管理接口、Prometheus 指标和结构化日志。
+YiGate 是一个轻量级 Go 语言实现的统一代理网关。HTTP、HTTPS CONNECT 与 SOCKS5 共用单端口接入，通过规则路由、多上游级联、健康检查、socks5h 远端解析、配置热加载和管理接口提供可运维的代理能力。项目定位为合规矩形、轻量可运维的统一代理网关，明确不支持任何混淆/非合规协议。
 
 ## 主要特性
 
 ### 代理协议
 
-- HTTP、HTTPS CONNECT、SOCKS5 统一端口接入。
+- HTTP、HTTPS CONNECT、SOCKS5 统一端口接入，自动识别下游协议。
 - SOCKS5 支持 CONNECT、BIND、UDP ASSOCIATE。
-- 支持 HTTP、HTTPS、SOCKS5、SOCKS5H 上游代理。
-- 支持 socks5h 重定向与 TLS SNI / HTTP Host 目标恢复。
+- 支持 HTTP、HTTPS、SOCKS5、SOCKS5H 上游代理级联。
+- 支持 socks5h 远端域名解析与 TLS SNI / HTTP Host 目标恢复。
 
 ### TLS 服务端终止
 
@@ -20,16 +20,12 @@
 ### 负载均衡
 
 - 多上游支持优先级与加权轮询。
-- 支持最少连接（`least_connections`）策略。
-- 支持一致性哈希（`consistent_hash`）会话保持。
-- 支持源 IP 哈希（`source_ip_hash`）会话保持。
+- 支持最少连接（`least_connections`）、一致性哈希（`consistent_hash`）、源 IP 哈希（`source_ip_hash`）策略。
 - 支持熔断与失败转移。
 
 ### 健康检查
 
 - 支持 TCP、HTTP、HTTPS、TLS 四种检查类型。
-- HTTP 检查支持自定义路径与预期响应码。
-- TLS 检查支持对上游做 TLS 握手探测。
 - 检查间隔、超时、失败阈值支持 per-upstream 配置。
 - 失败上游临时摘除与自动恢复。
 
@@ -40,26 +36,21 @@
 
 ### DNS 安全解析
 
-- 内置 DoH（DNS-over-HTTPS）解析器。
-- 内置 DoT（DNS-over-TLS）解析器。
-- 可配置 fallback 到系统 DNS。
-- 支持 IPv4/IPv6 优先级策略（`ip_precedence`）。
-- 内置 60 秒 TTL DNS 缓存。
+- 内置 DoH（DNS-over-HTTPS）和 DoT（DNS-over-TLS）解析器。
+- 可配置 fallback 到系统 DNS，内置 60 秒 TTL 缓存。
+- 支持 IPv4/IPv6 优先级策略（`ipv4_first`/`ipv6_first`/`system`）。
 
 ### 运行时配置 API
 
 - 通过 REST API 动态增删查改 upstream、路由规则、用户。
 - 变更持久化到 YAML 配置文件并自动热加载。
-- 上游 URL 脱敏输出，不暴露凭证。
-- 所有端点要求管理 Token 认证。
+- 上游 URL 脱敏输出，所有端点要求管理 Token 认证。
 
 ### 流量审计与配额
 
 - 按用户、上游、目标域名三维统计流量。
 - 支持每用户和每上游流量配额限制。
-- 支持可配置的配额统计窗口。
-- 通过 `/api/v1/traffic` 端点查询流量快照。
-- 通过 Prometheus 指标暴露流量统计。
+- 通过 `/api/v1/traffic` 端点查询，通过 Prometheus 指标暴露。
 
 ### 透明代理 / TPROXY
 
@@ -69,11 +60,7 @@
 
 ### IPv6 支持
 
-- 监听地址支持 IPv6（`[::]:port` 双栈，`[::1]:port` 单栈）。
-- DNS 解析支持 IPv6（A + AAAA 并行查询）。
-- 路由规则支持 IPv6 CIDR。
-- SOCKS5 支持 IPv6 地址类型。
-- 目标策略保护 IPv6 敏感地址段。
+- 监听、DNS 解析、路由规则、SOCKS5、目标策略全面支持 IPv6。
 
 ### 目标地址访问策略
 
@@ -90,19 +77,27 @@
 
 ### 运维与管理
 
-- 支持配置文件保存后自动热加载。
-- 支持 IP 白名单、单 IP 速率限制、单用户并发限制。
-- 支持 `/health`、`/metrics`、`/api/v1/status`、`/api/v1/reload`、`/api/v1/traffic` 管理接口。
-- 支持运行时配置 API（`/api/v1/config/*`）。
-- 支持可选 `/debug/pprof` 调试端点。
-- 支持 JSON / console 日志、文件输出和日志滚动。
-- 支持 Linux systemd 服务和 Docker 运行。
+- 配置文件保存后自动热加载。
+- IP 白名单、单 IP 速率限制、单用户并发限制。
+- `/health`、`/metrics`、`/api/v1/status`、`/api/v1/reload`、`/api/v1/traffic` 管理接口。
+- 运行时配置 API（`/api/v1/config/*`）。
+- 可选 `/debug/pprof` 调试端点。
+- JSON / console 日志、文件输出和日志滚动。
+- Linux systemd 服务和 Docker 运行。
 
 ## 目录结构
 
 ```text
 .
 ├── src/                 # Go 源码、模块文件和 Go 测试
+│   ├── go.mod
+│   ├── main.go          # CLI 入口、版本信息、服务命令
+│   ├── config.go        # YAML 配置加载、环境变量展开、校验
+│   ├── config_api_impl.go # 运行时配置 API 实现（持久化到 YAML）
+│   ├── server.go        # 统一 TCP Server、协议识别、配置热加载、多监听器
+│   ├── service.go       # 系统服务封装
+│   ├── config.sample.yml
+│   └── proxy/           # 代理核心（协议/路由/上游/DNS/审计/管理）
 ├── deploy/              # Docker/systemd 部署模板和公开配置
 │   ├── docker/
 │   ├── systemd/
@@ -124,38 +119,38 @@
 ```bash
 cd src
 GOPROXY=https://goproxy.cn,direct go mod download
-GOPROXY=https://goproxy.cn,direct go build -o k5pw .
-./k5pw -config ../deploy/config/config.local.yml run
+GOPROXY=https://goproxy.cn,direct go build -o yigate .
+./yigate -config ../deploy/config/config.local.yml run
 ```
 
 默认命令为 `run`，也可以省略：
 
 ```bash
-./k5pw -config ../deploy/config/config.local.yml
+./yigate -config ../deploy/config/config.local.yml
 ```
 
 查看版本：
 
 ```bash
-./k5pw -version
+./yigate -version
 ```
 
 ## 常用命令
 
 ```bash
 # 前台运行
-./k5pw -config config.yml run
+./yigate -config config.yml run
 
 # 安装为系统服务
-sudo ./k5pw -config /etc/k5pw/config.yml install
+sudo ./yigate -config /etc/yigate/config.yml install
 
 # 启停系统服务
-sudo ./k5pw -config /etc/k5pw/config.yml start
-sudo ./k5pw -config /etc/k5pw/config.yml stop
-sudo ./k5pw -config /etc/k5pw/config.yml restart
+sudo ./yigate -config /etc/yigate/config.yml start
+sudo ./yigate -config /etc/yigate/config.yml stop
+sudo ./yigate -config /etc/yigate/config.yml restart
 
 # 卸载系统服务
-sudo ./k5pw -config /etc/k5pw/config.yml uninstall
+sudo ./yigate -config /etc/yigate/config.yml uninstall
 ```
 
 ## 配置说明
@@ -223,7 +218,7 @@ sudo ./k5pw -config /etc/k5pw/config.yml uninstall
 - `check_interval`：上游健康检查间隔，单位秒。
 - `max_connections`：全局最大下游连接数；为 0 表示不限制。
 
-配置中的密码、Token、上游地址可使用环境变量，例如 `${K5PW_PROXY_PASSWORD}`。引用的环境变量未设置或为空时，配置加载会失败。
+配置中的密码、Token、上游地址可使用环境变量，例如 `${YIGATE_PROXY_PASSWORD}`。引用的环境变量未设置或为空时，配置加载会失败。
 
 ## 管理接口
 
@@ -262,8 +257,8 @@ docker compose -f compose.local.yml up --build
 局域网认证模式（需设置环境变量）：
 
 ```bash
-export K5PW_PROXY_PASSWORD=yourpassword
-export K5PW_MANAGEMENT_TOKEN=yourtoken
+export YIGATE_PROXY_PASSWORD=yourpassword
+export YIGATE_MANAGEMENT_TOKEN=yourtoken
 cd deploy/docker
 docker compose -f compose.lan.yml up --build
 ```
@@ -311,7 +306,7 @@ GOPROXY=https://goproxy.cn,direct go test ./...
 
 > 注：`install/start/stop/restart/uninstall` 系统服务命令依赖 `kardianos/service`，在 Linux、macOS、Windows 与 FreeBSD 上完整支持；其他 BSD 平台可运行 `run` 模式作为前台代理。
 
-### 本地发布构建（Linux / macOS）
+### 本地交叉编译
 
 ```bash
 # 使用 Makefile 一次性交叉编译所有平台（开发验证）
@@ -339,13 +334,10 @@ git push origin v1.2.0
 ./scripts/check-release-files.sh 1.2.0
 ```
 
-### 本地发布构建（Windows）
+### Windows 本地构建
 
 ```powershell
-# 使用 PowerShell 脚本验证所有目标平台
 .\scripts\build.ps1 -Version 1.2.0
-
-# 结果位于 build/ 目录
 Get-ChildItem build\
 ```
 
@@ -364,3 +356,7 @@ Get-ChildItem build\
 - `enable_pprof` 仅建议在排障时临时开启。
 - `destination_policy.protect_private` 建议保持开启，防止 SSRF 攻击。
 - 透明代理模式需要 root 权限配置 iptables/nftables，生产环境注意最小权限原则。
+
+## 许可证
+
+见 [LICENSE](LICENSE)。

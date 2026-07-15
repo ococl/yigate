@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 func writeConfigForTest(t *testing.T, path, content string) {

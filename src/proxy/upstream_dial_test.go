@@ -331,7 +331,7 @@ func TestUpstreamManagerDialFallsBackToDirectAfterUpstreamFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	MetricSet("k5pw_upstream_dial_failures_total", 0, "upstream=bad")
+	MetricSet("yigate_upstream_dial_failures_total", 0, "upstream=bad")
 	target := startMockTarget(t)
 	conn, err := mgr.Dial(target)
 	if err != nil {
@@ -347,7 +347,7 @@ func TestUpstreamManagerDialFallsBackToDirectAfterUpstreamFailure(t *testing.T) 
 	if err != nil || string(buf[:n]) != "fallback" {
 		t.Fatalf("echo failed: %v, %q", err, buf[:n])
 	}
-	if got := MetricValue("k5pw_upstream_dial_failures_total", "upstream=bad"); got < 1 {
+	if got := MetricValue("yigate_upstream_dial_failures_total", "upstream=bad"); got < 1 {
 		t.Fatalf("expected upstream failure metric, got %v", got)
 	}
 }

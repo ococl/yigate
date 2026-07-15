@@ -93,7 +93,7 @@ jobs:
         run: ./scripts/check-release-files.sh "${GITHUB_REF_NAME#v}"
 
       - name: Smoke test Linux binary
-        run: ./release/k5pw-${GITHUB_REF_NAME#v}-linux-amd64 -version
+        run: ./release/yigate-${GITHUB_REF_NAME#v}-linux-amd64 -version
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -106,7 +106,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/k5pw-*
+            release/yigate-*
             release/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: true

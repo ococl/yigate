@@ -40,7 +40,7 @@ func startTestSOCKS5Server(t *testing.T, router *Router) (string, func()) {
 	}
 }
 
-// startTestProxyWithUpstream 启动一个带 SOCKS5 上游的 k5pw 风格代理服务器，用于测试级联。
+// startTestProxyWithUpstream 启动一个带 SOCKS5 上游的 yigate 风格代理服务器，用于测试级联。
 func startTestProxyWithUpstream(t *testing.T, upstreamAddr string) (string, func()) {
 	t.Helper()
 	mgr, err := NewUpstreamManager([]UpstreamConfig{

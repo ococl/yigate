@@ -1,15 +1,15 @@
 [Unit]
-Description=k5pw proxy server
+Description=yigate proxy server
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/k5pw -config /var/lib/k5pw/config/config.yml
+ExecStart=/usr/local/bin/yigate -config /var/lib/yigate/config/config.yml
 Restart=always
 RestartSec=10
 StartLimitBurst=64
-User=k5pw
-Group=k5pw
+User=yigate
+Group=yigate
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -21,8 +21,8 @@ RestrictSUIDSGID=true
 LockPersonality=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-ReadWritePaths=/var/lib/k5pw /var/log/k5pw
-RuntimeDirectory=k5pw
+ReadWritePaths=/var/lib/yigate /var/log/yigate
+RuntimeDirectory=yigate
 
 [Install]
 WantedBy=multi-user.target

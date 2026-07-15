@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-k5pw 8891 端口（生产实例）全能力验收测试脚本。
+yigate 8891 端口（生产实例）全能力验收测试脚本。
 
-本脚本针对运行中的 k5pw 生产实例（监听 0.0.0.0:8891，
+本脚本针对运行中的 yigate 生产实例（监听 0.0.0.0:8891，
 管理端口 127.0.0.1:8890）进行端到端验证：
   - 国内站点（geosite CN -> 直连）
   - 国外站点（github/google 等 -> 经上游代理）
@@ -30,7 +30,7 @@ k5pw 8891 端口（生产实例）全能力验收测试脚本。
 与 test_proxy_4479.py（自包含、本地 fixture）不同，本脚本依赖真实网络与
 上游代理，验证的是生产实例的真实路由与出网能力。
 
-运行前请确保 k5pw 已在 8891 端口启动且上游可达。
+运行前请确保 yigate 已在 8891 端口启动且上游可达。
 
 用法：
     python3 test_proxy_8891.py
@@ -412,7 +412,7 @@ def test_management_health():
 
 def test_management_metrics():
     code, text = _mgmt_get("/metrics")
-    ok = code == 200 and "k5pw" in text
+    ok = code == 200 and "yigate" in text
     return TestResult("管理接口 /metrics", ok, f"HTTP {code} len={len(text)}" if ok else f"失败 HTTP {code}")
 
 
@@ -731,10 +731,10 @@ def test_metrics_delta():
             return None
 
         counter_names = [
-            "k5pw_connections_total",
-            "k5pw_requests_total",
-            "k5pw_proxy_requests_total",
-            "k5pw_total_connections",
+            "yigate_connections_total",
+            "yigate_requests_total",
+            "yigate_proxy_requests_total",
+            "yigate_total_connections",
         ]
         before_vals = {}
         for name in counter_names:
@@ -896,7 +896,7 @@ def summarize(all_results, strict):
 
 def main():
     global PROXY_PORT, MGMT_PORT
-    parser = argparse.ArgumentParser(description="k5pw 8891 dist 实例全能力验收测试")
+    parser = argparse.ArgumentParser(description="yigate 8891 dist 实例全能力验收测试")
     parser.add_argument("--strict", action="store_true", help="站点关键词缺失也视为失败")
     parser.add_argument("--proxy-port", type=int, default=8891, help="代理端口，默认 8891")
     parser.add_argument("--mgmt-port", type=int, default=8890, help="管理端口，默认 8890")
@@ -905,7 +905,7 @@ def main():
     PROXY_PORT = args.proxy_port
     MGMT_PORT = args.mgmt_port
 
-    print(f"{Colors.INFO}k5pw dist 实例全能力测试: {PROXY_HOST}:{PROXY_PORT} "
+    print(f"{Colors.INFO}yigate dist 实例全能力测试: {PROXY_HOST}:{PROXY_PORT} "
           f"(管理 {MGMT_HOST}:{MGMT_PORT}){Colors.RESET}")
 
     # 0) 前置连通性检查
@@ -914,7 +914,7 @@ def main():
             print(f"{Colors.OK}代理端口 {PROXY_HOST}:{PROXY_PORT} 连通{Colors.RESET}")
     except Exception as e:  # noqa: BLE001
         print(f"{Colors.FAIL}代理端口不通: {e}{Colors.RESET}")
-        print("请先启动 k5pw 生产实例")
+        print("请先启动 yigate 生产实例")
         sys.exit(2)
 
     try:

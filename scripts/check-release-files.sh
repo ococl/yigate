@@ -19,9 +19,9 @@ for platform in $(all_platforms); do
 done
 for platform in $(linux_platforms); do
   suffix="$(normalize_platform "${platform}")"
-  expected+=("k5pw-${VERSION}-${suffix}.tar.gz")
+  expected+=("yigate-${VERSION}-${suffix}.tar.gz")
 done
-expected+=("k5pw-${VERSION}.spdx.json")
+expected+=("yigate-${VERSION}.spdx.json")
 expected+=("SHA256SUMS")
 
 # 获取实际文件集合

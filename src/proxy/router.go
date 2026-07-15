@@ -259,18 +259,18 @@ func compileRouteRule(rule RouteRule) (compiledRouteRule, error) {
 
 func (r *Router) Decide(target string) RouteDecision {
 	if r == nil {
-		MetricInc("k5pw_routing_decisions_total", "action=auto")
+		MetricInc("yigate_routing_decisions_total", "action=auto")
 		return RouteDecision{Action: ActionAuto}
 	}
 	host := normalizeTargetHost(target)
 	ip := net.ParseIP(host)
 	for _, rule := range r.rules {
 		if rule.match(host, ip, r.geoSite) {
-			MetricInc("k5pw_routing_decisions_total", "action="+rule.decision.Action)
+			MetricInc("yigate_routing_decisions_total", "action="+rule.decision.Action)
 			return rule.decision
 		}
 	}
-	MetricInc("k5pw_routing_decisions_total", "action="+r.final.Action)
+	MetricInc("yigate_routing_decisions_total", "action="+r.final.Action)
 	return r.final
 }
 

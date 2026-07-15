@@ -44,69 +44,69 @@ var (
 func init() {
 	// 预注册核心指标
 	RegisterMetric(MetricDesc{
-		Name: "k5pw_connections_active",
+		Name: "yigate_connections_active",
 		Help: "Current number of active downstream connections.",
 		Type: MetricGauge,
 	})
 	RegisterMetric(MetricDesc{
-		Name: "k5pw_connections_total",
+		Name: "yigate_connections_total",
 		Help: "Total number of downstream connections accepted.",
 		Type: MetricCounter,
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_requests_total",
+		Name:   "yigate_requests_total",
 		Help:   "Total number of requests handled by protocol.",
 		Type:   MetricCounter,
 		Labels: []string{"protocol"},
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_routing_decisions_total",
+		Name:   "yigate_routing_decisions_total",
 		Help:   "Total number of routing decisions by action.",
 		Type:   MetricCounter,
 		Labels: []string{"action"},
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_upstream_dial_failures_total",
+		Name:   "yigate_upstream_dial_failures_total",
 		Help:   "Total number of upstream dial failures by upstream name.",
 		Type:   MetricCounter,
 		Labels: []string{"upstream"},
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_upstream_health_status",
+		Name:   "yigate_upstream_health_status",
 		Help:   "Current health status of each upstream (1=alive, 0=dead).",
 		Type:   MetricGauge,
 		Labels: []string{"upstream"},
 	})
 	RegisterMetric(MetricDesc{
-		Name: "k5pw_cache_hits_total",
+		Name: "yigate_cache_hits_total",
 		Help: "Total number of route cache hits.",
 		Type: MetricCounter,
 	})
 	RegisterMetric(MetricDesc{
-		Name: "k5pw_cache_misses_total",
+		Name: "yigate_cache_misses_total",
 		Help: "Total number of route cache misses.",
 		Type: MetricCounter,
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_tunnel_transferred_bytes_total",
+		Name:   "yigate_tunnel_transferred_bytes_total",
 		Help:   "Total number of bytes transferred through tunnels.",
 		Type:   MetricCounter,
 		Labels: []string{"direction"},
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_tunnel_packets_total",
+		Name:   "yigate_tunnel_packets_total",
 		Help:   "Total number of read operations through tunnels.",
 		Type:   MetricCounter,
 		Labels: []string{"direction"},
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_management_requests_total",
+		Name:   "yigate_management_requests_total",
 		Help:   "Total number of requests to management endpoints.",
 		Type:   MetricCounter,
 		Labels: []string{"path"},
 	})
 	RegisterMetric(MetricDesc{
-		Name:   "k5pw_traffic_bytes_total",
+		Name:   "yigate_traffic_bytes_total",
 		Help:   "Total bytes transferred by user, upstream and target.",
 		Type:   MetricCounter,
 		Labels: []string{"direction", "user", "upstream", "target"},

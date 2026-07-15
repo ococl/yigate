@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 type listenerRuntime struct {
@@ -486,8 +486,8 @@ func (s *Server) acquireConnSlot(conn net.Conn, max int64) bool {
 			s.connections[conn] = struct{}{}
 			s.activeConns.Add(1)
 			s.activeMu.Unlock()
-			proxy.MetricSet("k5pw_connections_active", float64(cur+1))
-			proxy.MetricInc("k5pw_connections_total")
+			proxy.MetricSet("yigate_connections_active", float64(cur+1))
+			proxy.MetricInc("yigate_connections_total")
 			return true
 		}
 	}
@@ -503,11 +503,11 @@ func (s *Server) releaseConnSlot(conn net.Conn) {
 	for {
 		cur := s.connCount.Load()
 		if cur <= 0 {
-			proxy.MetricSet("k5pw_connections_active", 0)
+			proxy.MetricSet("yigate_connections_active", 0)
 			return
 		}
 		if s.connCount.CompareAndSwap(cur, cur-1) {
-			proxy.MetricSet("k5pw_connections_active", float64(cur-1))
+			proxy.MetricSet("yigate_connections_active", float64(cur-1))
 			return
 		}
 	}

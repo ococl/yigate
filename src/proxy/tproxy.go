@@ -30,7 +30,7 @@ func (c TProxyConfig) NormalizedMode() string {
 // 根据模式从连接中获取原始目标地址，然后通过路由器建立到目标的连接并双向转发。
 func HandleTProxy(client net.Conn, mgr *UpstreamManager, router *Router, mode string) {
 	defer client.Close()
-	MetricInc("k5pw_requests_total", "protocol=tproxy")
+	MetricInc("yigate_requests_total", "protocol=tproxy")
 
 	target, err := getOriginalDestination(client, mode)
 	if err != nil {

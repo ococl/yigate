@@ -1,4 +1,4 @@
-module k5pw
+module yigate
 
 go 1.21
 

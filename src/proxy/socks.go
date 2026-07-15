@@ -8,7 +8,7 @@ import (
 // HandleSOCKS5 处理 SOCKS5 代理请求，并在 socks5h_redirect 开启时尝试恢复域名
 func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController, allowBind, allowUDP bool) {
 	defer client.Close()
-	MetricInc("k5pw_requests_total", "protocol=socks5")
+	MetricInc("yigate_requests_total", "protocol=socks5")
 
 	user, err := socks5NegotiateAuth(client, clientReader, users)
 	if err != nil {

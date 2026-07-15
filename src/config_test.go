@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 func TestLoadConfigWithRouting(t *testing.T) {
@@ -376,8 +376,8 @@ func TestValidateConfigRejectsInvalidDurations(t *testing.T) {
 }
 
 func TestLoadConfigExpandsSensitiveEnv(t *testing.T) {
-	t.Setenv("K5PW_MANAGEMENT_TOKEN", "mgmt-token")
-	t.Setenv("K5PW_PROXY_PASSWORD", "proxy-pass")
+	t.Setenv("YIGATE_MANAGEMENT_TOKEN", "mgmt-token")
+	t.Setenv("YIGATE_PROXY_PASSWORD", "proxy-pass")
 	t.Setenv("UPSTREAM_HOST", "127.0.0.1")
 	t.Setenv("UPSTREAM_PORT", "1080")
 
@@ -385,9 +385,9 @@ func TestLoadConfigExpandsSensitiveEnv(t *testing.T) {
 	path := filepath.Join(dir, "config.yml")
 	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
 management: 127.0.0.1:0
-management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"
+management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"
 users:
-  alice: "${K5PW_PROXY_PASSWORD}"
+  alice: "${YIGATE_PROXY_PASSWORD}"
 upstreams:
   - name: default
     url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"

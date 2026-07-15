@@ -10,7 +10,7 @@ import (
 	"syscall"
 )
 
-// ErrorCode 是 k5pw 内部统一错误码，用于日志、指标和客户端响应分类。
+// ErrorCode 是 yigate 内部统一错误码，用于日志、指标和客户端响应分类。
 type ErrorCode string
 
 const (

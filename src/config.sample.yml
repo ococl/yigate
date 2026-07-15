@@ -4,7 +4,7 @@
 listeners:
   - listen: "127.0.0.1:4479"
     users:
-      username: "${K5PW_PROXY_PASSWORD}"
+      username: "${YIGATE_PROXY_PASSWORD}"
     access_control:
       allowed_clients: []
       rate_limit:
@@ -19,12 +19,12 @@ listeners:
     #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
   - listen: "127.0.0.1:4480"
     users:
-      service: "${K5PW_SERVICE_PASSWORD}"
+      service: "${YIGATE_SERVICE_PASSWORD}"
     max_connections: 512
   # IPv6 监听示例：[::] 表示双栈监听（IPv4+IPv6），[::1] 仅监听 IPv6 回环。
   # - listen: "[::]:4482"
   #   users:
-  #     ipv6user: "${K5PW_IPV6_PASSWORD}"
+  #     ipv6user: "${YIGATE_IPV6_PASSWORD}"
   #   max_connections: 256
   # 透明代理 listener（Linux 专用）：配合 iptables/nftables 使用，无需客户端配置代理。
   # - listen: ":4481"
@@ -35,9 +35,9 @@ listeners:
 # 旧版单监听端口配置（listeners 为空时生效，与上述多监听配置二选一）。
 # listen: "127.0.0.1:4479"
 # users:
-#   username: "${K5PW_PROXY_PASSWORD}"
+#   username: "${YIGATE_PROXY_PASSWORD}"
 management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
-management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"  # 非空时所有管理端点要求 Authorization: Bearer <token>
+management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"  # 非空时所有管理端点要求 Authorization: Bearer <token>
 # 运行时配置 API：通过管理端口动态增删 upstream/规则/用户，变更持久化到 YAML 并热加载。
 # 所有端点均要求 management_auth_token 认证。
 #   GET    /api/v1/config/upstreams          列出上游（URL 脱敏）
@@ -56,7 +56,7 @@ management_auth_token: "${K5PW_MANAGEMENT_TOKEN}"  # 非空时所有管理端点
 #   key_file: "certs/server.key"
 #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
 users:
-  username: "${K5PW_PROXY_PASSWORD}"
+  username: "${YIGATE_PROXY_PASSWORD}"
 upstreams:
   - name: "default"
     url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"
@@ -155,7 +155,7 @@ log:
   level: info
   format: json
   output: file
-  file: "logs/k5pw.log"
+  file: "logs/yigate.log"
   rotation: size
   max_size: 100
   max_age: 7

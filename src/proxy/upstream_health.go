@@ -134,7 +134,7 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 			if alive || !u.dead {
 				status = 1.0
 			}
-			MetricSet("k5pw_upstream_health_status", status, "upstream="+u.Name)
+			MetricSet("yigate_upstream_health_status", status, "upstream="+u.Name)
 			m.mu.Unlock()
 		}(u)
 	}
@@ -177,7 +177,7 @@ func (m *UpstreamManager) probeDeadUpstreams() {
 			u.dead = false
 			u.consecutiveDead = 0
 			u.nextProbeAt = time.Time{}
-			MetricSet("k5pw_upstream_health_status", 1.0, "upstream="+u.Name)
+			MetricSet("yigate_upstream_health_status", 1.0, "upstream="+u.Name)
 		} else {
 			// 仍未恢复，调度下次探测（指数退避）
 			u.consecutiveDead++
@@ -186,7 +186,7 @@ func (m *UpstreamManager) probeDeadUpstreams() {
 				backoff = deadProbeMaxInterval
 			}
 			u.nextProbeAt = time.Now().Add(backoff)
-			MetricSet("k5pw_upstream_health_status", 0.0, "upstream="+u.Name)
+			MetricSet("yigate_upstream_health_status", 0.0, "upstream="+u.Name)
 		}
 		m.mu.Unlock()
 	}

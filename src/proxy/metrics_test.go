@@ -10,18 +10,18 @@ import (
 )
 
 func TestMetricsIncAddSetValue(t *testing.T) {
-	MetricSet("k5pw_requests_total", 0, "protocol=http")
-	MetricInc("k5pw_requests_total", "protocol=http")
-	MetricAdd("k5pw_requests_total", 2, "protocol=http")
-	MetricSet("k5pw_connections_active", 5)
+	MetricSet("yigate_requests_total", 0, "protocol=http")
+	MetricInc("yigate_requests_total", "protocol=http")
+	MetricAdd("yigate_requests_total", 2, "protocol=http")
+	MetricSet("yigate_connections_active", 5)
 
-	if got := MetricValue("k5pw_requests_total", "protocol=http"); got != 3 {
+	if got := MetricValue("yigate_requests_total", "protocol=http"); got != 3 {
 		t.Fatalf("requests = %v, want 3", got)
 	}
-	if got := MetricValue("k5pw_connections_active"); got != 5 {
+	if got := MetricValue("yigate_connections_active"); got != 5 {
 		t.Fatalf("connections = %v, want 5", got)
 	}
-	if got := MetricValue("k5pw_missing"); got != 0 {
+	if got := MetricValue("yigate_missing"); got != 0 {
 		t.Fatalf("missing = %v, want 0", got)
 	}
 }
@@ -36,25 +36,25 @@ func TestMetricKey(t *testing.T) {
 }
 
 func TestExposeMetrics(t *testing.T) {
-	MetricInc("k5pw_requests_total", "protocol=http")
-	MetricSet("k5pw_connections_active", 1)
+	MetricInc("yigate_requests_total", "protocol=http")
+	MetricSet("yigate_connections_active", 1)
 
 	var buf bytes.Buffer
 	ExposeMetrics(&buf)
 	out := buf.String()
-	if !strings.Contains(out, "k5pw_requests_total") {
+	if !strings.Contains(out, "yigate_requests_total") {
 		t.Fatalf("output missing requests metric: %s", out)
 	}
-	if !strings.Contains(out, "k5pw_connections_active") {
+	if !strings.Contains(out, "yigate_connections_active") {
 		t.Fatalf("output missing connections metric: %s", out)
 	}
 }
 
 func TestMatchingKeys(t *testing.T) {
-	keys := matchingKeys("k5pw_requests_total")
+	keys := matchingKeys("yigate_requests_total")
 	found := false
 	for _, k := range keys {
-		if k == "k5pw_requests_total{protocol=http}" {
+		if k == "yigate_requests_total{protocol=http}" {
 			found = true
 		}
 	}
@@ -89,10 +89,10 @@ func TestMetricsMaxEntries(t *testing.T) {
 }
 
 func TestTunnelMetrics(t *testing.T) {
-	MetricSet("k5pw_tunnel_transferred_bytes_total", 0, "direction=client_to_target")
-	MetricSet("k5pw_tunnel_transferred_bytes_total", 0, "direction=target_to_client")
-	MetricSet("k5pw_tunnel_packets_total", 0, "direction=client_to_target")
-	MetricSet("k5pw_tunnel_packets_total", 0, "direction=target_to_client")
+	MetricSet("yigate_tunnel_transferred_bytes_total", 0, "direction=client_to_target")
+	MetricSet("yigate_tunnel_transferred_bytes_total", 0, "direction=target_to_client")
+	MetricSet("yigate_tunnel_packets_total", 0, "direction=client_to_target")
+	MetricSet("yigate_tunnel_packets_total", 0, "direction=target_to_client")
 
 	client, proxySide := net.Pipe()
 	targetSide, target := net.Pipe()
@@ -123,16 +123,16 @@ func TestTunnelMetrics(t *testing.T) {
 	target.Close()
 	<-done
 
-	if got := MetricValue("k5pw_tunnel_transferred_bytes_total", "direction=client_to_target"); got < 4 {
+	if got := MetricValue("yigate_tunnel_transferred_bytes_total", "direction=client_to_target"); got < 4 {
 		t.Fatalf("client_to_target bytes = %v, want >= 4", got)
 	}
-	if got := MetricValue("k5pw_tunnel_transferred_bytes_total", "direction=target_to_client"); got < 4 {
+	if got := MetricValue("yigate_tunnel_transferred_bytes_total", "direction=target_to_client"); got < 4 {
 		t.Fatalf("target_to_client bytes = %v, want >= 4", got)
 	}
-	if got := MetricValue("k5pw_tunnel_packets_total", "direction=client_to_target"); got < 1 {
+	if got := MetricValue("yigate_tunnel_packets_total", "direction=client_to_target"); got < 1 {
 		t.Fatalf("client_to_target packets = %v, want >= 1", got)
 	}
-	if got := MetricValue("k5pw_tunnel_packets_total", "direction=target_to_client"); got < 1 {
+	if got := MetricValue("yigate_tunnel_packets_total", "direction=target_to_client"); got < 1 {
 		t.Fatalf("target_to_client packets = %v, want >= 1", got)
 	}
 }

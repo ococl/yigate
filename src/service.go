@@ -6,7 +6,7 @@ import (
 	"runtime"
 
 	"github.com/kardianos/service"
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 type program struct {
@@ -45,7 +45,7 @@ func (p *program) Stop(s service.Service) error {
 }
 
 // newService 构造跨平台系统服务封装。除基础元信息外，会按平台注入
-// 重启/恢复策略（platformServiceOptions），使 k5pw 在进程异常退出或宿主
+// 重启/恢复策略（platformServiceOptions），使 yigate 在进程异常退出或宿主
 // 重启后能够自动恢复，从而支持在各平台稳定部署为系统服务。
 func newService(cfgPath string) service.Service {
 	prg := &program{cfgPath: cfgPath}
@@ -56,8 +56,8 @@ func newService(cfgPath string) service.Service {
 	}
 
 	svcConfig := &service.Config{
-		Name:        "k5pw",
-		DisplayName: "k5pw Unified Proxy",
+		Name:        "yigate",
+		DisplayName: "YiGate Unified Proxy",
 		Description: "Lightweight unified proxy (HTTP/HTTPS CONNECT/SOCKS5) with routing, multi-upstream and management API",
 		Executable:  exePath,
 		Arguments:   []string{"-config", cfgPath, "service"},

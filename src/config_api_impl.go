@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 // configEditor 实现 proxy.ConfigEditor 接口。
@@ -67,7 +67,7 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 	}
 
 	dir := filepath.Dir(e.cfgPath)
-	tmp, err := os.CreateTemp(dir, ".k5pw-config-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".yigate-config-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}

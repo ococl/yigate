@@ -99,7 +99,7 @@ func (u *GeoSiteUpdater) UpdateOnce() error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "k5pw-geosite-updater/1.0")
+	req.Header.Set("User-Agent", "yigate-geosite-updater/1.0")
 
 	resp, err := u.doRequest(req)
 	if err != nil {

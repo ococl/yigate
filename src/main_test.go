@@ -10,7 +10,7 @@ import (
 )
 
 func TestVersionCommandOutputsBuildMetadata(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "k5pw-test")
+	bin := filepath.Join(t.TempDir(), "yigate-test")
 	cmd := exec.Command("go", "build", "-o", bin, "-ldflags", "-X main.version=9.8.7 -X main.commit=testcommit -X main.buildTime=2026-07-10T00:00:00Z", ".")
 	cmd.Env = append(os.Environ(), "GOPROXY=https://goproxy.cn,direct")
 	out, err := cmd.CombinedOutput()
@@ -24,7 +24,7 @@ func TestVersionCommandOutputsBuildMetadata(t *testing.T) {
 		t.Fatalf("run version: %v\n%s", err, out)
 	}
 	got := string(out)
-	for _, want := range []string{"k5pw version 9.8.7", "commit testcommit", "built 2026-07-10T00:00:00Z"} {
+	for _, want := range []string{"yigate version 9.8.7", "commit testcommit", "built 2026-07-10T00:00:00Z"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("version output %q missing %q", got, want)
 		}
@@ -44,10 +44,10 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		"FROM alpine:3.20",
 		"go mod download",
 		"CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct",
-		"adduser -D -u 1000 k5pw",
-		"COPY --from=builder /build/k5pw /usr/local/bin/k5pw",
+		"adduser -D -u 1000 yigate",
+		"COPY --from=builder /build/yigate /usr/local/bin/yigate",
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
-		"USER k5pw",
+		"USER yigate",
 		"EXPOSE 8891",
 		"ENTRYPOINT",
 	} {
@@ -62,7 +62,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"services:", "k5pw:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "restart: unless-stopped", "healthcheck:"} {
+		for _, want := range []string{"services:", "yigate:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "restart: unless-stopped", "healthcheck:"} {
 			if !bytes.Contains(compose, []byte(want)) {
 				t.Fatalf("%s missing %q", composeFile, want)
 			}
@@ -70,13 +70,13 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	}
 
 	// systemd unit 已迁移至 deploy/systemd/
-	serviceUnit, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "systemd", "k5pw.service"))
+	serviceUnit, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "systemd", "yigate.service"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/k5pw -config /var/lib/k5pw/config/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "User=k5pw", "Group=k5pw", "WantedBy=multi-user.target"} {
+	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/yigate -config /var/lib/yigate/config/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "User=yigate", "Group=yigate", "WantedBy=multi-user.target"} {
 		if !bytes.Contains(serviceUnit, []byte(want)) {
-			t.Fatalf("k5pw.service missing %q", want)
+			t.Fatalf("yigate.service missing %q", want)
 		}
 	}
 
@@ -96,7 +96,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"K5PW_PLATFORMS=(", "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "freebsd/amd64"} {
+	for _, want := range []string{"YIGATE_PLATFORMS=(", "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "freebsd/amd64"} {
 		if !bytes.Contains(platforms, []byte(want)) {
 			t.Fatalf("platforms.sh missing %q", want)
 		}

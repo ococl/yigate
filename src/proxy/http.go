@@ -77,7 +77,7 @@ func (h *maxHeaderConnReader) readUnlimited(p []byte) (int, error) {
 // 请求头受 maxHTTPHeaderBytes 上限保护。
 func HandleHTTP(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController) {
 	defer client.Close()
-	MetricInc("k5pw_requests_total", "protocol=http")
+	MetricInc("yigate_requests_total", "protocol=http")
 
 	hr := &maxHeaderConnReader{br: clientReader, conn: client, limit: maxHTTPHeaderBytes}
 	reqReader := bufio.NewReader(hr)

@@ -245,7 +245,7 @@ func (m *ManagementServer) requireAuth(w http.ResponseWriter, r *http.Request) b
 	if m.checkAuth(r) {
 		return true
 	}
-	w.Header().Set("WWW-Authenticate", `Bearer realm="k5pw-management"`)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="yigate-management"`)
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "unauthorized"})
 	return false
@@ -369,7 +369,7 @@ func (m *ManagementServer) handleHealth(w http.ResponseWriter, r *http.Request) 
 	if !m.requireAuth(w, r) {
 		return
 	}
-	MetricInc("k5pw_management_requests_total", "path=/health")
+	MetricInc("yigate_management_requests_total", "path=/health")
 	m.mu.Lock()
 	getStatus := m.getStatus
 	m.mu.Unlock()
@@ -398,7 +398,7 @@ func (m *ManagementServer) handleMetrics(w http.ResponseWriter, r *http.Request)
 	if !m.requireAuth(w, r) {
 		return
 	}
-	MetricInc("k5pw_management_requests_total", "path=/metrics")
+	MetricInc("yigate_management_requests_total", "path=/metrics")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	ExposeMetrics(w)
@@ -412,7 +412,7 @@ func (m *ManagementServer) handleStatus(w http.ResponseWriter, r *http.Request) 
 	if !m.requireAuth(w, r) {
 		return
 	}
-	MetricInc("k5pw_management_requests_total", "path=/api/v1/status")
+	MetricInc("yigate_management_requests_total", "path=/api/v1/status")
 	m.mu.Lock()
 	getSnapshot := m.getStatusSnapshot
 	getStatus := m.getStatus
@@ -446,7 +446,7 @@ func (m *ManagementServer) handleReload(w http.ResponseWriter, r *http.Request) 
 	if !m.requireAuth(w, r) {
 		return
 	}
-	MetricInc("k5pw_management_requests_total", "path=/api/v1/reload")
+	MetricInc("yigate_management_requests_total", "path=/api/v1/reload")
 	m.mu.Lock()
 	reload := m.reload
 	m.mu.Unlock()
@@ -473,7 +473,7 @@ func (m *ManagementServer) handleTraffic(w http.ResponseWriter, r *http.Request)
 	if !m.requireAuth(w, r) {
 		return
 	}
-	MetricInc("k5pw_management_requests_total", "path=/api/v1/traffic")
+	MetricInc("yigate_management_requests_total", "path=/api/v1/traffic")
 	snapshot := TrafficSnapshot{}
 	if globalTrafficAccounter != nil {
 		snapshot = globalTrafficAccounter.Snapshot()

@@ -52,7 +52,7 @@ BUILD_TIME="$(git -C "${REPO_ROOT}" log -1 --format=%cI "${TAG}")"
 
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
 
-echo "Building k5pw ${TAG} (commit ${COMMIT:0:12}, built ${BUILD_TIME})"
+echo "Building yigate ${TAG} (commit ${COMMIT:0:12}, built ${BUILD_TIME})"
 
 # 清空并重建 release staging
 rm -rf "${RELEASE_DIR}"
@@ -84,12 +84,12 @@ for platform in $(linux_platforms); do
 done
 
 # 生成 SBOM
-syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/k5pw-${VERSION}.spdx.json"
+syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/yigate-${VERSION}.spdx.json"
 
 # 生成校验和
 (
   cd "${RELEASE_DIR}"
-  sha256sum k5pw-* k5pw-*.spdx.json > SHA256SUMS
+  sha256sum yigate-* yigate-*.spdx.json > SHA256SUMS
   sha256sum -c SHA256SUMS
 )
 

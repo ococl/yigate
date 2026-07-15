@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/kardianos/service"
-	"k5pw/proxy"
+	"yigate/proxy"
 )
 
 var (
@@ -22,7 +22,7 @@ func main() {
 	configPath := flag.String("config", "config.yml", "path to config file")
 	showVersion := flag.Bool("version", false, "show version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: k5pw [-version] [-config <path>] <command>\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: yigate [-version] [-config <path>] <command>\n\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  run       run in foreground (default)\n")
 		fmt.Fprintf(os.Stderr, "  service   run as system service (used by service manager)\n")
@@ -37,7 +37,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("k5pw version %s (commit %s, built %s)\n", version, commit, buildTime)
+		fmt.Printf("yigate version %s (commit %s, built %s)\n", version, commit, buildTime)
 		return
 	}
 
@@ -85,14 +85,14 @@ func runForeground(cfgPath string) {
 		}
 	}()
 
-	proxy.Logger().Infow("k5pw proxy started", "listen", cfg.Listen)
+	proxy.Logger().Infow("yigate proxy started", "listen", cfg.Listen)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	srv.Stop()
-	proxy.Logger().Infow("k5pw proxy stopped")
+	proxy.Logger().Infow("yigate proxy stopped")
 	proxy.CloseLogger()
 }
 
@@ -138,12 +138,12 @@ func controlService(cfgPath, action string) {
 func serviceStatusString(st service.Status) string {
 	switch st {
 	case service.StatusRunning:
-		return "k5pw service: running"
+		return "yigate service: running"
 	case service.StatusStopped:
-		return "k5pw service: stopped"
+		return "yigate service: stopped"
 	case service.StatusUnknown:
-		return "k5pw service: unknown (not installed or status unavailable)"
+		return "yigate service: unknown (not installed or status unavailable)"
 	default:
-		return fmt.Sprintf("k5pw service: status=%d", int(st))
+		return fmt.Sprintf("yigate service: status=%d", int(st))
 	}
 }

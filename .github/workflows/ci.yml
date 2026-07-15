@@ -67,7 +67,7 @@ jobs:
       - name: Build native binary
         env:
           GOPROXY: https://goproxy.cn,direct
-        run: go build -o k5pw .
+        run: go build -o yigate .
 
   cross-compile:
     name: Cross compile
@@ -125,15 +125,15 @@ jobs:
           export GOARM="${GOARM#v}"
           SUFFIX="${GOOS}-${GOARCH}"
           if [[ "$GOARCH" == "arm" && "$GOARM" == "7" ]]; then SUFFIX="${GOOS}-armv7"; fi
-          OUTPUT="k5pw-${SUFFIX}"
+          OUTPUT="yigate-${SUFFIX}"
           if [[ "${GOOS}" == "windows" ]]; then OUTPUT="${OUTPUT}.exe"; fi
           go build -trimpath -mod=readonly -ldflags '-s -w' -o "${OUTPUT}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: k5pw-build-${{ matrix.platform }}
-          path: ./src/k5pw-*
+          name: yigate-build-${{ matrix.platform }}
+          path: ./src/yigate-*
           if-no-files-found: error
 
   docker:
@@ -157,7 +157,7 @@ jobs:
         run: |
           docker build \
             --build-arg VERSION=ci --build-arg COMMIT=ci --build-arg BUILD_TIME=ci \
-            -f deploy/docker/Dockerfile -t k5pw:local .
+            -f deploy/docker/Dockerfile -t yigate:local .
 
       - name: Validate local compose
         run: |

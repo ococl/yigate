@@ -52,18 +52,18 @@ func TestUpstreamHealthStatusMetric(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	MetricSet("k5pw_upstream_health_status", -1, "upstream=alive")
-	MetricSet("k5pw_upstream_health_status", -1, "upstream=dead")
+	MetricSet("yigate_upstream_health_status", -1, "upstream=alive")
+	MetricSet("yigate_upstream_health_status", -1, "upstream=dead")
 
 	// 连续失败达到阈值才标记 dead。
 	for i := 0; i < deadFailureThreshold; i++ {
 		mgr.checkAllForTest(30)
 	}
 
-	if got := MetricValue("k5pw_upstream_health_status", "upstream=alive"); got != 1 {
+	if got := MetricValue("yigate_upstream_health_status", "upstream=alive"); got != 1 {
 		t.Fatalf("alive health metric = %v, want 1", got)
 	}
-	if got := MetricValue("k5pw_upstream_health_status", "upstream=dead"); got != 0 {
+	if got := MetricValue("yigate_upstream_health_status", "upstream=dead"); got != 0 {
 		t.Fatalf("dead health metric = %v, want 0", got)
 	}
 	if up := mgr.byName["dead"]; up == nil || !up.dead {

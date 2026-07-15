@@ -114,8 +114,8 @@ func (r *deadlineReader) Read(p []byte) (int, error) {
 	}
 	n, err := r.r.Read(p)
 	if n > 0 && r.metricDirection != "" {
-		MetricAdd("k5pw_tunnel_transferred_bytes_total", float64(n), "direction="+r.metricDirection)
-		MetricInc("k5pw_tunnel_packets_total", "direction="+r.metricDirection)
+		MetricAdd("yigate_tunnel_transferred_bytes_total", float64(n), "direction="+r.metricDirection)
+		MetricInc("yigate_tunnel_packets_total", "direction="+r.metricDirection)
 	}
 	if n > 0 && r.accounter != nil {
 		var recordErr error

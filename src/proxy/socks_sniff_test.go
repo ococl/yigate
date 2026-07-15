@@ -8,7 +8,7 @@ import (
 )
 
 func TestRewriteSOCKS5TargetFromHTTPHost(t *testing.T) {
-	initial := []byte("GET / HTTP/1.1\r\nHost: www.google.com\r\nUser-Agent: k5pw-test\r\n\r\n")
+	initial := []byte("GET / HTTP/1.1\r\nHost: www.google.com\r\nUser-Agent: yigate-test\r\n\r\n")
 	got := rewriteSOCKS5TargetFromInitial("142.250.72.14:80", initial)
 	if got != "www.google.com:80" {
 		t.Fatalf("rewriteSOCKS5TargetFromInitial() = %q", got)

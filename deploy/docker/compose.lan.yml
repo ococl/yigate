@@ -1,21 +1,21 @@
 services:
-  k5pw:
+  yigate:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
-    image: k5pw:lan
-    container_name: k5pw-lan
+    image: yigate:lan
+    container_name: yigate-lan
     environment:
-      - K5PW_PROXY_PASSWORD
-      - K5PW_MANAGEMENT_TOKEN
-      - K5PW_TEMPLATE=lan
+      - YIGATE_PROXY_PASSWORD
+      - YIGATE_MANAGEMENT_TOKEN
+      - YIGATE_TEMPLATE=lan
     ports:
       - "8891:8891"
       - "127.0.0.1:8890:8890"
     volumes:
-      - ../config/config.lan.yml:/etc/k5pw/config.lan.yml:ro
-      - k5pw-data:/var/lib/k5pw
-      - k5pw-logs:/var/log/k5pw
+      - ../config/config.lan.yml:/etc/yigate/config.lan.yml:ro
+      - yigate-data:/var/lib/yigate
+      - yigate-logs:/var/log/yigate
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -32,5 +32,5 @@ services:
       start_period: 10s
 
 volumes:
-  k5pw-data:
-  k5pw-logs:
+  yigate-data:
+  yigate-logs:

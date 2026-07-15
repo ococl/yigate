@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-`k5pw` 是一个 Go 语言实现的轻量级统一代理服务。核心能力是让 HTTP、HTTPS CONNECT 和 SOCKS5 共用单端口接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和管理接口提供可运维的代理能力。项目定位为合规矩形、轻量可运维的统一代理网关，明确不支持任何混淆/非合规协议。
+YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是让 HTTP、HTTPS CONNECT 和 SOCKS5 共用单端口接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和管理接口提供可运维的代理能力。项目定位为合规矩形、轻量可运维的统一代理网关，明确不支持任何混淆/非合规协议。
 
 ## 工作约定
 
@@ -27,7 +27,7 @@
 ```text
 .
 ├── src/                 # Go 模块根目录
-│   ├── go.mod
+│   ├── go.mod           # module yigate
 │   ├── main.go          # CLI 入口、版本信息、服务命令
 │   ├── config.go        # YAML 配置加载、环境变量展开、校验
 │   ├── config_api_impl.go # 运行时配置 API 实现（持久化到 YAML）
@@ -90,7 +90,7 @@
 
 - `src/proxy/management.go`：提供健康检查、指标、状态、reload、流量查询和配置 API 接口。
 - `src/proxy/config_api.go`：运行时配置 API（增删查改 upstream/规则/用户）。
-- `src/proxy/metrics.go`：维护 Prometheus 文本格式指标，包括流量审计指标。
+- `src/proxy/metrics.go`：维护 Prometheus 文本格式指标，包括流量审计指标。指标前缀为 `yigate_`。
 - `src/proxy/traffic_audit.go`：流量统计器，按 user/upstream/target 三维统计，支持配额限制。
 - `src/proxy/access.go`：客户端 CIDR 白名单、单 IP 限速和用户并发限制。
 - `src/proxy/logging.go`：初始化结构化日志和日志滚动。
@@ -101,8 +101,8 @@
 ```bash
 cd src
 GOPROXY=https://goproxy.cn,direct go mod download
-GOPROXY=https://goproxy.cn,direct go build -o k5pw .
-./k5pw -config config.sample.yml run
+GOPROXY=https://goproxy.cn,direct go build -o yigate .
+./yigate -config config.sample.yml run
 ```
 
 Docker：
@@ -198,3 +198,4 @@ GOPROXY=https://goproxy.cn,direct go test ./...
 - 目标策略（`destination_policy`）独立于路由，是 SSRF 防护的最后一道防线。
 - 流量审计通过 `TrafficAccounter` 实现，`Tunnel` 函数签名包含 `TrafficKey` 和 `*TrafficAccounter` 参数。
 - 运行时配置 API 读取原始 YAML（不展开环境变量），保留 `${ENV_VAR}` 占位符。
+- Prometheus 指标前缀为 `yigate_`，环境变量前缀为 `YIGATE_`。

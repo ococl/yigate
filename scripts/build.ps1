@@ -58,9 +58,9 @@ foreach ($Platform in $Platforms) {
     $Env:GOARCH = $Parts[1]
     $Env:GOARM = if ($Parts[2]) { $Parts[2].Substring(1) } else { "" }
 
-    $OutputName = "k5pw-$Env:GOOS-$Env:GOARCH"
+    $OutputName = "yigate-$Env:GOOS-$Env:GOARCH"
     if ($Env:GOARCH -eq "arm" -and $Env:GOARM -eq "7") {
-        $OutputName = "k5pw-$Env:GOOS-armv7"
+        $OutputName = "yigate-$Env:GOOS-armv7"
     }
     if ($Env:GOOS -eq "windows") {
         $OutputName += ".exe"

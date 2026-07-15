@@ -99,24 +99,24 @@ func (c *RouteCache) evictExpired() {
 
 func (c *RouteCache) Get(key string) (RouteCacheEntry, bool) {
 	if c == nil || key == "" {
-		MetricInc("k5pw_cache_misses_total")
+		MetricInc("yigate_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
 	c.mu.RLock()
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
 	if !ok {
-		MetricInc("k5pw_cache_misses_total")
+		MetricInc("yigate_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
 	if !entry.ExpiresAt.IsZero() && time.Now().After(entry.ExpiresAt) {
 		// 原子地删除过期条目：在写锁下重新校验 ExpiresAt，
 		// 避免误删在 RUnlock 与 Lock 之间被其他 goroutine 写入的新值。
 		c.deleteIfExpired(key, entry.ExpiresAt)
-		MetricInc("k5pw_cache_misses_total")
+		MetricInc("yigate_cache_misses_total")
 		return RouteCacheEntry{}, false
 	}
-	MetricInc("k5pw_cache_hits_total")
+	MetricInc("yigate_cache_hits_total")
 	return entry, true
 }
 

@@ -207,8 +207,8 @@ func (a *TrafficAccounter) recordAggregates(k TrafficKey, bytesIn, bytesOut, tot
 
 	// 更新 Prometheus 指标（target 标签做归一化以限制基数）
 	normalizedTarget := normalizeTargetLabel(k.Target)
-	MetricAdd("k5pw_traffic_bytes_total", float64(bytesIn), "direction=client_to_target", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
-	MetricAdd("k5pw_traffic_bytes_total", float64(bytesOut), "direction=target_to_client", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
+	MetricAdd("yigate_traffic_bytes_total", float64(bytesIn), "direction=client_to_target", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
+	MetricAdd("yigate_traffic_bytes_total", float64(bytesOut), "direction=target_to_client", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
 
 	return nil
 }
