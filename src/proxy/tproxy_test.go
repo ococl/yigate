@@ -140,8 +140,11 @@ func TestHandleTProxyTProxyModeDialFail(t *testing.T) {
 	}
 	defer router.Stop()
 
-	// 设置短超时以加速测试
+	// 设置短超时以加速测试：Dial 超时控制拨号失败速度，
+	// TunnelIdle 控制隧道空闲超时。
+	t.Cleanup(resetTimeouts)
 	SetTimeouts(TimeoutConfig{
+		Dial:      Duration(2 * time.Second),
 		TunnelIdle: Duration(2 * time.Second),
 	})
 
@@ -155,8 +158,8 @@ func TestHandleTProxyTProxyModeDialFail(t *testing.T) {
 	select {
 	case <-done:
 		// 预期行为：拨号失败后 HandleTProxy 返回
-	case <-time.After(10 * time.Second):
-		t.Fatal("HandleTProxy did not return within 10 seconds")
+	case <-time.After(5 * time.Second):
+		t.Fatal("HandleTProxy did not return within 5 seconds")
 	}
 
 	if !conn.closed {
@@ -229,6 +232,7 @@ func TestHandleTProxyTProxyModeEndToEnd(t *testing.T) {
 
 	// 创建一对真实 TCP 连接模拟 TPROXY 连接
 	// 使用 net.Pipe 但设置短超时
+	t.Cleanup(resetTimeouts)
 	SetTimeouts(TimeoutConfig{
 		TunnelIdle: Duration(500 * time.Millisecond),
 	})
