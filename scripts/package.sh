@@ -33,6 +33,9 @@ if [[ ! -f "${BINARY_PATH}" ]]; then
     exit 1
 fi
 
+# 清理残留的 staging 目录（上次失败可能遗留）
+rm -rf "${RELEASE_DIR}"/.pkg-*
+
 # 组装临时目录
 rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}"
@@ -62,6 +65,7 @@ fi
 # zip 命令在精简 CI 镜像中可能缺失，回退到 Python zipfile。
 if [[ "$GOOS" == "windows" ]]; then
     ARCHIVE="${RELEASE_DIR}/${PKG_NAME}.zip"
+    rm -f "${ARCHIVE}"
     if command -v zip &>/dev/null; then
         (cd "${STAGING_DIR}" && zip -9 -q -r "${ARCHIVE}" .)
     else
@@ -78,6 +82,7 @@ PYEOF
     fi
 else
     ARCHIVE="${RELEASE_DIR}/${PKG_NAME}.tar.gz"
+    rm -f "${ARCHIVE}"
     tar -cf - -C "${STAGING_DIR}" . | gzip -9 > "${ARCHIVE}"
 fi
 
