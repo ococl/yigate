@@ -9,6 +9,8 @@ import (
 	"net"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // Linux 专用常量
@@ -54,7 +56,7 @@ func getOriginalDstV4(fd int) (string, error) {
 	var buf [128]byte
 	size := uint32(len(buf))
 	_, _, errno := syscall.Syscall6(
-		syscall.SYS_GETSOCKOPT,
+		unix.SYS_GETSOCKOPT,
 		uintptr(fd),
 		uintptr(syscall.SOL_IP),
 		uintptr(soOriginalDst),
@@ -83,7 +85,7 @@ func getOriginalDstV6(fd int) (string, error) {
 	var buf [128]byte
 	size := uint32(len(buf))
 	_, _, errno := syscall.Syscall6(
-		syscall.SYS_GETSOCKOPT,
+		unix.SYS_GETSOCKOPT,
 		uintptr(fd),
 		uintptr(syscall.SOL_IPV6),
 		uintptr(ip6tSoOriginalDst),
