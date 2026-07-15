@@ -57,13 +57,28 @@ if [[ "$GOOS" == "linux" ]]; then
     chmod +x "${STAGING_DIR}/install.sh"
 fi
 
-# 打包: Windows 用 zip (最大压缩), 其他用 tar.gz (gzip -9)
+# 打包: Windows 用 zip, 其他用 tar.gz
+# 避免使用 GZIP 环境变量（已弃用），通过管道显式调用 gzip -9。
+# zip 命令在精简 CI 镜像中可能缺失，回退到 Python zipfile。
 if [[ "$GOOS" == "windows" ]]; then
     ARCHIVE="${RELEASE_DIR}/${PKG_NAME}.zip"
-    (cd "${STAGING_DIR}" && zip -9 -q -r "${ARCHIVE}" .)
+    if command -v zip &>/dev/null; then
+        (cd "${STAGING_DIR}" && zip -9 -q -r "${ARCHIVE}" .)
+    else
+        python3 - "$ARCHIVE" "$STAGING_DIR" <<'PYEOF'
+import sys, zipfile, os
+archive, staging = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+    for root, _, files in os.walk(staging):
+        for f in files:
+            full = os.path.join(root, f)
+            arc = os.path.relpath(full, staging)
+            zf.write(full, arc)
+PYEOF
+    fi
 else
     ARCHIVE="${RELEASE_DIR}/${PKG_NAME}.tar.gz"
-    GZIP=-9 tar -czf "${ARCHIVE}" -C "${STAGING_DIR}" .
+    tar -cf - -C "${STAGING_DIR}" . | gzip -9 > "${ARCHIVE}"
 fi
 
 rm -rf "${STAGING_DIR}"
