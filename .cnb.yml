@@ -65,6 +65,15 @@ dev:
             preRelease: true
             overlying: true
           allowFailure: true
+        - name: upload-artifacts
+          image: cnbcool/attachments
+          settings:
+            tag: dev-latest
+            attachments:
+              - "./release/*.tar.gz"
+              - "./release/*.zip"
+              - "./release/SHA256SUMS"
+          allowFailure: true
 
 # ==================== main 分支: Beta 版 ====================
 main:
@@ -120,6 +129,15 @@ main:
             descriptionFromFile: release/RELEASE_NOTES.md
             preRelease: true
             overlying: true
+          allowFailure: true
+        - name: upload-artifacts
+          image: cnbcool/attachments
+          settings:
+            tag: beta-latest
+            attachments:
+              - "./release/*.tar.gz"
+              - "./release/*.zip"
+              - "./release/SHA256SUMS"
           allowFailure: true
 
 # ==================== PR 检查: 代码质量守护 ====================
@@ -183,5 +201,7 @@ main:
         - name: upload-artifacts
           image: cnbcool/attachments
           settings:
-            path: release/
-          allowFailure: true
+            attachments:
+              - "./release/*.tar.gz"
+              - "./release/*.zip"
+              - "./release/SHA256SUMS"

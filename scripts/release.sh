@@ -77,10 +77,15 @@ for platform in $(all_platforms); do
   )
 done
 
-# 生成 Linux 安装包
-for platform in $(linux_platforms); do
-  suffix="$(normalize_platform "${platform}")"
-  "${SCRIPTS_DIR}/package-linux.sh" "${VERSION}" "${suffix}"
+# 全平台打包
+for platform in $(all_platforms); do
+  "${SCRIPTS_DIR}/package.sh" "${VERSION}" "${platform}"
+done
+
+# 删除裸二进制
+for platform in $(all_platforms); do
+  name="$(output_name "${VERSION}" "${platform}")"
+  rm -f "${RELEASE_DIR}/${name}"
 done
 
 # 生成 SBOM
@@ -89,7 +94,7 @@ syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/yigate-${VERSION}.spdx.json
 # 生成校验和
 (
   cd "${RELEASE_DIR}"
-  sha256sum yigate-* yigate-*.spdx.json > SHA256SUMS
+  find . -maxdepth 1 -type f ! -name '.version' ! -name 'SHA256SUMS' -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS
   sha256sum -c SHA256SUMS
 )
 

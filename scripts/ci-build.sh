@@ -3,11 +3,12 @@ set -euo pipefail
 
 # ci-build.sh — CI 环境下的跨平台构建脚本。
 #
-# 功能: 依赖下载 → 跨平台编译 → Linux 打包 → SBOM(可选) → 校验和
+# 功能: 依赖下载 → 跨平台编译 → 全平台打包 → SBOM(可选) → 校验和
 # 用法: scripts/ci-build.sh [version]
 #   version 可选，未提供时调用 scripts/version.sh 自动确定
 #
 # 产物输出到 release/ 目录，版本号写入 release/.version 供下游阶段使用。
+# 产物仅包含压缩归档 (tar.gz/zip) + SHA256SUMS，不含裸二进制。
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/src"
@@ -55,11 +56,17 @@ for platform in $(all_platforms); do
     )
 done
 
-# 生成 Linux 安装包
-echo "--- Packaging Linux binaries ---"
-for platform in $(linux_platforms); do
-    suffix="$(normalize_platform "${platform}")"
-    "${SCRIPTS_DIR}/package-linux.sh" "${VERSION}" "${suffix}"
+# 全平台打包
+echo "--- Packaging $(all_platforms | wc -l) archives ---"
+for platform in $(all_platforms); do
+    "${SCRIPTS_DIR}/package.sh" "${VERSION}" "${platform}"
+done
+
+# 删除裸二进制，仅保留压缩归档
+echo "--- Removing raw binaries ---"
+for platform in $(all_platforms); do
+    name="$(output_name "${VERSION}" "${platform}")"
+    rm -f "${RELEASE_DIR}/${name}"
 done
 
 # 生成 SBOM (如果 syft 可用)

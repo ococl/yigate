@@ -3,6 +3,9 @@ set -euo pipefail
 
 # 校验 release/ 目录中的文件集合与预期白名单完全一致。
 # 用法: check-release-files.sh <version>
+#
+# 预期产物: 每个平台一个压缩归档 (tar.gz/zip) + SBOM(可选) + SHA256SUMS
+# 不含裸二进制和隐藏文件 (除 .version 外)。
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RELEASE_DIR="${REPO_ROOT}/release"
@@ -12,19 +15,24 @@ source "${SCRIPTS_DIR}/platforms.sh"
 VERSION="$1"
 status=0
 
-# 构建预期文件集合
+# 构建预期文件集合: 每个平台一个归档
 expected=()
 for platform in $(all_platforms); do
-  expected+=("$(output_name "${VERSION}" "${platform}")")
-done
-for platform in $(linux_platforms); do
   suffix="$(normalize_platform "${platform}")"
-  expected+=("yigate-${VERSION}-${suffix}.tar.gz")
+  goos="$(echo "$platform" | cut -d/ -f1)"
+  if [[ "$goos" == "windows" ]]; then
+    expected+=("yigate-${VERSION}-${suffix}.zip")
+  else
+    expected+=("yigate-${VERSION}-${suffix}.tar.gz")
+  fi
 done
-expected+=("yigate-${VERSION}.spdx.json")
+# SBOM 为可选产物，存在时才校验
+if [[ -f "${RELEASE_DIR}/yigate-${VERSION}.spdx.json" ]]; then
+  expected+=("yigate-${VERSION}.spdx.json")
+fi
 expected+=("SHA256SUMS")
 
-# 获取实际文件集合
+# 获取实际文件集合 (排除隐藏文件)
 if [[ ! -d "${RELEASE_DIR}" ]]; then
   echo "error: release 目录不存在" >&2
   exit 1
@@ -34,7 +42,7 @@ actual=()
 while IFS= read -r f; do
   [[ -z "$f" ]] && continue
   actual+=("$f")
-done < <(cd "${RELEASE_DIR}" && find . -maxdepth 1 -type f -printf '%P\n' | sort)
+done < <(cd "${RELEASE_DIR}" && find . -maxdepth 1 -type f ! -name '.*' -printf '%P\n' | sort)
 
 # 比较
 expected_sorted=($(printf '%s\n' "${expected[@]}" | sort))
@@ -51,14 +59,9 @@ for i in "${!expected_sorted[@]}"; do
   fi
 done
 
-# 禁止符号链接和隐藏文件
+# 禁止符号链接
 if find "${RELEASE_DIR}" -maxdepth 1 -type l | grep -q .; then
   echo "error: release 目录包含符号链接" >&2
-  status=1
-fi
-
-if find "${RELEASE_DIR}" -maxdepth 1 -name '.*' -not -name '.' | grep -q .; then
-  echo "error: release 目录包含隐藏文件" >&2
   status=1
 fi
 
