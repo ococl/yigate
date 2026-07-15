@@ -3,37 +3,47 @@
 
 # 平台清单：每行 "GOOS/GOARCH[/GOARM]"
 YIGATE_PLATFORMS=(
+  # Linux — 主力平台
   linux/amd64
   linux/arm64
   linux/386
   linux/arm/v7
+  linux/arm/v6
   linux/riscv64
   linux/ppc64le
   linux/s390x
   linux/mips64
   linux/mips64le
+  linux/mips
+  linux/mipsle
+  linux/loong64
+  # macOS
   darwin/amd64
   darwin/arm64
+  # Windows
   windows/amd64
   windows/386
   windows/arm64
+  # BSD
   freebsd/amd64
   freebsd/386
   freebsd/arm64
+  freebsd/arm/v7
   openbsd/amd64
   openbsd/arm64
   netbsd/amd64
+  netbsd/arm64
 )
 
 # 将平台标识规范化为不含斜杠的文件名后缀。
-# 例: linux/amd64 -> linux-amd64, linux/arm/v7 -> linux-armv7
+# 例: linux/amd64 -> linux-amd64, linux/arm/v7 -> linux-armv7, linux/arm/v6 -> linux-armv6
 normalize_platform() {
   local platform="$1"
   local goos goarch goarm
   IFS='/' read -r goos goarch goarm <<< "$platform"
   local suffix="${goos}-${goarch}"
-  if [[ "$goarch" == "arm" && "$goarm" == "v7" ]]; then
-    suffix="${goos}-armv7"
+  if [[ "$goarch" == "arm" && -n "$goarm" ]]; then
+    suffix="${goos}-arm${goarm}"
   fi
   echo "$suffix"
 }
