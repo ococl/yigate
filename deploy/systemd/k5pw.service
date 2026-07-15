@@ -8,7 +8,6 @@ ExecStart=/usr/local/bin/k5pw -config /var/lib/k5pw/config/config.yml
 Restart=always
 RestartSec=10
 StartLimitBurst=64
-SuccessExitStatus=1 2 8 SIGKILL
 User=k5pw
 Group=k5pw
 NoNewPrivileges=true

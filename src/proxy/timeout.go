@@ -118,10 +118,17 @@ func (r *deadlineReader) Read(p []byte) (int, error) {
 		MetricInc("k5pw_tunnel_packets_total", "direction="+r.metricDirection)
 	}
 	if n > 0 && r.accounter != nil {
+		var recordErr error
 		if r.auditDirection == "in" {
-			_ = r.accounter.Record(r.trafficKey, int64(n), 0)
+			recordErr = r.accounter.Record(r.trafficKey, int64(n), 0)
 		} else {
-			_ = r.accounter.Record(r.trafficKey, 0, int64(n))
+			recordErr = r.accounter.Record(r.trafficKey, 0, int64(n))
+		}
+		if recordErr != nil {
+			Logger().Warnw("traffic quota exceeded, terminating tunnel",
+				"user", r.trafficKey.User, "upstream", r.trafficKey.Upstream,
+				"target", r.trafficKey.Target, "direction", r.auditDirection, "error", recordErr)
+			return n, recordErr
 		}
 	}
 	return n, err

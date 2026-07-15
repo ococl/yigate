@@ -245,3 +245,56 @@ func TestSameDay(t *testing.T) {
 		t.Fatal("expected different day")
 	}
 }
+
+func TestDailyRotateWriterFallbackToStderr(t *testing.T) {
+	// 使用一个无法创建的路径（父目录不存在且无权限）
+	// 在 /dev/null 下创建文件路径会失败
+	badPath := "/dev/null/cannot-create/test.log"
+	w := newDailyRotateWriter(badPath, false, 1)
+	defer w.Close()
+
+	// file 应为 nil（打开失败）
+	w.mu.Lock()
+	fileNil := w.file == nil
+	w.mu.Unlock()
+	if !fileNil {
+		t.Skip("file was unexpectedly opened, skipping stderr fallback test")
+	}
+
+	// Write 应回退到 stderr 而非返回错误
+	n, err := w.Write([]byte("fallback test\n"))
+	if err != nil {
+		t.Fatalf("expected stderr fallback to succeed, got error: %v", err)
+	}
+	if n <= 0 {
+		t.Fatal("expected non-zero bytes written to stderr")
+	}
+}
+
+func TestDailyRotateWriterReopenFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reopen.log")
+	w := newDailyRotateWriter(path, false, 1)
+	defer w.Close()
+
+	// 正常写入
+	if _, err := w.Write([]byte("normal\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟文件丢失：关闭并删除文件，然后触发 reopen
+	w.mu.Lock()
+	if w.file != nil {
+		w.file.Close()
+		w.file = nil
+	}
+	w.mu.Unlock()
+
+	// 写入应在 file=nil 时回退到 stderr
+	n, err := w.Write([]byte("after-close\n"))
+	if err != nil {
+		t.Fatalf("expected stderr fallback, got: %v", err)
+	}
+	if n <= 0 {
+		t.Fatal("expected bytes written via stderr fallback")
+	}
+}

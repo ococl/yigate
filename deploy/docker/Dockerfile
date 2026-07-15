@@ -29,7 +29,7 @@ LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/yi-team/k5pw" \
       org.opencontainers.image.created="${BUILD_TIME}"
 
-RUN apk add --no-cache ca-certificates wget && \
+RUN apk add --no-cache ca-certificates && \
     adduser -D -u 1000 k5pw
 WORKDIR /k5
 COPY --from=builder /build/k5pw /usr/local/bin/k5pw

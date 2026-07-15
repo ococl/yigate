@@ -12,10 +12,10 @@ import (
 
 // TrafficAuditConfig 定义流量审计与配额配置。
 type TrafficAuditConfig struct {
-	Enabled          bool `yaml:"enabled"`
-	PerUserQuota     int64 `yaml:"per_user_quota"`      // 每用户流量配额（字节），0 表示不限制
-	PerUpstreamQuota int64 `yaml:"per_upstream_quota"`  // 每上游流量配额（字节），0 表示不限制
-	QuotaWindow      Duration `yaml:"quota_window"`      // 配额统计窗口，默认 1 小时
+	Enabled          bool     `yaml:"enabled"`
+	PerUserQuota     int64    `yaml:"per_user_quota"`     // 每用户流量配额（字节），0 表示不限制
+	PerUpstreamQuota int64    `yaml:"per_upstream_quota"` // 每上游流量配额（字节），0 表示不限制
+	QuotaWindow      Duration `yaml:"quota_window"`       // 配额统计窗口，默认 1 小时
 }
 
 // TrafficKey 标识一条流量统计维度。
@@ -27,8 +27,8 @@ type TrafficKey struct {
 
 // trafficEntry 记录单个维度的流量统计。
 type trafficEntry struct {
-	bytesIn   atomic.Int64 // client -> target
-	bytesOut  atomic.Int64 // target -> client
+	bytesIn     atomic.Int64 // client -> target
+	bytesOut    atomic.Int64 // target -> client
 	windowStart time.Time
 }
 
@@ -189,9 +189,10 @@ func (a *TrafficAccounter) Record(k TrafficKey, bytesIn, bytesOut int64) error {
 		}
 	}
 
-	// 更新 Prometheus 指标
-	MetricAdd("k5pw_traffic_bytes_total", float64(bytesIn), "direction=client_to_target", "user="+k.User, "upstream="+k.Upstream, "target="+k.Target)
-	MetricAdd("k5pw_traffic_bytes_total", float64(bytesOut), "direction=target_to_client", "user="+k.User, "upstream="+k.Upstream, "target="+k.Target)
+	// 更新 Prometheus 指标（target 标签做归一化以限制基数）
+	normalizedTarget := normalizeTargetLabel(k.Target)
+	MetricAdd("k5pw_traffic_bytes_total", float64(bytesIn), "direction=client_to_target", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
+	MetricAdd("k5pw_traffic_bytes_total", float64(bytesOut), "direction=target_to_client", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
 
 	return nil
 }
@@ -284,4 +285,29 @@ func targetHostFromAddr(addr string) string {
 		return addr
 	}
 	return host
+}
+
+// normalizeTargetLabel 归一化目标域名用于 Prometheus 标签，防止高基数。
+// 截断超长域名，IP 地址保持原样。
+const maxTargetLabelLen = 63
+
+func normalizeTargetLabel(target string) string {
+	if target == "" {
+		return ""
+	}
+	// IP 地址直接返回（基数可控）
+	if net.ParseIP(target) != nil {
+		return target
+	}
+	if len(target) <= maxTargetLabelLen {
+		return target
+	}
+	// 保留域名后缀（TLD 部分），截断中间
+	dotIdx := strings.LastIndex(target, ".")
+	if dotIdx > 0 && len(target)-dotIdx <= maxTargetLabelLen/2 {
+		suffix := target[dotIdx:]
+		prefix := target[:maxTargetLabelLen-len(suffix)-3]
+		return prefix + "..." + suffix
+	}
+	return target[:maxTargetLabelLen-3] + "..."
 }

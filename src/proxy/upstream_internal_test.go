@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/url"
 	"testing"
 )
@@ -252,4 +253,110 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 		t.Fatalf("parse %q: %v", raw, err)
 	}
 	return u
+}
+
+func TestPickConsistentHashDeterministic(t *testing.T) {
+	us := []*Upstream{
+		{Name: "up1", URL: mustParseURL(t, "http://h1:8080"), Weight: 1},
+		{Name: "up2", URL: mustParseURL(t, "http://h2:8080"), Weight: 1},
+		{Name: "up3", URL: mustParseURL(t, "http://h3:8080"), Weight: 1},
+	}
+	// 同一 key 应始终映射到同一上游
+	first := pickConsistentHash(us, "example.com")
+	for i := 0; i < 10; i++ {
+		got := pickConsistentHash(us, "example.com")
+		if got != first {
+			t.Fatalf("consistent hash not deterministic: first=%s got=%s", first.Name, got.Name)
+		}
+	}
+}
+
+func TestPickConsistentHashDistribution(t *testing.T) {
+	us := []*Upstream{
+		{Name: "up1", URL: mustParseURL(t, "http://h1:8080"), Weight: 1},
+		{Name: "up2", URL: mustParseURL(t, "http://h2:8080"), Weight: 1},
+		{Name: "up3", URL: mustParseURL(t, "http://h3:8080"), Weight: 1},
+	}
+	counts := make(map[string]int)
+	total := 3000
+	for i := 0; i < total; i++ {
+		key := fmt.Sprintf("target-%d.example.com", i)
+		picked := pickConsistentHash(us, key)
+		counts[picked.Name]++
+	}
+	// 每个上游应分到大约 1/3 的流量，允许 ±20% 偏差
+	expected := total / len(us)
+	tolerance := expected / 5
+	for _, name := range []string{"up1", "up2", "up3"} {
+		c := counts[name]
+		if c < expected-tolerance || c > expected+tolerance {
+			t.Errorf("upstream %s got %d, expected ~%d (±%d)", name, c, expected, tolerance)
+		}
+	}
+}
+
+func TestPickConsistentHashStability(t *testing.T) {
+	// 一致性哈希的核心特性：移除一个上游时，只有映射到该上游的 key 需要迁移
+	us3 := []*Upstream{
+		{Name: "up1", URL: mustParseURL(t, "http://h1:8080"), Weight: 1},
+		{Name: "up2", URL: mustParseURL(t, "http://h2:8080"), Weight: 1},
+		{Name: "up3", URL: mustParseURL(t, "http://h3:8080"), Weight: 1},
+	}
+	us2 := []*Upstream{
+		{Name: "up1", URL: mustParseURL(t, "http://h1:8080"), Weight: 1},
+		{Name: "up2", URL: mustParseURL(t, "http://h2:8080"), Weight: 1},
+	}
+
+	total := 1000
+	migrated := 0
+	stayed := 0
+	for i := 0; i < total; i++ {
+		key := fmt.Sprintf("target-%d.example.com", i)
+		before := pickConsistentHash(us3, key)
+		after := pickConsistentHash(us2, key)
+		if before.Name == "up3" {
+			// 映射到被移除上游的 key 必须迁移
+			migrated++
+		} else {
+			// 映射到保留上游的 key 应保持不变
+			if before.Name == after.Name {
+				stayed++
+			} else {
+				t.Errorf("key %q was on %s, moved to %s after removing up3 (should have stayed)",
+					key, before.Name, after.Name)
+			}
+		}
+	}
+	if migrated == 0 {
+		t.Error("expected some keys to migrate from removed upstream")
+	}
+	if stayed == 0 {
+		t.Error("expected some keys to stay on remaining upstreams")
+	}
+	// 大部分 key 应保持不变
+	if stayed < total/2 {
+		t.Errorf("expected at least half keys to stay, got %d/%d", stayed, total)
+	}
+}
+
+func TestPickConsistentHashEmptyKey(t *testing.T) {
+	us := []*Upstream{
+		{Name: "up1", URL: mustParseURL(t, "http://h1:8080"), Weight: 1},
+		{Name: "up2", URL: mustParseURL(t, "http://h2:8080"), Weight: 1},
+	}
+	// 空 key 应回退到加权轮询
+	got := pickConsistentHash(us, "")
+	if got == nil {
+		t.Fatal("expected non-nil upstream for empty key")
+	}
+}
+
+func TestPickConsistentHashSingleUpstream(t *testing.T) {
+	us := []*Upstream{
+		{Name: "only", URL: mustParseURL(t, "http://h1:8080"), Weight: 1},
+	}
+	got := pickConsistentHash(us, "any-key")
+	if got == nil || got.Name != "only" {
+		t.Fatalf("expected only, got %v", got)
+	}
 }

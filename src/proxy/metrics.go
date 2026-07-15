@@ -24,6 +24,10 @@ type MetricDesc struct {
 	Labels []string
 }
 
+// metricsMaxEntries 是指标注册表中允许的最大条目数。
+// 超过此上限后，新的标签组合不再创建条目，防止高基数标签导致内存无限增长。
+const metricsMaxEntries = 10000
+
 // Metrics 是一个轻量级的 Prometheus 格式指标注册表。
 // 所有指标线程安全，通过 key（name + 标签）存储为 float64。
 type Metrics struct {
@@ -130,6 +134,12 @@ func (m *Metrics) metricAdd(name string, value float64, labels ...string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := metricKey(name, labels)
+	if _, exists := m.values[key]; !exists {
+		if len(m.values) >= metricsMaxEntries {
+			// 超过上限，仅更新已有条目，不创建新条目
+			return
+		}
+	}
 	m.values[key] += value
 }
 

@@ -140,6 +140,7 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 	}
 	wg.Wait()
 }
+
 // StopHealthCheck 停止健康检查
 func (m *UpstreamManager) StopHealthCheck() {
 	m.mu.Lock()
@@ -169,21 +170,21 @@ func (m *UpstreamManager) checkAll() {
 				u.dead = false
 				u.consecutiveDead = 0
 				u.nextProbeAt = time.Time{}
-		} else if !u.dead {
-			// alive 上游重置失败计数
-			if alive {
-				u.failures = 0
-			} else {
-				u.failures++
-				if u.failures >= u.HealthCheckFailureThreshold() {
-					u.dead = true
-					u.deadSince = time.Now()
-					u.consecutiveDead = 1
-					u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
-					Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
+			} else if !u.dead {
+				// alive 上游重置失败计数
+				if alive {
+					u.failures = 0
+				} else {
+					u.failures++
+					if u.failures >= u.HealthCheckFailureThreshold() {
+						u.dead = true
+						u.deadSince = time.Now()
+						u.consecutiveDead = 1
+						u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
+						Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
+					}
 				}
 			}
-		}
 
 			status := 0.0
 			if alive || !u.dead {
@@ -191,7 +192,6 @@ func (m *UpstreamManager) checkAll() {
 			}
 			MetricSet("k5pw_upstream_health_status", status, "upstream="+u.Name)
 			m.mu.Unlock()
-
 		}(u)
 	}
 	wg.Wait()

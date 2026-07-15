@@ -48,7 +48,24 @@ type ManagementServer struct {
 	ln                net.Listener
 	srv               *http.Server
 	pprofHandlers     map[string]http.Handler
+
+	// authFailures 跟踪每 IP 的认证失败次数，用于暴力破解防护。
+	authFailures   map[string]*authFailState
+	authFailuresMu sync.Mutex
 }
+
+// authFailState 记录单个 IP 的认证失败状态。
+type authFailState struct {
+	count        int
+	blockedUntil time.Time
+}
+
+const (
+	// authMaxFailures 是单 IP 连续认证失败的最大次数，超过后临时封禁。
+	authMaxFailures = 10
+	// authBlockDuration 是认证失败封禁持续时间。
+	authBlockDuration = 5 * time.Minute
+)
 
 // NewManagementServer 创建管理服务器，getStatus 提供当前健康状态。
 // enablePprof 为 true 时注册 /debug/pprof 路由，用于线上问题排查。
@@ -59,9 +76,10 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 		token = strings.TrimSpace(authToken[0])
 	}
 	m := &ManagementServer{
-		getStatus:   getStatus,
-		enablePprof: enablePprof,
-		authToken:   token,
+		getStatus:    getStatus,
+		enablePprof:  enablePprof,
+		authToken:    token,
+		authFailures: make(map[string]*authFailState),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", m.handleHealth)
@@ -110,16 +128,74 @@ func (m *ManagementServer) checkAuth(r *http.Request) bool {
 	if token == "" {
 		return true
 	}
+
+	// 暴力破解防护：检查 IP 是否被封禁
+	clientIP := clientIPFromRequest(r)
+	if clientIP != "" {
+		m.authFailuresMu.Lock()
+		state, ok := m.authFailures[clientIP]
+		if ok && time.Now().Before(state.blockedUntil) {
+			m.authFailuresMu.Unlock()
+			return false
+		}
+		m.authFailuresMu.Unlock()
+	}
+
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")
 	if !strings.HasPrefix(header, prefix) {
+		m.recordAuthFailure(clientIP)
 		return false
 	}
 	provided := strings.TrimSpace(strings.TrimPrefix(header, prefix))
 	if provided == "" || len(provided) != len(token) {
+		m.recordAuthFailure(clientIP)
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+	ok := subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+	if !ok {
+		m.recordAuthFailure(clientIP)
+	} else {
+		m.clearAuthFailures(clientIP)
+	}
+	return ok
+}
+
+// recordAuthFailure 记录一次认证失败，超过阈值后临时封禁该 IP。
+func (m *ManagementServer) recordAuthFailure(ip string) {
+	if ip == "" {
+		return
+	}
+	m.authFailuresMu.Lock()
+	defer m.authFailuresMu.Unlock()
+	state, ok := m.authFailures[ip]
+	if !ok {
+		state = &authFailState{}
+		m.authFailures[ip] = state
+	}
+	state.count++
+	if state.count >= authMaxFailures {
+		state.blockedUntil = time.Now().Add(authBlockDuration)
+	}
+}
+
+// clearAuthFailures 清除指定 IP 的认证失败记录。
+func (m *ManagementServer) clearAuthFailures(ip string) {
+	if ip == "" {
+		return
+	}
+	m.authFailuresMu.Lock()
+	delete(m.authFailures, ip)
+	m.authFailuresMu.Unlock()
+}
+
+// clientIPFromRequest 从请求中提取客户端 IP 地址。
+func clientIPFromRequest(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (m *ManagementServer) requireAuth(w http.ResponseWriter, r *http.Request) bool {

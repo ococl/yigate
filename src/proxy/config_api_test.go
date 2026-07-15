@@ -15,8 +15,8 @@ import (
 type mockConfigEditor struct {
 	upstreams []UpstreamConfig
 	rules     []RouteRule
-	users    map[string]string
-	applyErr error
+	users     map[string]string
+	applyErr  error
 }
 
 func newMockConfigEditor() *mockConfigEditor {
@@ -641,5 +641,22 @@ func TestConfigAPIRedactURL(t *testing.T) {
 	resp.Body.Close()
 	if strings.Contains(string(body), "supersecret") {
 		t.Fatalf("password should be redacted in response, got %s", body)
+	}
+}
+
+func TestConfigAPIBodySizeLimit(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	// 构造一个超过 1 MiB 的请求体
+	largeName := strings.Repeat("a", 2*1024*1024)
+	resp := doRequest(t, "POST", addr, "/api/v1/config/upstreams", addUpstreamRequest{
+		Name: largeName,
+		URL:  "socks5://host:1080",
+	}, "")
+	defer resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("status = %d, want 400 for oversized body", resp.StatusCode)
 	}
 }

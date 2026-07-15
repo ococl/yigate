@@ -586,14 +586,58 @@ func pickLeastConnections(us []*Upstream) *Upstream {
 	return best
 }
 
+// consistentHashRingSize 是每个上游在哈希环上的虚拟节点数。
+const consistentHashRingSize = 150
+
+// pickConsistentHash 使用哈希环（虚拟节点）实现一致性哈希。
+// 添加或移除上游时，只有部分 key 会重新映射，保证会话保持的稳定性。
 func pickConsistentHash(us []*Upstream, key string) *Upstream {
 	if key == "" {
 		return pickWeighted(us)
 	}
+	if len(us) == 1 {
+		return us[0]
+	}
+
+	// 构建哈希环：对每个上游创建多个虚拟节点
+	type ringEntry struct {
+		hash uint32
+		idx  int
+	}
+	ring := make([]ringEntry, 0, len(us)*consistentHashRingSize)
+	for i, u := range us {
+		for j := 0; j < consistentHashRingSize; j++ {
+			h := fnv.New32a()
+			h.Write([]byte(u.Name))
+			h.Write([]byte{byte(j >> 24), byte(j >> 16), byte(j >> 8), byte(j)})
+			ring = append(ring, ringEntry{hash: h.Sum32(), idx: i})
+		}
+	}
+
+	// 排序哈希环
+	sort.Slice(ring, func(i, j int) bool {
+		return ring[i].hash < ring[j].hash
+	})
+
+	// 计算key的哈希，在环上顺时针查找最近的虚拟节点
 	h := fnv.New32a()
 	h.Write([]byte(key))
-	idx := h.Sum32() % uint32(len(us))
-	return us[idx]
+	keyHash := h.Sum32()
+
+	// 二分查找第一个 >= keyHash 的节点
+	lo, hi := 0, len(ring)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if ring[mid].hash < keyHash {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo >= len(ring) {
+		lo = 0 // 环绕到环的起点
+	}
+	return us[ring[lo].idx]
 }
 
 // pickWeighted 平滑加权轮询

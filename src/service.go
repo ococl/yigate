@@ -96,9 +96,8 @@ func platformServiceOptions() map[string]interface{} {
 		}
 	default:
 		return map[string]interface{}{
-			"Restart":              "always",
-			"SuccessExitStatus":    "1 2 8 SIGKILL",
-			"SystemdScript":        systemdUnitTemplate,
+			"Restart":       "always",
+			"SystemdScript": systemdUnitTemplate,
 		}
 	}
 }

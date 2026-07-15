@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 )
@@ -399,21 +399,15 @@ func writeJSONError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"status": "error", "error": msg})
 }
 
-// decodeJSON 解码 JSON 请求体。
+// maxManagementBodySize 限制管理 API 请求体大小（1 MiB）。
+const maxManagementBodySize = 1 << 20
+
+// decodeJSON 解码 JSON 请求体，限制最大大小以防止 DoS。
 func decodeJSON(r *http.Request, v any) error {
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxManagementBodySize))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 	return nil
-}
-
-// redactUpstreamURL 脱敏上游 URL 中的凭证信息。
-func redactUpstreamURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "<invalid>"
-	}
-	return u.Redacted()
 }

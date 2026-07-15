@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,31 @@ func TestMatchingKeys(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("matching keys = %#v", keys)
+	}
+}
+
+func TestMetricsMaxEntries(t *testing.T) {
+	// 使用独立的 Metrics 实例避免污染全局 registry
+	m := &Metrics{values: make(map[string]float64)}
+
+	// 填满到上限
+	for i := 0; i < metricsMaxEntries; i++ {
+		m.metricAdd("test_metric", 1, "idx="+strconv.Itoa(i))
+	}
+	if len(m.values) != metricsMaxEntries {
+		t.Fatalf("expected %d entries, got %d", metricsMaxEntries, len(m.values))
+	}
+
+	// 新的标签组合不应创建新条目
+	m.metricAdd("test_metric", 1, "idx=new")
+	if len(m.values) != metricsMaxEntries {
+		t.Fatalf("expected entries to stay at %d, got %d", metricsMaxEntries, len(m.values))
+	}
+
+	// 已有条目仍可更新
+	m.metricAdd("test_metric", 5, "idx=0")
+	if got := m.values["test_metric{idx=0}"]; got != 6 {
+		t.Fatalf("expected existing entry updated to 6, got %v", got)
 	}
 }
 

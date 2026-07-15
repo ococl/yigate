@@ -53,8 +53,9 @@ func TestPlatformServiceOptions(t *testing.T) {
 		if opts["Restart"] != "always" {
 			t.Errorf("linux/default Restart = %v, want always", opts["Restart"])
 		}
-		if opts["SuccessExitStatus"] != "1 2 8 SIGKILL" {
-			t.Errorf("linux/default SuccessExitStatus = %v, want '1 2 8 SIGKILL'", opts["SuccessExitStatus"])
+		// SuccessExitStatus 已移除：退出码 1/2 和 SIGKILL 不应被视为成功退出
+		if _, ok := opts["SuccessExitStatus"]; ok {
+			t.Error("linux/default should not set SuccessExitStatus")
 		}
 		// RestartSec / StartLimitBurst 在自定义 systemd 模板中写死，
 		// 需校验模板字符串而非 Option 键。
@@ -76,9 +77,9 @@ func TestPlatformServiceOptions(t *testing.T) {
 
 func TestServiceStatusString(t *testing.T) {
 	cases := map[service.Status]string{
-		service.StatusRunning:               "k5pw service: running",
-		service.StatusStopped:               "k5pw service: stopped",
-		service.StatusUnknown:               "k5pw service: unknown (not installed or status unavailable)",
+		service.StatusRunning: "k5pw service: running",
+		service.StatusStopped: "k5pw service: stopped",
+		service.StatusUnknown: "k5pw service: unknown (not installed or status unavailable)",
 	}
 	for st, want := range cases {
 		if got := serviceStatusString(st); got != want {

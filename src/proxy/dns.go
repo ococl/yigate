@@ -39,9 +39,10 @@ const (
 // type 为 doh 时通过 DNS-over-HTTPS 解析；
 // type 为 dot 时通过 DNS-over-TLS 解析。
 // ip_precedence 控制 DNS 解析后 IPv4/IPv6 的优先级：
-//   "ipv4_first"（默认）：IPv4 优先，IPv6 兜底
-//   "ipv6_first"：IPv6 优先，IPv4 兜底
-//   "system"：保持 DNS 返回顺序
+//
+//	"ipv4_first"（默认）：IPv4 优先，IPv6 兜底
+//	"ipv6_first"：IPv6 优先，IPv4 兜底
+//	"system"：保持 DNS 返回顺序
 type DNSConfig struct {
 	Type         string   `yaml:"type"`
 	DoHURL       string   `yaml:"doh_url"`
@@ -57,6 +58,12 @@ type dnsCacheEntry struct {
 	expiresAt time.Time
 }
 
+// dnsCacheMaxEntries 是 DNS 缓存的最大条目数。
+const dnsCacheMaxEntries = 10000
+
+// dnsCacheCleanupInterval 是后台清理过期条目的间隔。
+const dnsCacheCleanupInterval = 5 * time.Minute
+
 // DNSResolver 根据配置使用系统 DNS、DoH 或 DoT 解析域名。
 type DNSResolver struct {
 	typ      string
@@ -68,8 +75,10 @@ type DNSResolver struct {
 	httpClient *http.Client
 	tlsConfig  *tls.Config
 
-	cache   map[string]*dnsCacheEntry
-	cacheMu sync.RWMutex
+	cache    map[string]*dnsCacheEntry
+	cacheMu  sync.RWMutex
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // defaultDNSTimeout 是 DNS 查询的默认超时时间。
@@ -93,6 +102,7 @@ func NewDNSResolver(cfg DNSConfig) *DNSResolver {
 		fallback: cfg.Fallback,
 		timeout:  timeout,
 		cache:    make(map[string]*dnsCacheEntry),
+		stopCh:   make(chan struct{}),
 	}
 
 	if typ == dnsTypeDoH || cfg.Fallback {
@@ -112,7 +122,53 @@ func NewDNSResolver(cfg DNSConfig) *DNSResolver {
 		}
 	}
 
+	if typ != dnsTypeSystem {
+		r.startCacheCleanup()
+	}
+
 	return r
+}
+
+// startCacheCleanup 启动后台 goroutine 定期清理过期 DNS 缓存条目。
+func (r *DNSResolver) startCacheCleanup() {
+	r.stopOnce.Do(func() {
+		go r.cacheCleanupLoop()
+	})
+}
+
+// Stop 停止 DNS 解析器的后台清理 goroutine。
+func (r *DNSResolver) Stop() {
+	if r == nil {
+		return
+	}
+	r.stopOnce.Do(func() {
+		close(r.stopCh)
+	})
+}
+
+func (r *DNSResolver) cacheCleanupLoop() {
+	ticker := time.NewTicker(dnsCacheCleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			r.evictExpired()
+		case <-r.stopCh:
+			return
+		}
+	}
+}
+
+// evictExpired 删除所有过期的缓存条目。
+func (r *DNSResolver) evictExpired() {
+	now := time.Now()
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+	for host, entry := range r.cache {
+		if now.After(entry.expiresAt) {
+			delete(r.cache, host)
+		}
+	}
 }
 
 // LookupIPAddr 解析域名返回 IP 地址列表。
@@ -336,10 +392,23 @@ func (r *DNSResolver) cacheGet(host string) ([]net.IPAddr, bool) {
 	return entry.addrs, true
 }
 
-// cacheSet 将 DNS 结果存入缓存。
+// cacheSet 将 DNS 结果存入缓存。当缓存超过上限时淘汰过期条目。
 func (r *DNSResolver) cacheSet(host string, addrs []net.IPAddr) {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
+	if len(r.cache) >= dnsCacheMaxEntries {
+		// 淘汰过期条目
+		now := time.Now()
+		for h, entry := range r.cache {
+			if now.After(entry.expiresAt) {
+				delete(r.cache, h)
+			}
+		}
+		// 如果仍然超限，不再添加新条目以防止无限增长
+		if len(r.cache) >= dnsCacheMaxEntries {
+			return
+		}
+	}
 	r.cache[host] = &dnsCacheEntry{
 		addrs:     addrs,
 		expiresAt: time.Now().Add(dnsCacheTTL),
@@ -352,12 +421,12 @@ func buildDNSQuery(domain string, qtype uint16) []byte {
 
 	// Header (12 bytes)
 	id := uint16(time.Now().UnixNano() & 0xFFFF)
-	binary.Write(&buf, binary.BigEndian, id)       // ID
+	binary.Write(&buf, binary.BigEndian, id)             // ID
 	binary.Write(&buf, binary.BigEndian, uint16(0x0100)) // Flags: RD=1
-	binary.Write(&buf, binary.BigEndian, uint16(1))     // QDCOUNT
-	binary.Write(&buf, binary.BigEndian, uint16(0))     // ANCOUNT
-	binary.Write(&buf, binary.BigEndian, uint16(0))     // NSCOUNT
-	binary.Write(&buf, binary.BigEndian, uint16(0))     // ARCOUNT
+	binary.Write(&buf, binary.BigEndian, uint16(1))      // QDCOUNT
+	binary.Write(&buf, binary.BigEndian, uint16(0))      // ANCOUNT
+	binary.Write(&buf, binary.BigEndian, uint16(0))      // NSCOUNT
+	binary.Write(&buf, binary.BigEndian, uint16(0))      // ARCOUNT
 
 	// Question: QNAME
 	domain = strings.TrimSuffix(domain, ".")

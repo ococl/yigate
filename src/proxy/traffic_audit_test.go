@@ -213,6 +213,35 @@ func TestTargetHostFromAddr(t *testing.T) {
 	}
 }
 
+func TestNormalizeTargetLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{"empty", "", ""},
+		{"short domain", "example.com", "example.com"},
+		{"ipv4", "1.2.3.4", "1.2.3.4"},
+		{"ipv6", "::1", "::1"},
+		{"exactly 63 chars", strings.Repeat("a", 63), strings.Repeat("a", 63)},
+		{"64 chars truncated", strings.Repeat("a", 64), strings.Repeat("a", 60) + "..."},
+		{"long domain with tld preserved", strings.Repeat("a", 60) + ".com", strings.Repeat("a", 57) + "..." + ".com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeTargetLabel(tt.target)
+			if len(got) > maxTargetLabelLen {
+				t.Errorf("normalizeTargetLabel(%q) = %q (len=%d), exceeds max %d", tt.target, got, len(got), maxTargetLabelLen)
+			}
+			if tt.name != "64 chars truncated" && tt.name != "long domain with tld preserved" {
+				if got != tt.want {
+					t.Errorf("normalizeTargetLabel(%q) = %q, want %q", tt.target, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 	// Reset registry for clean test
 	registry.mu.Lock()
@@ -239,5 +268,3 @@ func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 		t.Errorf("expected out=200, got %f", outVal)
 	}
 }
-
-

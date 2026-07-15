@@ -15,9 +15,9 @@ import (
 // configEditor 实现 proxy.ConfigEditor 接口。
 // 它通过原子性地修改配置文件并触发热加载来工作。
 type configEditor struct {
-	cfgPath  string
-	apply    func() error
-	applyMu  sync.Mutex
+	cfgPath string
+	apply   func() error
+	applyMu sync.Mutex
 }
 
 // errNotFound 表示资源不存在，用于区分 404 和 400 响应。
@@ -237,9 +237,22 @@ func (e *configEditor) ListUsers() []string {
 	if err != nil {
 		return nil
 	}
+	seen := make(map[string]struct{})
 	result := make([]string, 0, len(cfg.Users))
 	for name := range cfg.Users {
-		result = append(result, name)
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			result = append(result, name)
+		}
+	}
+	// 多 listener 模式下聚合各 listener 的用户
+	for i := range cfg.Listeners {
+		for name := range cfg.Listeners[i].Users {
+			if _, ok := seen[name]; !ok {
+				seen[name] = struct{}{}
+				result = append(result, name)
+			}
+		}
 	}
 	return result
 }
@@ -263,6 +276,13 @@ func (e *configEditor) AddUser(username, password string) error {
 		return fmt.Errorf("user %q already exists", username)
 	}
 	cfg.Users[username] = password
+	// 多 listener 模式下同步添加到所有 listener
+	for i := range cfg.Listeners {
+		if cfg.Listeners[i].Users == nil {
+			cfg.Listeners[i].Users = make(map[string]string)
+		}
+		cfg.Listeners[i].Users[username] = password
+	}
 	return e.saveAndApply(cfg)
 }
 
@@ -275,9 +295,23 @@ func (e *configEditor) RemoveUser(username string) error {
 	if cfg.Users == nil {
 		cfg.Users = make(map[string]string)
 	}
-	if _, exists := cfg.Users[username]; !exists {
+	found := false
+	if _, exists := cfg.Users[username]; exists {
+		delete(cfg.Users, username)
+		found = true
+	}
+	// 多 listener 模式下同步从所有 listener 删除
+	for i := range cfg.Listeners {
+		if cfg.Listeners[i].Users == nil {
+			continue
+		}
+		if _, exists := cfg.Listeners[i].Users[username]; exists {
+			delete(cfg.Listeners[i].Users, username)
+			found = true
+		}
+	}
+	if !found {
 		return fmt.Errorf("%w: user %q not found", errNotFound, username)
 	}
-	delete(cfg.Users, username)
 	return e.saveAndApply(cfg)
 }

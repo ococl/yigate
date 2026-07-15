@@ -247,6 +247,74 @@ func TestDNSResolverCacheExpiry(t *testing.T) {
 	}
 }
 
+func TestDNSResolverCacheMaxEntries(t *testing.T) {
+	r := NewDNSResolver(DNSConfig{Type: "system"})
+	// 填满缓存到上限
+	for i := 0; i < dnsCacheMaxEntries; i++ {
+		host := fmt.Sprintf("host%d.example.com", i)
+		r.cacheSet(host, []net.IPAddr{{IP: net.IPv4(1, 2, 3, byte(i%256))}})
+	}
+	if len(r.cache) != dnsCacheMaxEntries {
+		t.Fatalf("expected %d entries, got %d", dnsCacheMaxEntries, len(r.cache))
+	}
+
+	// 再添加一个新条目，由于所有条目都未过期，应被拒绝
+	r.cacheSet("overflow.example.com", []net.IPAddr{{IP: net.IPv4(9, 9, 9, 9)}})
+	if len(r.cache) > dnsCacheMaxEntries {
+		t.Fatalf("cache should not exceed max entries, got %d", len(r.cache))
+	}
+	if _, ok := r.cacheGet("overflow.example.com"); ok {
+		t.Fatal("overflow entry should not have been added")
+	}
+}
+
+func TestDNSResolverCacheEvictExpired(t *testing.T) {
+	r := NewDNSResolver(DNSConfig{Type: "system"})
+	// 添加一些过期和未过期的条目
+	r.cacheSet("expired1.example.com", []net.IPAddr{{IP: net.IPv4(1, 1, 1, 1)}})
+	r.cacheSet("expired2.example.com", []net.IPAddr{{IP: net.IPv4(2, 2, 2, 2)}})
+	r.cacheSet("alive.example.com", []net.IPAddr{{IP: net.IPv4(3, 3, 3, 3)}})
+
+	// 手动使前两个过期
+	r.cacheMu.Lock()
+	r.cache["expired1.example.com"].expiresAt = time.Now().Add(-time.Second)
+	r.cache["expired2.example.com"].expiresAt = time.Now().Add(-time.Second)
+	r.cacheMu.Unlock()
+
+	// evictExpired 应删除过期条目
+	r.evictExpired()
+
+	r.cacheMu.RLock()
+	count := len(r.cache)
+	_, hasAlive := r.cache["alive.example.com"]
+	r.cacheMu.RUnlock()
+
+	if count != 1 {
+		t.Fatalf("expected 1 entry after eviction, got %d", count)
+	}
+	if !hasAlive {
+		t.Fatal("alive entry should still exist")
+	}
+}
+
+func TestDNSResolverStop(t *testing.T) {
+	r := NewDNSResolver(DNSConfig{
+		Type:    "doh",
+		DoHURL:  "https://dns.google/dns-query",
+		Timeout: Duration(5 * time.Second),
+	})
+	// Stop should not panic and should be idempotent
+	r.Stop()
+	r.Stop() // idempotent
+}
+
+func TestDNSResolverSystemTypeNoCleanup(t *testing.T) {
+	// System type should not start cache cleanup goroutine
+	r := NewDNSResolver(DNSConfig{Type: "system"})
+	// stopCh should still be created (for safe Stop call)
+	r.Stop()
+}
+
 func TestValidateDNSConfig(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -396,12 +464,12 @@ func buildDNSResponseMulti(query []byte, rtype uint16, ips []net.IP) []byte {
 	var buf []byte
 	// Header: copy ID from query, set QR=1, RD=1, RA=1, RCODE=0
 	header := make([]byte, 12)
-	copy(header[:2], query[:2]) // ID
-	binary.BigEndian.PutUint16(header[2:4], 0x8180) // Flags: QR=1, RD=1, RA=1, RCODE=0
-	binary.BigEndian.PutUint16(header[4:6], 1)      // QDCOUNT
-	binary.BigEndian.Uint16(header[6:8])           // ANCOUNT (set below)
-	binary.BigEndian.PutUint16(header[8:10], 0)    // NSCOUNT
-	binary.BigEndian.PutUint16(header[10:12], 0)   // ARCOUNT
+	copy(header[:2], query[:2])                               // ID
+	binary.BigEndian.PutUint16(header[2:4], 0x8180)           // Flags: QR=1, RD=1, RA=1, RCODE=0
+	binary.BigEndian.PutUint16(header[4:6], 1)                // QDCOUNT
+	binary.BigEndian.Uint16(header[6:8])                      // ANCOUNT (set below)
+	binary.BigEndian.PutUint16(header[8:10], 0)               // NSCOUNT
+	binary.BigEndian.PutUint16(header[10:12], 0)              // ARCOUNT
 	binary.BigEndian.PutUint16(header[6:8], uint16(len(ips))) // ANCOUNT
 	buf = append(buf, header...)
 

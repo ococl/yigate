@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k5pw/proxy"
@@ -360,6 +361,120 @@ routing:
 	users := editor.ListUsers()
 	if len(users) != 2 {
 		t.Fatalf("expected 2 users, got %d", len(users))
+	}
+}
+
+func TestConfigEditorMultiListenerListUsers(t *testing.T) {
+	editor, _ := newTestConfigEditor(t, `listeners:
+  - listen: "127.0.0.1:1080"
+    users:
+      alice: "pass1"
+      carol: "pass3"
+  - listen: "127.0.0.1:1081"
+    users:
+      bob: "pass2"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+routing:
+  final: auto
+`)
+
+	users := editor.ListUsers()
+	if len(users) != 3 {
+		t.Fatalf("expected 3 users (alice, carol, bob), got %d: %v", len(users), users)
+	}
+	seen := make(map[string]bool)
+	for _, u := range users {
+		seen[u] = true
+	}
+	for _, name := range []string{"alice", "bob", "carol"} {
+		if !seen[name] {
+			t.Errorf("expected user %s in list", name)
+		}
+	}
+}
+
+func TestConfigEditorMultiListenerAddUser(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listeners:
+  - listen: "127.0.0.1:1080"
+    users:
+      alice: "pass1"
+  - listen: "127.0.0.1:1081"
+    users:
+      bob: "pass2"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+routing:
+  final: auto
+`)
+
+	err := editor.AddUser("charlie", "pass3")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	content := string(data)
+	if !contains(content, "charlie") {
+		t.Fatalf("expected charlie in config, got:\n%s", content)
+	}
+	// charlie 应出现在全局 users 和两个 listener 中
+	// 至少出现 3 次（全局 + 2 个 listener）
+	charlieCount := strings.Count(content, "charlie")
+	if charlieCount < 2 {
+		t.Fatalf("expected charlie in at least 2 places (global + listeners), got %d occurrences", charlieCount)
+	}
+}
+
+func TestConfigEditorMultiListenerRemoveUser(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listeners:
+  - listen: "127.0.0.1:1080"
+    users:
+      alice: "pass1"
+      bob: "pass2"
+  - listen: "127.0.0.1:1081"
+    users:
+      alice: "pass1"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+routing:
+  final: auto
+`)
+
+	err := editor.RemoveUser("alice")
+	if err != nil {
+		t.Fatalf("RemoveUser: %v", err)
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	content := string(data)
+	if contains(content, "alice") {
+		t.Fatalf("expected alice to be removed from all listeners, got:\n%s", content)
+	}
+	// bob 应保留
+	if !contains(content, "bob") {
+		t.Fatalf("expected bob to remain, got:\n%s", content)
+	}
+}
+
+func TestConfigEditorMultiListenerRemoveUserNotFound(t *testing.T) {
+	editor, _ := newTestConfigEditor(t, `listeners:
+  - listen: "127.0.0.1:1080"
+    users:
+      alice: "pass1"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+routing:
+  final: auto
+`)
+
+	err := editor.RemoveUser("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent user in multi-listener config")
 	}
 }
 

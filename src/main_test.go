@@ -74,7 +74,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/k5pw -config /var/lib/k5pw/config/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "SuccessExitStatus=1 2 8 SIGKILL", "User=k5pw", "Group=k5pw", "WantedBy=multi-user.target"} {
+	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/k5pw -config /var/lib/k5pw/config/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "User=k5pw", "Group=k5pw", "WantedBy=multi-user.target"} {
 		if !bytes.Contains(serviceUnit, []byte(want)) {
 			t.Fatalf("k5pw.service missing %q", want)
 		}
