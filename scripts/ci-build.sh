@@ -74,7 +74,7 @@ fi
 echo "--- Generating checksums ---"
 (
     cd "${RELEASE_DIR}"
-    find . -maxdepth 1 -type f ! -name '.version' -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS
+    find . -maxdepth 1 -type f ! -name '.version' ! -name 'SHA256SUMS' -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS
     sha256sum -c SHA256SUMS
 )
 
