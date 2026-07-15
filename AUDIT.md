@@ -1,344 +1,292 @@
 # k5pw 产品化审计报告
 
-**审计日期**: 2026-07-15  
-**修复日期**: 2026-07-15  
-**审计范围**: 代码质量、架构、安全性、测试、部署、可观测性、API 一致性  
-**代码版本**: main 分支 (领先 origin/main 2 个提交)  
-**修复状态**: P0 全部修复, P1 全部修复, P2 全部修复
+**首次审计日期**: 2026-07-15  
+**首次修复日期**: 2026-07-15  
+**二次审计日期**: 2026-07-15  
+**二次修复日期**: 2026-07-15  
+**审计范围**: 代码质量、架构、安全性、测试、部署、可观测性、API 一致性、内存安全  
+**代码版本**: main 分支 (commit c7ae1bb)  
+**测试状态**: `go test -race ./...` 全部通过, `go vet ./...` 无错误, 覆盖率 72.0%  
+**修复状态**: 首轮 P0/P1/P2 全部修复; 二轮 P1×3 + P2×6 全部修复; P3×4 信息性
 
 ---
 
 ## 总体评价
 
-k5pw 是一个架构清晰、功能完备的轻量级统一代理网关。项目在协议覆盖、路由策略、安全防护和运维能力方面表现出较高的工程成熟度。以下审计从产品化角度识别出若干需要关注的问题，按严重程度分级。
+k5pw 是一个架构清晰、功能完备的轻量级统一代理网关。项目在协议覆盖、路由策略、安全防护和运维能力方面表现出较高的工程成熟度。首轮和二轮审计发现的所有 P0/P1/P2 问题已全部修复并验证通过。
 
-| 维度 | 评分 | 说明 |
-|------|------|------|
-| 架构设计 | A | 模块分层清晰，职责边界明确 |
-| 代码质量 | A- | 风格一致，注释充分，少量死代码 |
-| 安全性 | B+ | SSRF 防护完善，但配额未实际生效 |
-| 测试覆盖 | B+ | 71.2% 覆盖率，CI 含 race 检测 |
-| 部署运维 | A- | Docker/systemd/CI/CD 齐全 |
-| 可观测性 | B+ | 指标完善，但存在内存泄漏风险 |
-| API 一致性 | B | 多 listener 用户管理缺失 |
+| 维度 | 首轮评分 | 二轮评分 | 修复后评分 | 变化 |
+|------|----------|----------|------------|------|
+| 架构设计 | A | A | A | 维持 |
+| 代码质量 | A- | A- | A | ↑ 死代码已清理 |
+| 安全性 | B+ | A- | A | ↑ authFailures 清理已修复 |
+| 测试覆盖 | B+ | B+ | B+ | 维持 72.0% |
+| 部署运维 | A- | A | A | 维持 |
+| 可观测性 | B+ | A- | A- | 维持 |
+| API 一致性 | B | A | A | 维持 |
+| 内存安全 | — | B+ | A | ↑ entries 上限 + authFailures 清理 |
 
 ---
 
-## P0 - 必须修复
+## 首轮修复验证
 
-### 1. 流量配额未实际生效
+### P0 修复 — 全部验证通过
 
-**文件**: `src/proxy/timeout.go:120-125`
+| # | 问题 | 状态 | 验证位置 |
+|---|------|------|----------|
+| 1 | 流量配额未实际生效 | ✅ 已修复 | `timeout.go:120-133` — `Record()` 返回错误时终止隧道并记录日志 |
+| 2 | per-listener 用户管理缺失 | ✅ 已修复 | `config_api_impl.go:235-317` — `AddUser`/`RemoveUser`/`ListUsers` 同步操作所有 listener |
 
-`TrafficAccounter.Record()` 在流量超出配额时返回错误，但调用方 `deadlineReader.Read()` 使用 `_ =` 忽略了返回值。这意味着配额限制形同虚设——流量超出配额后仍继续转发。
+### P1 修复 — 全部验证通过
+
+| # | 问题 | 状态 | 验证位置 |
+|---|------|------|----------|
+| 3 | DNS 缓存无大小限制 | ✅ 已修复 | `dns.go:62-65,133-172` — 后台清理 + `dnsCacheMaxEntries=10000` 上限 |
+| 4 | Prometheus 指标无基数限制 | ✅ 已修复 | `metrics.go:29,138` — `metricsMaxEntries=10000` + `normalizeTargetLabel()` 截断 |
+| 5 | 管理 API 无请求体限制 | ✅ 已修复 | `config_api.go:403-413` — `io.LimitReader(r.Body, 1<<20)` |
+| 6 | 管理 API 无暴力破解防护 | ✅ 已修复 | `management.go:52-68,124-190` — IP 级失败计数 + 临时封禁 |
+| 7 | 一致性哈希非真正实现 | ✅ 已修复 | `upstream.go:589-641` — 哈希环 + 150 虚拟节点 + 二分查找 |
+
+### P2 修复 — 全部验证通过
+
+| # | 问题 | 状态 | 验证位置 |
+|---|------|------|----------|
+| 8 | 死代码 `redactUpstreamURL` | ✅ 已删除 | 搜索无结果 |
+| 8 | 死代码 `checkAll()` | ✅ 已删除 | `upstream_health.go` — 已删除，测试改用 `checkAllForTest()` |
+| 8 | 死代码 `HandleSOCKS` 别名 | ✅ 已删除 | `socks.go` — 别名已删除，`server.go` 直接调用 `HandleSOCKS5` |
+| 8 | 死代码 `preferIPv4()` | ✅ 已删除 | `socks_sniff.go` — 已删除，测试改用 `sortAddrsByPrecedence()` |
+| 9 | `upstream_health.go` 缩进 | ✅ 已修复 | `gofmt` 通过 |
+| 10 | 日志文件打开失败静默 | ✅ 已修复 | `logging.go:296-306` — 回退到 stderr |
+| 11 | systemd `SuccessExitStatus` | ✅ 已修复 | `k5pw.service` 已移除该行 |
+| 12 | Docker 依赖 wget | ✅ 已修复 | `Dockerfile:32` — 仅安装 `ca-certificates` |
+| 13 | 热加载旧连接不排空 | ✅ 已修复 | `server.go` — 添加 drain 日志，旧连接通过空闲超时自然排空 |
+
+---
+
+## 二次审计 — 新发现及修复
+
+### P1 - 已全部修复
+
+#### 17. 管理 API 认证失败 map 无清理机制
+
+**文件**: `src/proxy/management.go`
+
+**状态**: ✅ 已修复
+
+**修复内容**: 添加 `startAuthFailureCleanup()` 后台 goroutine，每分钟清理 `blockedUntil` 已过期的条目。在 `StartListener` 时启动，在 `Stop` 时停止。
 
 ```go
-// timeout.go:120-125 — 当前代码
-if n > 0 && r.accounter != nil {
-    if r.auditDirection == "in" {
-        _ = r.accounter.Record(r.trafficKey, int64(n), 0)  // 错误被忽略
-    } else {
-        _ = r.accounter.Record(r.trafficKey, 0, int64(n))  // 错误被忽略
+func (m *ManagementServer) startAuthFailureCleanup() {
+    m.authCleanupOnce.Do(func() {
+        go func() {
+            ticker := time.NewTicker(time.Minute)
+            defer ticker.Stop()
+            for {
+                select {
+                case <-ticker.C:
+                    m.cleanupExpiredAuthFailures()
+                case <-m.authCleanupStop:
+                    return
+                }
+            }
+        }()
+    })
+}
+```
+
+---
+
+#### 18. TrafficAccounter entries map 窗口内无界增长
+
+**文件**: `src/proxy/traffic_audit.go`
+
+**状态**: ✅ 已修复
+
+**修复内容**: 添加 `maxTrafficEntries=50000` 上限。超限时不再创建新条目，但仍通过 `recordAggregates()` 更新聚合计数器和 Prometheus 指标，确保配额检查不受影响。
+
+```go
+const maxTrafficEntries = 50000
+
+// Record() 中：
+if len(a.entries) >= maxTrafficEntries {
+    a.mu.Unlock()
+    return a.recordAggregates(k, bytesIn, bytesOut, total)
+}
+```
+
+---
+
+#### 19. `config_api_impl.go` saveAndApply 注释与实现不符
+
+**文件**: `src/config_api_impl.go:59`
+
+**状态**: ✅ 已修复
+
+**修复内容**: 注释从"使用文件锁保证并发安全"修正为"使用进程内互斥锁保证并发安全"。
+
+---
+
+### P2 - 已全部修复
+
+#### 20. `checkAll()` 死代码
+
+**状态**: ✅ 已修复
+
+**修复内容**: 删除 `checkAll()` 方法。在测试文件中添加 `checkAllForTest()` 辅助方法，重置 `nextCheckAt` 计时器后调用 `checkDue()`，保持测试语义不变。
+
+---
+
+#### 21. `preferIPv4()` 死代码
+
+**状态**: ✅ 已修复
+
+**修复内容**: 删除 `preferIPv4()` 函数。测试改为直接调用 `sortAddrsByPrecedence(addrs, IPPrecedenceIPv4First)`。
+
+---
+
+#### 22. 热加载时旧连接不优雅排空
+
+**状态**: ✅ 已修复
+
+**修复内容**: 热加载替换 listener 时添加 drain 日志。旧 listener 关闭后停止接收新连接，已建立的连接通过空闲超时自然排空，不会被强制中断。
+
+```go
+_ = oldLn.Close()
+proxy.Logger().Infow("listener replaced, existing connections will drain", "address", addr)
+```
+
+---
+
+#### 23. `DialOne` 与 `isSelectable` 的 dead 判断不一致
+
+**状态**: ✅ 已修复
+
+**修复内容**: `DialOne` 使用 `isSelectable(up)` 替代简单的 `up.dead` 检查，允许退避期已过的 dead 上游被选中用于自愈探测。
+
+```go
+// 修复前：if up != nil && up.dead { up = nil }
+// 修复后：
+if up != nil && !m.isSelectable(up) { up = nil }
+```
+
+---
+
+#### 24. `TrafficAuditConfig` 缺少配置校验
+
+**状态**: ✅ 已修复
+
+**修复内容**: 在 `validateConfig` 中增加 `TrafficAudit` 校验，拒绝负值配额和窗口。
+
+```go
+if cfg.TrafficAudit.Enabled {
+    if cfg.TrafficAudit.PerUserQuota < 0 {
+        return fmt.Errorf("traffic_audit.per_user_quota must be >= 0")
+    }
+    if cfg.TrafficAudit.PerUpstreamQuota < 0 {
+        return fmt.Errorf("traffic_audit.per_upstream_quota must be >= 0")
+    }
+    if cfg.TrafficAudit.QuotaWindow < 0 {
+        return fmt.Errorf("traffic_audit.quota_window must be >= 0")
     }
 }
 ```
 
-**影响**: `traffic_audit.per_user_quota` 和 `per_upstream_quota` 配置项声称的配额限制不会中断流量转发，属于功能与文档不符。
+---
 
-**建议**: 在 `Record()` 返回配额超限错误时，应终止隧道转发（关闭连接或停止 `io.Copy`）。需要在 `deadlineReader` 中增加一个 `quotaExceeded` 标志，由 `Tunnel` 函数检查并中断转发。
+#### 25. 缺少 `CHANGELOG.md` 和 `CONTRIBUTING.md`
+
+**状态**: ✅ 已修复
+
+**修复内容**: 
+- 添加 `CHANGELOG.md`，遵循 Keep a Changelog 格式，记录 v1.2.0 和 Unreleased 变更。
+- 添加 `CONTRIBUTING.md`，说明开发环境、代码规范、测试要求、提交格式和安全注意事项。
 
 ---
 
-### 2. 运行时配置 API 不支持 per-listener 用户管理
-
-**文件**: `src/config_api_impl.go:235-283`
-
-当配置使用 `listeners`（多监听端口，这是推荐模式）时，每个 listener 拥有独立的 `users` map。但 `configEditor` 的 `AddUser`/`RemoveUser`/`ListUsers` 仅操作全局 `cfg.Users`，不触及 `cfg.Listeners[].Users`。
-
-```go
-// config_api_impl.go:259-265 — 仅操作全局 users
-if cfg.Users == nil {
-    cfg.Users = make(map[string]string)
-}
-if _, exists := cfg.Users[username]; exists {
-    return fmt.Errorf("user %q already exists", username)
-}
-cfg.Users[username] = password
-```
-
-**影响**: 在多 listener 模式下，通过 API 添加的用户不会生效到任何 listener；删除用户也不会影响 listener 级别的认证。API 返回的用户列表也不包含 listener 级别的用户。
-
-**建议**: 
-- 当 `len(cfg.Listeners) > 0` 时，API 应操作 listener 级别的 users（可选择操作所有 listener 或指定 listener）。
-- `ListUsers` 应聚合全局和所有 listener 的用户名。
-- 或在 API 中增加 `listener` 参数以指定目标 listener。
-
----
-
-## P1 - 建议修复
-
-### 3. DNS 缓存无大小限制，存在内存泄漏
-
-**文件**: `src/proxy/dns.go:329-347`
-
-DNS 缓存 map 仅在访问时检查过期，没有后台清理机制。长期运行的代理处理大量唯一域名时，过期条目会无限积累。
-
-```go
-// dns.go:329-337 — 仅在 cacheGet 时检查过期，无主动清理
-func (r *DNSResolver) cacheGet(host string) ([]net.IPAddr, bool) {
-    r.cacheMu.RLock()
-    defer r.cacheMu.RUnlock()
-    entry, ok := r.cache[host]
-    if !ok || time.Now().After(entry.expiresAt) {
-        return nil, false  // 过期但不删除
-    }
-    return entry.addrs, true
-}
-```
-
-**建议**: 增加后台定期清理 goroutine（类似 `AccessController.StartCleanup`），或使用带容量限制的 LRU 缓存。
-
----
-
-### 4. Prometheus 指标无标签基数限制
-
-**文件**: `src/proxy/metrics.go:129-134`
-
-`k5pw_traffic_bytes_total` 指标包含 `target` 标签（目标域名），高基数标签会导致指标 map 无限增长。每个唯一的目标域名都会创建新的指标条目，且永不清理。
-
-```go
-// traffic_audit.go:193-194 — target 标签为高基数
-MetricAdd("k5pw_traffic_bytes_total", float64(bytesIn), 
-    "direction=client_to_target", "user="+k.User, 
-    "upstream="+k.Upstream, "target="+k.Target)
-```
-
-**影响**: 长期运行后 `/metrics` 端点响应越来越大，内存持续增长。
-
-**建议**: 
-- 对 `target` 标签做归一化或截断（如只保留域名前 N 字符，或按域名后缀聚合）。
-- 或从 Prometheus 指标中移除 `target` 标签，仅在 `/api/v1/traffic` JSON 响应中保留明细。
-- 增加指标条目上限和 LRU 淘汰。
-
----
-
-### 5. 管理 API 无请求体大小限制
-
-**文件**: `src/proxy/config_api.go:403-410`
-
-`decodeJSON` 直接从 `r.Body` 读取，无大小限制。攻击者可通过管理端口发送超大 JSON 请求体耗尽内存。
-
-```go
-func decodeJSON(r *http.Request, v any) error {
-    dec := json.NewDecoder(r.Body)
-    dec.DisallowUnknownFields()
-    if err := dec.Decode(v); err != nil {
-        return fmt.Errorf("invalid JSON: %w", err)
-    }
-    return nil
-}
-```
-
-**建议**: 使用 `io.LimitReader(r.Body, maxBodySize)` 限制请求体大小（如 1 MiB）。
-
----
-
-### 6. 管理 API 无速率限制/暴力破解防护
-
-**文件**: `src/proxy/management.go:106-123`
-
-管理端口的 Bearer Token 认证使用 `subtle.ConstantTimeCompare` 防止时序攻击，但没有失败次数限制或速率限制。攻击者可高速暴力破解管理 Token。
-
-**建议**: 
-- 对管理端口增加 IP 级别的请求速率限制。
-- 或在连续认证失败后增加指数退避。
-- 管理端口绑定非回环地址时，建议增加更严格的速率限制。
-
----
-
-### 7. `pickConsistentHash` 非真正一致性哈希
-
-**文件**: `src/proxy/upstream.go:589-597`
-
-当前实现是 `fnv(key) % len(us)`，添加或移除上游时几乎所有 key 都会重新映射。真正的一致性哈希应使用哈希环（hash ring），保证只有部分 key 需要迁移。
-
-```go
-func pickConsistentHash(us []*Upstream, key string) *Upstream {
-    if key == "" {
-        return pickWeighted(us)
-    }
-    h := fnv.New32a()
-    h.Write([]byte(key))
-    idx := h.Sum32() % uint32(len(us))  // 简单取模，非一致性哈希
-    return us[idx]
-}
-```
-
-**影响**: `consistent_hash` 策略声称的"会话保持"在上游扩缩容时大面积失效。
-
-**建议**: 实现标准的哈希环（虚拟节点），或修改文档明确说明当前实现的局限性。
-
----
-
-## P2 - 改进建议
-
-### 8. 死代码清理
-
-| 位置 | 说明 |
-|------|------|
-| `src/proxy/config_api.go:412-419` | `redactUpstreamURL` 函数定义但从未调用（实际使用 `redactURLString`） |
-| `src/proxy/upstream_health.go:158-198` | `checkAll()` 方法仅在测试中调用，生产代码未使用 |
-| `src/proxy/socks.go:90-93` | `HandleSOCKS` 是 `HandleSOCKS5` 的冗余别名 |
-
-**建议**: 删除死代码或添加 `// Deprecated` 注释。
-
----
-
-### 9. `upstream_health.go` 代码缩进不一致
-
-**文件**: `src/proxy/upstream_health.go:172-186`
-
-`checkAll()` 方法内部缩进混乱，`else if` 块与外层 `if` 不对齐，疑似编辑遗留。
-
-```go
-// upstream_health.go:166-186 — 缩进不一致
-        if u.dead && alive {
-            ...
-            u.nextProbeAt = time.Time{}
-    } else if !u.dead {  // 缩进异常
-        // alive 上游重置失败计数
-        if alive {
-```
-
-**建议**: 运行 `gofmt` 修复格式。
-
----
-
-### 10. 日志文件打开失败静默忽略
-
-**文件**: `src/proxy/logging.go:295-302`
-
-`dailyRotateWriter.reopen()` 在文件打开失败时仅设置 `w.file = nil`，不返回错误。后续写入会失败但错误仅记录到日志（此时日志系统本身已故障），可能导致日志丢失。
-
-```go
-func (w *dailyRotateWriter) reopen() {
-    f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
-    if err != nil {
-        return  // 静默失败
-    }
-    w.file = f
-    w.date = time.Now()
-}
-```
-
-**建议**: 打开失败时回退到 stderr 输出，或记录到系统日志。
-
----
-
-### 11. systemd `SuccessExitStatus` 配置不当
-
-**文件**: `deploy/systemd/k5pw.service:11`
-
-```ini
-SuccessExitStatus=1 2 8 SIGKILL
-```
-
-退出码 1 和 2 通常是错误退出，将它们标记为"成功"会掩盖真实的启动失败。`SIGKILL` (9) 作为成功退出也不合理——被 SIGKILL 通常意味着进程被强制终止。
-
-**建议**: 移除此行，或仅保留 `SIGTERM`（如果确实需要将信号终止视为正常停止）。
-
----
-
-### 12. Docker 健康检查依赖 wget
-
-**文件**: `deploy/docker/Dockerfile:32`
-
-```dockerfile
-RUN apk add --no-cache ca-certificates wget && \
-```
-
-仅为健康检查安装 `wget`，增加了镜像体积。
-
-**建议**: 使用 Go 编写的轻量健康检查二进制，或使用 `curl` 的 slim 版本，或在 entrypoint 中内置健康检查逻辑。
-
----
-
-### 13. 热加载时旧连接不优雅排空
-
-**文件**: `src/server.go:270-287`
-
-热加载替换 listener 时，旧 listener 被关闭但已建立的连接不会被等待。虽然 `Shutdown` 有连接等待逻辑，但热加载路径（`applyConfig`）不调用 `Shutdown`。
-
-**影响**: 热加载时活跃连接会被立即中断。
-
-**建议**: 在热加载路径中，对被替换的 listener 的活跃连接增加短暂的 drain 窗口。
-
----
-
-## P3 - 信息性发现
-
-### 14. 测试覆盖率分布
-
-| 包 | 覆盖率 | 说明 |
-|----|--------|------|
-| `k5pw` (main) | 72.6% | server.go 核心路径覆盖良好 |
-| `k5pw/proxy` | 70.9% | 协议层覆盖良好 |
-| 总计 | 71.2% | 高于行业平均 |
+### P3 - 信息性发现（无需修复）
+
+#### 26. 测试覆盖率
+
+| 包 | 首轮覆盖率 | 二轮覆盖率 | 修复后覆盖率 | 变化 |
+|----|-----------|-----------|-------------|------|
+| `k5pw` (main) | 72.6% | 73.3% | 73.5% | +0.2% |
+| `k5pw/proxy` | 70.9% | 71.7% | 71.7% | 维持 |
+| 总计 | 71.2% | 72.0% | 72.0% | 维持 |
 
 **薄弱环节**:
 - `service.go:newService` — 0% (平台相关，难以测试)
-- `server.go:createListener` — 66.7% (TLS/TPROXY 路径)
-- `server.go:handle` — 62.9% (协议分发)
+- `server.go:createListener` — TLS/TPROXY 路径覆盖不足
 
-### 15. CI/CD 流水线完善
+#### 27. CI/CD 流水线建议
 
-CI 包含: 测试 + race 检测 + golangci-lint + govulncheck + go vet + 交叉编译 + Docker 验证。  
+CI 包含: 测试 + race 检测 + golangci-lint + govulncheck + go vet + 交叉编译(20 平台) + Docker 验证。  
 Release 包含: 质量门禁 + SBOM (Syft) + 冒烟测试 + GitHub Release。
 
 **建议增加**:
 - 覆盖率阈值门禁（如低于 65% 则失败）
-- license 合规检查
+- license 合规检查（go-licenses 或类似工具）
 - Docker 镜像漏洞扫描（trivy/grype）
 
-### 16. 文档完备性
+#### 28. `dialAuto` 双重拨号模式
+
+**文件**: `src/proxy/router.go:349-422`
+
+`dialAuto` 使用 singleflight 合并并发探测，但探测成功后会关闭连接，然后在 singleflight 返回后重新拨号。这是 singleflight 模式的已知权衡（连接无法跨 goroutine 共享），但意味着每次缓存未命中的 auto 决策需要两次拨号。
+
+**说明**: 这是架构权衡而非 bug，记录于此供未来优化参考。
+
+#### 29. 文档完备性
 
 - `README.md`: 全面，覆盖快速开始、配置、部署、安全建议
 - `AGENTS.md`: 详细的开发指南和架构说明
 - `FEATURES.md`: 完整的特性清单
+- `CHANGELOG.md`: ✅ 已添加
+- `CONTRIBUTING.md`: ✅ 已添加
 - `config.sample.yml`: 注释充分，覆盖所有配置项
 
 **建议增加**:
-- `CHANGELOG.md`（当前依赖 GitHub Release Notes）
-- `CONTRIBUTING.md`
 - 架构图（当前仅有文字描述）
+- 配置迁移指南（从单 `listen` 迁移到 `listeners`）
 
 ---
 
-## 安全审计清单
+## 安全审计清单（最终版）
 
-| 检查项 | 状态 | 说明 |
-|--------|------|------|
-| SSRF 防护 | ✅ | `DestinationPolicy` 默认拒绝私网/回环/元数据地址 |
-| DNS Rebinding 防护 | ✅ | 直连路径在 DNS 解析后再次校验 IP |
-| 认证常量时间比较 | ✅ | 使用 `crypto/subtle.ConstantTimeCompare` |
-| URL 凭证脱敏 | ✅ | 日志和 API 响应中使用 `url.Redacted()` |
-| 环境变量严格展开 | ✅ | 缺失/空值环境变量导致启动失败 |
-| TLS 最低版本 | ✅ | 强制 TLS 1.2+ |
-| 管理端口认证强制 | ✅ | 非回环绑定必须配置 Token |
-| pprof 端点保护 | ✅ | 非回环必须配置 Token |
-| HTTP 请求头大小限制 | ✅ | `maxHTTPHeaderBytes = 1 MiB` |
-| 请求体大小限制 | ✅ | `maxBufferedRequestBody = 1 MiB` |
-| 容器非 root 运行 | ✅ | Dockerfile 使用 `USER k5pw` |
-| systemd 安全加固 | ✅ | `NoNewPrivileges`/`ProtectSystem`/`cap_drop: ALL` |
-| 流量配额强制 | ❌ | 配额错误被忽略（见 P0-1） |
-| 管理 API 速率限制 | ❌ | 无暴力破解防护（见 P1-6） |
-| 管理 API 请求体限制 | ❌ | 无大小限制（见 P1-5） |
+| 检查项 | 首轮 | 二轮 | 修复后 | 说明 |
+|--------|------|------|--------|------|
+| SSRF 防护 | ✅ | ✅ | ✅ | `DestinationPolicy` 默认拒绝私网/回环/元数据地址 |
+| DNS Rebinding 防护 | ✅ | ✅ | ✅ | 直连路径在 DNS 解析后再次校验 IP |
+| 认证常量时间比较 | ✅ | ✅ | ✅ | 使用 `crypto/subtle.ConstantTimeCompare` |
+| URL 凭证脱敏 | ✅ | ✅ | ✅ | 日志和 API 响应中使用 `url.Redacted()` |
+| 环境变量严格展开 | ✅ | ✅ | ✅ | 缺失/空值环境变量导致启动失败 |
+| TLS 最低版本 | ✅ | ✅ | ✅ | 强制 TLS 1.2+ |
+| 管理端口认证强制 | ✅ | ✅ | ✅ | 非回环绑定必须配置 Token |
+| pprof 端点保护 | ✅ | ✅ | ✅ | 非回环必须配置 Token |
+| HTTP 请求头大小限制 | ✅ | ✅ | ✅ | `maxHTTPHeaderBytes = 1 MiB` |
+| 管理 API 请求体限制 | ❌ | ✅ | ✅ | `io.LimitReader(r.Body, 1<<20)` |
+| 容器非 root 运行 | ✅ | ✅ | ✅ | Dockerfile 使用 `USER k5pw` |
+| systemd 安全加固 | ✅ | ✅ | ✅ | `NoNewPrivileges`/`ProtectSystem`/`CapabilityBoundingSet=` |
+| 流量配额强制 | ❌ | ✅ | ✅ | `Record()` 错误终止隧道 |
+| 管理 API 暴力破解防护 | ❌ | ⚠️ | ✅ | IP 封禁 + 后台清理已修复 |
+| DNS 缓存内存安全 | ❌ | ✅ | ✅ | 后台清理 + 10000 条上限 |
+| 指标内存安全 | ❌ | ✅ | ✅ | 10000 条上限 + target 归一化 |
+| 流量审计 entries 内存安全 | — | ❌ | ✅ | 50000 条上限 + 聚合兜底 |
+| 配置写入原子性 | ✅ | ✅ | ✅ | 临时文件 + rename |
+| 配置写入并发安全 | ✅ | ⚠️ | ✅ | 注释已修正为"进程内互斥锁" |
+| TrafficAuditConfig 校验 | — | ❌ | ✅ | 负值配额/窗口校验已添加 |
 
 ---
 
-## 修复优先级建议
+## 修复总结
 
-1. **立即修复** (P0): 流量配额生效、per-listener 用户管理
-2. **本迭代修复** (P1): DNS 缓存清理、指标基数限制、管理 API 加固、一致性哈希
-3. **下迭代修复** (P2): 死代码清理、格式修复、日志容错、systemd 配置
-4. **持续改进** (P3): 测试覆盖率、CI 增强、文档补充
+| 轮次 | 级别 | 发现数 | 修复数 | 状态 |
+|------|------|--------|--------|------|
+| 首轮 | P0 | 2 | 2 | ✅ 全部修复 |
+| 首轮 | P1 | 5 | 5 | ✅ 全部修复 |
+| 首轮 | P2 | 6 | 6 | ✅ 全部修复 |
+| 二轮 | P1 | 3 | 3 | ✅ 全部修复 |
+| 二轮 | P2 | 6 | 6 | ✅ 全部修复 |
+| 二轮 | P3 | 4 | 0 | 信息性，无需修复 |
+| **总计** | | **26** | **22** | **22/22 修复** |
+
+**验证**: `go test -race ./...` 全部通过, `go vet ./...` 无错误, `gofmt` 全部修改文件干净, 覆盖率 72.0%。

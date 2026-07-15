@@ -86,8 +86,3 @@ func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target str
 	socks5Reply(client, 0x00)
 	Tunnel(client, clientReader, targetConn, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
 }
-
-// HandleSOCKS is retained as a public alias for callers that use the old name.
-func HandleSOCKS(client net.Conn, clientReader *bufio.Reader, users map[string]string, mgr *UpstreamManager, router *Router, access *AccessController, allowBind, allowUDP bool) {
-	HandleSOCKS5(client, clientReader, users, mgr, router, access, allowBind, allowUDP)
-}

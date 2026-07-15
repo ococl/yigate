@@ -165,11 +165,6 @@ func sortAddrsByPrecedence(addrs []net.IPAddr, precedence string) []net.IP {
 	}
 }
 
-// preferIPv4 保留为向后兼容的别名，默认 IPv4 优先。
-func preferIPv4(addrs []net.IPAddr) []net.IP {
-	return sortAddrsByPrecedence(addrs, IPPrecedenceIPv4First)
-}
-
 func shouldSniffSOCKS5Target(target string, mgr *UpstreamManager, router *Router) bool {
 	if mgr == nil || router == nil || !router.socks5h.Enabled {
 		return false

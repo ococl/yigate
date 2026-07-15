@@ -3,6 +3,7 @@ package proxy
 import (
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -43,13 +44,16 @@ type mockConn struct {
 	net.Conn
 	localAddr  net.Addr
 	remoteAddr net.Addr
+	closeMu    sync.Mutex
 	closed     bool
 }
 
 func (m *mockConn) LocalAddr() net.Addr  { return m.localAddr }
 func (m *mockConn) RemoteAddr() net.Addr { return m.remoteAddr }
 func (m *mockConn) Close() error {
+	m.closeMu.Lock()
 	m.closed = true
+	m.closeMu.Unlock()
 	if m.Conn != nil {
 		return m.Conn.Close()
 	}
@@ -76,7 +80,7 @@ type mockAddr struct {
 }
 
 func (m *mockAddr) Network() string { return "tcp" }
-func (m *mockAddr) String() string { return m.addr }
+func (m *mockAddr) String() string  { return m.addr }
 
 func TestGetOriginalDestinationTProxyMode(t *testing.T) {
 	conn := &mockConn{

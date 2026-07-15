@@ -52,8 +52,8 @@ type Config struct {
 	EnablePprof         bool                          `yaml:"enable_pprof"`
 	TLS                 TLSConfig                     `yaml:"tls"`
 	DNS                 proxy.DNSConfig               `yaml:"dns"`
-	TrafficAudit         proxy.TrafficAuditConfig      `yaml:"traffic_audit"`
-	TProxy              proxy.TProxyConfig           `yaml:"tproxy"`
+	TrafficAudit        proxy.TrafficAuditConfig      `yaml:"traffic_audit"`
+	TProxy              proxy.TProxyConfig            `yaml:"tproxy"`
 }
 
 // Socks5Config 控制 SOCKS5 可选命令的可用性，默认均禁用。
@@ -456,6 +456,18 @@ func validateConfig(cfg *Config) error {
 
 	if err := proxy.ValidateDNSConfig(cfg.DNS); err != nil {
 		return fmt.Errorf("dns: %w", err)
+	}
+
+	if cfg.TrafficAudit.Enabled {
+		if cfg.TrafficAudit.PerUserQuota < 0 {
+			return fmt.Errorf("traffic_audit.per_user_quota must be >= 0")
+		}
+		if cfg.TrafficAudit.PerUpstreamQuota < 0 {
+			return fmt.Errorf("traffic_audit.per_upstream_quota must be >= 0")
+		}
+		if cfg.TrafficAudit.QuotaWindow < 0 {
+			return fmt.Errorf("traffic_audit.quota_window must be >= 0")
+		}
 	}
 
 	return nil

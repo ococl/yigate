@@ -17,6 +17,17 @@ import (
 	"time"
 )
 
+// checkAllForTest 重置所有上游的 nextCheckAt 计时器并立即执行 checkDue，
+// 用于测试中强制检查所有上游而无需等待检查间隔。
+func (m *UpstreamManager) checkAllForTest(globalInterval int) {
+	m.mu.Lock()
+	for _, u := range m.upstreams {
+		u.nextCheckAt = time.Time{}
+	}
+	m.mu.Unlock()
+	m.checkDue(globalInterval)
+}
+
 func TestUpstreamHealthCheck(t *testing.T) {
 	proxyAddr := startMockSocks5Proxy(t)
 	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "s5", URL: "socks5://" + proxyAddr, Priority: 1, Weight: 1}})
@@ -46,7 +57,7 @@ func TestUpstreamHealthStatusMetric(t *testing.T) {
 
 	// 连续失败达到阈值才标记 dead。
 	for i := 0; i < deadFailureThreshold; i++ {
-		mgr.checkAll()
+		mgr.checkAllForTest(30)
 	}
 
 	if got := MetricValue("k5pw_upstream_health_status", "upstream=alive"); got != 1 {
@@ -183,11 +194,11 @@ func TestHealthCheckPerUpstreamFailureThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mgr.checkAll()
+	mgr.checkAllForTest(30)
 	if mgr.byName["dead"].dead {
 		t.Fatal("expected dead upstream not marked dead after 1 failure")
 	}
-	mgr.checkAll()
+	mgr.checkAllForTest(30)
 	if !mgr.byName["dead"].dead {
 		t.Fatal("expected dead upstream marked dead after 2 failures")
 	}
@@ -198,12 +209,12 @@ func generateTestCerts(t *testing.T) (certFile, keyFile, caFile string) {
 	dir := t.TempDir()
 
 	ca := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{Organization: []string{"YiGate Test"}},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{Organization: []string{"YiGate Test"}},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)

@@ -32,6 +32,10 @@ type trafficEntry struct {
 	windowStart time.Time
 }
 
+// maxTrafficEntries 限制单个配额窗口内 entries map 的最大条目数，
+// 防止高流量代理在窗口周期内积累过多唯一目标导致内存无限增长。
+const maxTrafficEntries = 50000
+
 // TrafficAccounter 统计按 user/upstream/target 维度的流量，并执行配额检查。
 type TrafficAccounter struct {
 	enabled          bool
@@ -141,6 +145,12 @@ func (a *TrafficAccounter) Record(k TrafficKey, bytesIn, bytesOut int64) error {
 		a.mu.Lock()
 		entry, ok = a.entries[keyStr]
 		if !ok {
+			if len(a.entries) >= maxTrafficEntries {
+				// 超过上限时不再创建新条目，仅更新已有条目，
+				// 防止高流量代理在窗口内 entries 无限增长。
+				a.mu.Unlock()
+				return a.recordAggregates(k, bytesIn, bytesOut, total)
+			}
 			entry = &trafficEntry{windowStart: time.Now()}
 			a.entries[keyStr] = entry
 		}
@@ -149,6 +159,12 @@ func (a *TrafficAccounter) Record(k TrafficKey, bytesIn, bytesOut int64) error {
 	entry.bytesIn.Add(bytesIn)
 	entry.bytesOut.Add(bytesOut)
 
+	return a.recordAggregates(k, bytesIn, bytesOut, total)
+}
+
+// recordAggregates 更新用户和上游聚合计数器以及 Prometheus 指标。
+// 返回配额超限错误（如果有）。
+func (a *TrafficAccounter) recordAggregates(k TrafficKey, bytesIn, bytesOut, total int64) error {
 	// 更新用户聚合
 	if k.User != "" {
 		a.mu.RLock()

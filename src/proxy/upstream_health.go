@@ -156,47 +156,6 @@ func (m *UpstreamManager) StopHealthCheck() {
 	m.wg.Wait()
 }
 
-func (m *UpstreamManager) checkAll() {
-	var wg sync.WaitGroup
-	for _, u := range m.upstreams {
-		wg.Add(1)
-		go func(u *Upstream) {
-			defer wg.Done()
-			alive := m.check(u)
-			m.mu.Lock()
-			if u.dead && alive {
-				Logger().Infow("upstream recovered", "upstream", u.URL.Host, "name", u.Name)
-				u.failures = 0
-				u.dead = false
-				u.consecutiveDead = 0
-				u.nextProbeAt = time.Time{}
-			} else if !u.dead {
-				// alive 上游重置失败计数
-				if alive {
-					u.failures = 0
-				} else {
-					u.failures++
-					if u.failures >= u.HealthCheckFailureThreshold() {
-						u.dead = true
-						u.deadSince = time.Now()
-						u.consecutiveDead = 1
-						u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
-						Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
-					}
-				}
-			}
-
-			status := 0.0
-			if alive || !u.dead {
-				status = 1.0
-			}
-			MetricSet("k5pw_upstream_health_status", status, "upstream="+u.Name)
-			m.mu.Unlock()
-		}(u)
-	}
-	wg.Wait()
-}
-
 // probeDeadUpstreams 检查 nextProbeAt 已到期的 dead 上游，成功则恢复。
 func (m *UpstreamManager) probeDeadUpstreams() {
 	now := time.Now()

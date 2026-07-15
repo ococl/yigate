@@ -23,16 +23,14 @@ func TestRewriteSOCKS5TargetFromTLSSNI(t *testing.T) {
 	}
 }
 
-func TestPreferIPv4(t *testing.T) {
+func TestSortAddrsByPrecedenceIPv4First(t *testing.T) {
 	addrs := []net.IPAddr{
 		{IP: net.ParseIP("::1")},
 		{IP: net.ParseIP("127.0.0.1")},
 	}
-	got := preferIPv4(addrs)
-	if len(got) != 2 || got[0].Equal(net.ParseIP("127.0.0.1")) {
-		// ok
-	} else {
-		t.Fatalf("preferIPv4 = %#v", got)
+	got := sortAddrsByPrecedence(addrs, IPPrecedenceIPv4First)
+	if len(got) != 2 || !got[0].Equal(net.ParseIP("127.0.0.1")) {
+		t.Fatalf("sortAddrsByPrecedence(ipv4_first) = %#v", got)
 	}
 }
 

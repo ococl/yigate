@@ -28,7 +28,6 @@ func (u *Upstream) Dial(target string) (net.Conn, error) {
 	return u.trackConn(conn), nil
 }
 
-
 // Dial 尝试通过上游建立连接，单个上游失败时尝试下一个，全部失败后回退自身直连
 func (m *UpstreamManager) Dial(target string, sourceIP ...string) (net.Conn, error) {
 	sip := ""
@@ -86,7 +85,7 @@ func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names [
 func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, error) {
 	m.mu.Lock()
 	up := m.byName[name]
-	if up != nil && up.dead {
+	if up != nil && !m.isSelectable(up) {
 		up = nil
 	}
 	m.mu.Unlock()
@@ -99,6 +98,8 @@ func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, err
 		m.markDead(up)
 		return nil, nil, err
 	}
+	// 拨号成功即视为上游恢复健康，清除 dead 状态（与 DialProxyWithSourceIP 一致）。
+	m.markAlive(up)
 	return conn, up, nil
 }
 

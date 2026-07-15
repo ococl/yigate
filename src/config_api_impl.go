@@ -56,7 +56,7 @@ func (e *configEditor) loadRawConfig() (*Config, error) {
 }
 
 // saveAndApply 保存配置到磁盘并触发热加载。
-// 使用文件锁保证并发安全，使用临时文件+原子重命名保证写入安全。
+// 使用进程内互斥锁保证并发安全，使用临时文件+原子重命名保证写入安全。
 func (e *configEditor) saveAndApply(cfg *Config) error {
 	e.applyMu.Lock()
 	defer e.applyMu.Unlock()

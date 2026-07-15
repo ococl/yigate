@@ -25,11 +25,11 @@ type listenerRuntime struct {
 }
 
 type runtimeState struct {
-	config         *Config
-	manager        *proxy.UpstreamManager
-	router         *proxy.Router
-	geoUpdate      *proxy.GeoSiteUpdater
-	listeners      map[string]*listenerRuntime
+	config           *Config
+	manager          *proxy.UpstreamManager
+	router           *proxy.Router
+	geoUpdate        *proxy.GeoSiteUpdater
+	listeners        map[string]*listenerRuntime
 	trafficAccounter *proxy.TrafficAccounter
 }
 
@@ -276,7 +276,9 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 			if newLn, ok := newListeners[addr]; ok && newLn == oldLn {
 				continue
 			}
+			// 关闭旧 listener 停止接收新连接，已建立的连接通过空闲超时自然排空。
 			_ = oldLn.Close()
+			proxy.Logger().Infow("listener replaced, existing connections will drain", "address", addr)
 		}
 		for addr, newLn := range newListeners {
 			if oldLn, ok := oldListeners[addr]; ok && oldLn == newLn {
@@ -763,7 +765,7 @@ func (s *Server) handle(conn net.Conn, addr string) {
 	}
 
 	if b[0] == 0x05 {
-		proxy.HandleSOCKS(conn, br, lc.config.Users, mgr, router, lc.access, lc.config.Socks5.AllowBind, lc.config.Socks5.AllowUDPAssociate)
+		proxy.HandleSOCKS5(conn, br, lc.config.Users, mgr, router, lc.access, lc.config.Socks5.AllowBind, lc.config.Socks5.AllowUDPAssociate)
 	} else {
 		proxy.HandleHTTP(conn, br, lc.config.Users, mgr, router, lc.access)
 	}

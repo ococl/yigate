@@ -50,8 +50,10 @@ type ManagementServer struct {
 	pprofHandlers     map[string]http.Handler
 
 	// authFailures 跟踪每 IP 的认证失败次数，用于暴力破解防护。
-	authFailures   map[string]*authFailState
-	authFailuresMu sync.Mutex
+	authFailures    map[string]*authFailState
+	authFailuresMu  sync.Mutex
+	authCleanupStop chan struct{}
+	authCleanupOnce sync.Once
 }
 
 // authFailState 记录单个 IP 的认证失败状态。
@@ -76,10 +78,11 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 		token = strings.TrimSpace(authToken[0])
 	}
 	m := &ManagementServer{
-		getStatus:    getStatus,
-		enablePprof:  enablePprof,
-		authToken:    token,
-		authFailures: make(map[string]*authFailState),
+		getStatus:       getStatus,
+		enablePprof:     enablePprof,
+		authToken:       token,
+		authFailures:    make(map[string]*authFailState),
+		authCleanupStop: make(chan struct{}),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", m.handleHealth)
@@ -189,6 +192,46 @@ func (m *ManagementServer) clearAuthFailures(ip string) {
 	m.authFailuresMu.Unlock()
 }
 
+// startAuthFailureCleanup 启动后台 goroutine 定期清理已过期的 authFailures 条目，
+// 防止公网暴露的管理端口在长期运行后 map 无限增长。
+func (m *ManagementServer) startAuthFailureCleanup() {
+	m.authCleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					m.cleanupExpiredAuthFailures()
+				case <-m.authCleanupStop:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// stopAuthFailureCleanup 停止 authFailures 后台清理 goroutine。
+func (m *ManagementServer) stopAuthFailureCleanup() {
+	select {
+	case <-m.authCleanupStop:
+	default:
+		close(m.authCleanupStop)
+	}
+}
+
+// cleanupExpiredAuthFailures 删除 blockedUntil 已过期的条目。
+func (m *ManagementServer) cleanupExpiredAuthFailures() {
+	now := time.Now()
+	m.authFailuresMu.Lock()
+	for ip, state := range m.authFailures {
+		if now.After(state.blockedUntil) {
+			delete(m.authFailures, ip)
+		}
+	}
+	m.authFailuresMu.Unlock()
+}
+
 // clientIPFromRequest 从请求中提取客户端 IP 地址。
 func clientIPFromRequest(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -280,6 +323,7 @@ func (m *ManagementServer) StartListener(ln net.Listener) error {
 		return errors.New("management server already started")
 	}
 	m.ln = ln
+	m.startAuthFailureCleanup()
 	go func() {
 		if err := m.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			Logger().Warnw("management server error", "error", err)
@@ -309,6 +353,7 @@ func (m *ManagementServer) Stop() {
 	if ln == nil {
 		return
 	}
+	m.stopAuthFailureCleanup()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := m.srv.Shutdown(ctx); err != nil {
