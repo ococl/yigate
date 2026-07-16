@@ -5,6 +5,7 @@ const appStore = useAppStore()
 
 const menuItems = [
   { key: 'home', label: '首页', path: '/' },
+  { key: 'api-docs', label: 'API 文档', path: '/api-docs' },
   { key: 'about', label: '关于', path: '/about' },
 ]
 </script>
