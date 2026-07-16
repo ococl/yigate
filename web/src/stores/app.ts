@@ -1,9 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+const THEME_KEY = 'yigate_theme'
+
 export const useAppStore = defineStore('app', () => {
   const sidebarCollapsed = ref(false)
-  const theme = ref<'light' | 'dark'>('light')
+  const theme = ref<'light' | 'dark'>(
+    (localStorage.getItem(THEME_KEY) as 'light' | 'dark') || 'light',
+  )
 
   const isDark = computed(() => theme.value === 'dark')
 
@@ -13,6 +17,7 @@ export const useAppStore = defineStore('app', () => {
 
   function toggleTheme() {
     theme.value = theme.value === 'light' ? 'dark' : 'light'
+    localStorage.setItem(THEME_KEY, theme.value)
   }
 
   return {

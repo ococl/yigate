@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { apiGroups, authInfo, type ApiEndpoint } from '@/data/api-docs'
+import { apiGroups } from '@/data/api-docs'
 
 const activeGroup = ref<string>('system')
 const searchKeyword = ref('')
@@ -53,30 +53,6 @@ function copyToClipboard(text: string) {
         <a-tag color="purple">{{ apiGroups.length }} 个分组</a-tag>
       </template>
     </a-page-header>
-
-    <!-- 认证说明 -->
-    <a-card title="认证机制" size="small" style="margin-bottom: 16px;">
-      <a-descriptions :column="1" size="small" bordered>
-        <a-descriptions-item label="认证方式">
-          <a-tag color="blue">{{ authInfo.method }}</a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="请求头">
-          <a-typography-text code copyable>{{ authInfo.header }}</a-typography-text>
-        </a-descriptions-item>
-        <a-descriptions-item label="配置字段">
-          <a-typography-text code>{{ authInfo.configField }}</a-typography-text>
-        </a-descriptions-item>
-        <a-descriptions-item label="说明">{{ authInfo.description }}</a-descriptions-item>
-        <a-descriptions-item label="暴力破解防护">
-          <a-tag color="orange">{{ authInfo.bruteForceProtection }}</a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="未认证响应">
-          <a-typography-text type="danger">
-            HTTP {{ authInfo.unauthorizedResponse.status }} — {{ authInfo.unauthorizedResponse.body }}
-          </a-typography-text>
-        </a-descriptions-item>
-      </a-descriptions>
-    </a-card>
 
     <!-- 搜索框 -->
     <a-input-search
@@ -165,7 +141,7 @@ function copyToClipboard(text: string) {
 
               <!-- 路径参数 -->
               <template v-if="endpoint.params.length > 0">
-                <a-divider orientation="left" plain style="margin: 8px 0;">
+                <a-divider title-placement="start" plain style="margin: 8px 0;">
                   <a-typography-text type="secondary">路径参数</a-typography-text>
                 </a-divider>
                 <a-table
@@ -175,16 +151,22 @@ function copyToClipboard(text: string) {
                   :columns="[
                     { title: '参数名', dataIndex: 'name', width: 120 },
                     { title: '类型', dataIndex: 'type', width: 140 },
-                    { title: '必填', dataIndex: 'required', width: 60, customRender: ({ text }: { text: boolean }) => text ? '是' : '否' },
+                    { title: '必填', dataIndex: 'required', width: 60 },
                     { title: '说明', dataIndex: 'description' },
                   ]"
                   :row-key="(r: any) => r.name"
-                />
+                >
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.dataIndex === 'required'">
+                      {{ record.required ? '是' : '否' }}
+                    </template>
+                  </template>
+                </a-table>
               </template>
 
               <!-- 请求体 -->
               <template v-if="endpoint.requestBody">
-                <a-divider orientation="left" plain style="margin: 8px 0;">
+                <a-divider title-placement="start" plain style="margin: 8px 0;">
                   <a-typography-text type="secondary">请求体 (JSON)</a-typography-text>
                 </a-divider>
                 <div class="code-block">
@@ -199,7 +181,7 @@ function copyToClipboard(text: string) {
               </template>
 
               <!-- 响应体 -->
-              <a-divider orientation="left" plain style="margin: 8px 0;">
+              <a-divider title-placement="start" plain style="margin: 8px 0;">
                 <a-typography-text type="secondary">响应体 (JSON)</a-typography-text>
               </a-divider>
               <div class="code-block">
@@ -213,7 +195,7 @@ function copyToClipboard(text: string) {
               </div>
 
               <!-- 状态码 -->
-              <a-divider orientation="left" plain style="margin: 8px 0;">
+              <a-divider title-placement="start" plain style="margin: 8px 0;">
                 <a-typography-text type="secondary">状态码</a-typography-text>
               </a-divider>
               <a-table
@@ -238,7 +220,7 @@ function copyToClipboard(text: string) {
               </a-table>
 
               <!-- 示例 -->
-              <a-divider orientation="left" plain style="margin: 8px 0;">
+              <a-divider title-placement="start" plain style="margin: 8px 0;">
                 <a-typography-text type="secondary">请求示例</a-typography-text>
               </a-divider>
               <div class="code-block">
@@ -256,7 +238,7 @@ function copyToClipboard(text: string) {
                 <pre><code>{{ endpoint.example.request }}</code></pre>
               </div>
 
-              <a-divider orientation="left" plain style="margin: 8px 0;">
+              <a-divider title-placement="start" plain style="margin: 8px 0;">
                 <a-typography-text type="secondary">响应示例</a-typography-text>
               </a-divider>
               <div class="code-block">
