@@ -21,12 +21,13 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 - `zap`：结构化日志。
 - `lumberjack`：按大小滚动日志。
 - `yaml.v3`：YAML 配置解析。
+- 前端：Vue 3 + Vite + TypeScript + antdv-next + Pinia + Vue Router（位于 `web/`，独立管理）
 
 ## 重要目录
 
 ```text
 .
-├── src/                 # Go 模块根目录
+├── src/                 # Go 模块根目录（应用后端）
 │   ├── go.mod           # module yigate
 │   ├── main.go          # CLI 入口、版本信息、服务命令
 │   ├── config.go        # YAML 配置加载、环境变量展开、校验
@@ -35,6 +36,19 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 │   ├── service.go       # system service 封装
 │   ├── config.sample.yml
 │   └── proxy/           # 代理核心
+├── web/                 # 前端项目（独立自治，非 monorepo）
+│   ├── package.json     # 前端依赖管理
+│   ├── vite.config.ts   # Vite 构建配置
+│   ├── tsconfig.json    # TypeScript 配置
+│   ├── index.html       # HTML 入口
+│   └── src/             # 前端源码
+│       ├── main.ts      # 应用入口
+│       ├── App.vue      # 根组件
+│       ├── router/      # Vue Router 路由配置
+│       ├── stores/      # Pinia 状态管理
+│       ├── views/       # 页面视图
+│       ├── layouts/     # 布局组件
+│       └── assets/      # 静态资源
 ├── deploy/              # Docker/systemd 部署模板和公开配置
 │   ├── docker/
 │   ├── systemd/
@@ -98,11 +112,32 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 
 ## 构建与运行
 
+Go 应用：
+
 ```bash
 cd src
 GOPROXY=https://goproxy.cn,direct go mod download
 GOPROXY=https://goproxy.cn,direct go build -o yigate .
 ./yigate -config config.sample.yml run
+```
+
+前端（`web/` 目录，独立管理）：
+
+```bash
+cd web
+npm install
+npm run dev       # 开发服务器
+npm run build     # 生产构建（输出到 web/dist/）
+npm run preview   # 预览构建产物
+```
+
+或通过 Makefile：
+
+```bash
+make build        # 构建 Go 应用
+make web-install  # 安装前端依赖
+make web-build    # 构建前端
+make web-dev      # 启动前端开发服务器
 ```
 
 Docker：
@@ -120,12 +155,22 @@ docker compose -f compose.local.yml up --build
 
 ## 测试
 
+Go 应用：
+
 ```bash
 cd src
 GOPROXY=https://goproxy.cn,direct go test ./...
 ```
 
 如果只改 `src/proxy`，仍建议至少运行 `go test ./proxy`。改动配置、启动、热加载或管理接口时，运行 `go test ./...`。
+
+前端：
+
+```bash
+cd web
+npm run type-check  # TypeScript 类型检查
+npm run build       # 构建即验证
+```
 
 ## 配置要点
 
@@ -199,3 +244,6 @@ GOPROXY=https://goproxy.cn,direct go test ./...
 - 流量审计通过 `TrafficAccounter` 实现，`Tunnel` 函数签名包含 `TrafficKey` 和 `*TrafficAccounter` 参数。
 - 运行时配置 API 读取原始 YAML（不展开环境变量），保留 `${ENV_VAR}` 占位符。
 - Prometheus 指标前缀为 `yigate_`，环境变量前缀为 `YIGATE_`。
+- 前端代码位于 `web/`，独立于 Go 应用，有自己的 `package.json` 和构建流程，非 monorepo。
+- 前端使用 antdv-next 组件库，通过 `unplugin-vue-components` + `@antdv-next/auto-import-resolver` 实现按需自动导入。
+- 前端开发服务器默认代理 `/api` 请求到 `http://127.0.0.1:8081`（Go 管理端口）。

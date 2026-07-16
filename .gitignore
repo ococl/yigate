@@ -49,3 +49,11 @@ Thumbs.db
 
 # Test artifacts
 .last_proxy_test_summary
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
+web/dist-ssr/
+web/*.local
+web/src/auto-imports.d.ts
+web/src/components.d.ts

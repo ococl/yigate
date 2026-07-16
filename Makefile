@@ -1,8 +1,9 @@
-.PHONY: all build test cross clean release lint
+.PHONY: all build test cross clean release lint web web-build web-dev web-install
 
 GO ?= go
 GOPROXY ?= https://goproxy.cn,direct
 SRC_DIR := ./src
+WEB_DIR := ./web
 BUILD_DIR := ./build
 SCRIPTS_DIR := ./scripts
 
@@ -47,3 +48,16 @@ release:
 
 lint:
 	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) vet ./...
+
+# --- Frontend (web/) ---
+
+web-install:
+	cd $(WEB_DIR) && npm install
+
+web-dev:
+	cd $(WEB_DIR) && npm run dev
+
+web-build:
+	cd $(WEB_DIR) && npm run build
+
+web: web-build
