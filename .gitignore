@@ -55,8 +55,7 @@ web/node_modules/
 web/dist/
 web/dist-ssr/
 web/*.local
-web/src/auto-imports.d.ts
-web/src/components.d.ts
+# auto-imports.d.ts / components.d.ts 需纳入版本控制，供干净构建时 vue-tsc 类型检查使用
 web/vite.config.js
 web/vite.config.d.ts
 web/tsconfig.node.tsbuildinfo

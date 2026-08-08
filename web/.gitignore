@@ -7,8 +7,9 @@ dist-ssr
 !.env.example
 
 # auto-generated type declarations
-src/auto-imports.d.ts
-src/components.d.ts
+# 注意：auto-imports.d.ts / components.d.ts 需纳入版本控制，
+# 以便 Docker 干净构建时 vue-tsc 类型检查能找到全局类型声明。
+# 它们由 unplugin-auto-import / unplugin-vue-components 在 vite build 时重新生成。
 
 # vue-tsc build artifacts
 *.tsbuildinfo
