@@ -10,12 +10,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"golang.org/x/sys/unix"
 	"yigate/proxy"
 )
 
@@ -262,11 +265,31 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 
 	newListeners := make(map[string]net.Listener)
 	if !initialLoad {
+		// 先关闭需要替换或移除的旧 listener，释放端口，避免随后 bind 同地址时
+		// 因 TIME_WAIT 或端口仍被占用而报 address already in use。
+		reusedAddrs := make(map[string]bool, len(cfg.Listeners))
 		for _, lc := range cfg.Listeners {
 			oldLn := s.currentListener(lc.Listen)
 			oldLc := oldListenerConfig(oldState, lc.Listen)
 			if oldLn != nil && oldLc != nil && oldLc.Listen == lc.Listen && oldLc.TLS == lc.TLS && oldLc.TProxy == lc.TProxy {
 				newListeners[lc.Listen] = oldLn
+				reusedAddrs[lc.Listen] = true
+				continue
+			}
+		}
+		s.listenersMu.Lock()
+		oldListeners := s.listeners
+		s.listenersMu.Unlock()
+		for addr, oldLn := range oldListeners {
+			if reusedAddrs[addr] {
+				continue
+			}
+			_ = oldLn.Close()
+			proxy.Logger().Infow("listener closed for reconfiguration", "address", addr)
+		}
+		// 创建新 listener（此时被替换/移除地址的端口已释放）。
+		for _, lc := range cfg.Listeners {
+			if reusedAddrs[lc.Listen] {
 				continue
 			}
 			ln, err := createListener(lc.Listen, lc.TLS, lc.TProxy)
@@ -291,14 +314,6 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		oldListeners := s.listeners
 		s.listeners = newListeners
 		s.listenersMu.Unlock()
-		for addr, oldLn := range oldListeners {
-			if newLn, ok := newListeners[addr]; ok && newLn == oldLn {
-				continue
-			}
-			// 关闭旧 listener 停止接收新连接，已建立的连接通过空闲超时自然排空。
-			_ = oldLn.Close()
-			proxy.Logger().Infow("listener replaced, existing connections will drain", "address", addr)
-		}
 		for addr, newLn := range newListeners {
 			if oldLn, ok := oldListeners[addr]; ok && oldLn == newLn {
 				continue
@@ -720,7 +735,7 @@ func createListener(addr string, tlsCfg TLSConfig, tproxyCfg proxy.TProxyConfig)
 	if tproxyCfg.Enabled && tproxyCfg.NormalizedMode() == "tproxy" {
 		return proxy.CreateTProxyListener(addr)
 	}
-	baseLn, err := net.Listen("tcp", addr)
+	baseLn, err := reuseAddrListen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -733,6 +748,32 @@ func createListener(addr string, tlsCfg TLSConfig, tproxyCfg proxy.TProxyConfig)
 		return baseLn, nil
 	}
 	return tls.NewListener(baseLn, config), nil
+}
+
+// reuseAddrListen 创建一个开启 SO_REUSEADDR（及 SO_REUSEPORT）的 TCP 监听器。
+// 开启这两个选项后，旧监听器关闭（或处于 TIME_WAIT）时，新监听器可立即
+// 绑定同一地址，避免热加载监听地址回退到原端口时 bind: address already in use。
+// Windows 上不支持 SO_REUSEPORT 且 SO_REUSEADDR 语义不同，故仅使用标准 net.Listen。
+func reuseAddrListen(network, addr string) (net.Listener, error) {
+	if runtime.GOOS == "windows" {
+		return net.Listen(network, addr)
+	}
+	lc := net.ListenConfig{
+		Control: func(_, _ string, c syscall.RawConn) error {
+			var opErr error
+			if err := c.Control(func(fd uintptr) {
+				if opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); opErr != nil {
+					return
+				}
+				// SO_REUSEPORT 让同地址可被多实例复用，进一步降低热加载切换窗口。
+				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+			}); err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+	return lc.Listen(context.Background(), network, addr)
 }
 
 func (s *Server) handle(conn net.Conn, addr string) {
