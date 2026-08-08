@@ -1,3 +1,9 @@
+# 前端构建阶段
+FROM node:20-alpine AS webui
+WORKDIR /webui
+COPY web/ ./web/
+RUN cd web && npm install && npm run build
+
 # 构建阶段
 FROM golang:1.21-alpine AS builder
 WORKDIR /build
@@ -6,15 +12,8 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-# 先构建前端（生成 web/dist）
-COPY web/ ./web/
-RUN cd web && \
-    (command -v npm >/dev/null 2>&1 && npm install && npm run build) || \
-    echo "warning: npm not available, webui will be empty"
-
-# 将前端构建产物拷贝到 Go embed 目录
-RUN mkdir -p src/proxy/webui_dist && \
-    (test -d web/dist && cp -r web/dist/* src/proxy/webui_dist/ 2>/dev/null || true)
+# 将前端构建产物拷贝到 Go embed 目录（webui_dist 已被 .gitignore，仅构建期存在）
+COPY --from=webui /webui/web/dist ./src/proxy/webui_dist
 
 COPY src/go.mod src/go.sum ./src/
 RUN cd src && GOPROXY=https://goproxy.cn,direct go mod download
