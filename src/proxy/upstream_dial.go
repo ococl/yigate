@@ -23,6 +23,12 @@ func (u *Upstream) Dial(target string) (net.Conn, error) {
 		return nil, fmt.Errorf("unsupported upstream type %q", u.primaryProxyType())
 	}
 	if err != nil {
+		// 未分类的错误（裸 net.Error、读写错误等）默认归因为上游，
+		// 因为拨号到上游的连接失败最可能是上游本身的问题。
+		var de *DialError
+		if !errors.As(err, &de) {
+			err = newDialError(ErrCategoryUpstream, "dial", err)
+		}
 		return nil, err
 	}
 	return u.trackConn(conn), nil
@@ -74,7 +80,11 @@ func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names [
 		lastErr = err
 		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
 		MetricInc("yigate_upstream_dial_failures_total", "upstream="+up.Name)
-		m.markDead(up)
+		// 只有归因于上游本身的错误才推进健康状态转换；
+		// 目标不可达或上游不支持某能力不影响节点整体健康。
+		if IsUpstreamError(err) {
+			m.markDead(up)
+		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no available upstream")
@@ -95,7 +105,9 @@ func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, err
 	conn, err := up.Dial(target)
 	if err != nil {
 		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
-		m.markDead(up)
+		if IsUpstreamError(err) {
+			m.markDead(up)
+		}
 		return nil, nil, err
 	}
 	// 拨号成功即视为上游恢复健康，清除 dead 状态（与 DialProxyWithSourceIP 一致）。
@@ -172,50 +184,58 @@ func (u *Upstream) DialSOCKS5UDP(target string) (net.Conn, *net.UDPAddr, error) 
 	return u.trackConn(conn), udpAddr, nil
 }
 
-// DialSOCKS5Bind 按优先级选择 SOCKS5 上游建立 BIND，失败时尝试下一个，全部失败返回错误。
+// DialSOCKS5Bind 按优先级选择支持 BIND 的 SOCKS5 上游，失败时尝试下一个，全部失败返回错误。
 func (m *UpstreamManager) DialSOCKS5Bind(target string, names []string) (net.Conn, string, *Upstream, error) {
 	attempts := m.Socks5AttemptCount(names)
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		up := m.SelectSocks5For(names)
+		up := m.SelectSocks5ForBind(names)
 		if up == nil {
 			break
 		}
 		conn, addr, err := up.DialSOCKS5Bind(target)
 		if err == nil {
+			m.markCapabilitySupported(up, "bind")
 			return conn, addr, up, nil
 		}
 		lastErr = err
 		Logger().Warnw("upstream bind failed", "upstream", up.Name, "target", target, "error", err)
-		// BIND 是特殊命令，上游失败通常意味着不支持，立即标记 dead 避免后续请求挂起。
-		m.markDeadImmediate(up)
+		if IsCapabilityError(err) {
+			m.markCapabilityUnsupported(up, "bind")
+		} else if IsUpstreamError(err) {
+			m.markDeadImmediate(up)
+		}
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no available socks5 upstream")
+		lastErr = fmt.Errorf("no available socks5 upstream for bind")
 	}
 	return nil, "", nil, lastErr
 }
 
-// DialSOCKS5UDP 按优先级选择 SOCKS5 上游建立 UDP ASSOCIATE，失败时尝试下一个，全部失败返回错误。
+// DialSOCKS5UDP 按优先级选择支持 UDP ASSOCIATE 的 SOCKS5 上游，失败时尝试下一个，全部失败返回错误。
 func (m *UpstreamManager) DialSOCKS5UDP(target string, names []string) (net.Conn, *net.UDPAddr, *Upstream, error) {
 	attempts := m.Socks5AttemptCount(names)
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		up := m.SelectSocks5For(names)
+		up := m.SelectSocks5ForUDP(names)
 		if up == nil {
 			break
 		}
 		conn, addr, err := up.DialSOCKS5UDP(target)
 		if err == nil {
+			m.markCapabilitySupported(up, "udp_associate")
 			return conn, addr, up, nil
 		}
 		lastErr = err
 		Logger().Warnw("upstream udp associate failed", "upstream", up.Name, "target", target, "error", err)
-		// UDP ASSOCIATE 是特殊命令，上游失败通常意味着不支持，立即标记 dead 避免后续请求挂起。
-		m.markDeadImmediate(up)
+		if IsCapabilityError(err) {
+			m.markCapabilityUnsupported(up, "udp_associate")
+		} else if IsUpstreamError(err) {
+			m.markDeadImmediate(up)
+		}
 	}
 	if lastErr == nil {
-		lastErr = fmt.Errorf("no available socks5 upstream")
+		lastErr = fmt.Errorf("no available socks5 upstream for udp associate")
 	}
 	return nil, nil, nil, lastErr
 }

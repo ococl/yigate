@@ -124,13 +124,15 @@ func TestRequestViaProxyRetriesBufferedBody(t *testing.T) {
 }
 
 func TestIsTargetError(t *testing.T) {
-	if !isTargetError(errorFor("target unreachable")) {
+	targetErr := newDialErrorCode(ErrCategoryTarget, "request", 0x05, "target refused")
+	if !IsTargetError(targetErr) {
 		t.Fatal("expected target error")
 	}
-	if !isTargetError(errorFor("connection refused")) {
-		t.Fatal("expected connection refused as target error")
+	upstreamErr := newDialError(ErrCategoryUpstream, "dial", errorFor("connection refused"))
+	if IsTargetError(upstreamErr) {
+		t.Fatal("upstream error should not be target error")
 	}
-	if isTargetError(nil) {
+	if IsTargetError(nil) {
 		t.Fatal("expected nil not target error")
 	}
 }

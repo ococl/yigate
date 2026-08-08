@@ -23,16 +23,35 @@ type HealthStatus struct {
 	Timestamp     time.Time `json:"timestamp"`
 }
 
+// UpstreamStatus 描述单个上游节点的运行时状态，用于 /api/v1/status 输出。
+type UpstreamStatus struct {
+	Name            string    `json:"name"`
+	URL             string    `json:"url"`
+	Types           []string  `json:"types"`
+	Dead            bool      `json:"dead"`
+	DeadSince       time.Time `json:"dead_since,omitempty"`
+	Failures        int       `json:"failures"`
+	Successes       int       `json:"successes"`
+	ConsecutiveDead int       `json:"consecutive_dead"`
+	NextProbeAt     time.Time `json:"next_probe_at,omitempty"`
+	NextCheckAt     time.Time `json:"next_check_at,omitempty"`
+	BindUnsupported bool      `json:"bind_unsupported"`
+	UDPUnsupported  bool      `json:"udp_unsupported"`
+	ActiveConns     int64     `json:"active_conns"`
+}
+
 // StatusSnapshot 用于 /api/v1/status 返回的进程运行摘要。
 type StatusSnapshot struct {
-	Status        string    `json:"status"`
-	Listen        string    `json:"listen"`
-	Management    string    `json:"management"`
-	UpstreamCount int       `json:"upstream_count"`
-	RouterReady   bool      `json:"router_ready"`
-	ManagerReady  bool      `json:"manager_ready"`
-	PprofEnabled  bool      `json:"pprof_enabled"`
-	Timestamp     time.Time `json:"timestamp"`
+	Status        string           `json:"status"`
+	Listen        string           `json:"listen"`
+	Management    string           `json:"management"`
+	UpstreamCount int              `json:"upstream_count"`
+	RouterReady   bool             `json:"router_ready"`
+	ManagerReady  bool             `json:"manager_ready"`
+	PprofEnabled  bool             `json:"pprof_enabled"`
+	Ready         bool             `json:"ready"`
+	Upstreams     []UpstreamStatus `json:"upstreams,omitempty"`
+	Timestamp     time.Time        `json:"timestamp"`
 }
 
 // ManagementServer 提供管理接口，如健康检查、指标、状态与手动重载等。

@@ -59,16 +59,21 @@ type HealthCheckConfig struct {
 	Interval         Duration `yaml:"interval"`
 	Timeout          Duration `yaml:"timeout"`
 	FailureThreshold int      `yaml:"failure_threshold"`
+	SuccessThreshold int      `yaml:"success_threshold"`
 }
 
 // normalizeHealthCheckType 根据上游类型推断默认健康检查类型。
+// socks5/socks5h 上游默认执行真实协议握手探测而非裸 TCP。
 func normalizeHealthCheckType(value string, proxyType string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "tcp", "http", "https", "tls":
+	case "tcp", "http", "https", "tls", ProxyTypeSocks5, ProxyTypeSocks5H:
 		return strings.ToLower(strings.TrimSpace(value))
 	case "":
-		if proxyType == ProxyTypeHTTP || proxyType == ProxyTypeHTTPS {
+		switch proxyType {
+		case ProxyTypeHTTP, ProxyTypeHTTPS:
 			return "http"
+		case ProxyTypeSocks5, ProxyTypeSocks5H:
+			return ProxyTypeSocks5
 		}
 		return "tcp"
 	default:
@@ -78,11 +83,42 @@ func normalizeHealthCheckType(value string, proxyType string) string {
 
 func validateHealthCheckType(value string) error {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "tcp", "http", "https", "tls":
+	case "", "tcp", "http", "https", "tls", ProxyTypeSocks5, ProxyTypeSocks5H:
 		return nil
 	default:
 		return fmt.Errorf("unsupported health check type %q", value)
 	}
+}
+
+// ValidateHealthCheckConfig 校验健康检查配置的边界合法性。
+func ValidateHealthCheckConfig(hc HealthCheckConfig) error {
+	if err := validateHealthCheckType(hc.Type); err != nil {
+		return err
+	}
+	if hc.Interval < 0 {
+		return fmt.Errorf("health_check.interval must be non-negative")
+	}
+	if hc.Timeout < 0 {
+		return fmt.Errorf("health_check.timeout must be non-negative")
+	}
+	if hc.FailureThreshold < 0 {
+		return fmt.Errorf("health_check.failure_threshold must be non-negative")
+	}
+	if hc.SuccessThreshold < 0 {
+		return fmt.Errorf("health_check.success_threshold must be non-negative")
+	}
+	t := strings.ToLower(strings.TrimSpace(hc.Type))
+	if t == "http" || t == "https" {
+		if hc.Path != "" && !strings.HasPrefix(hc.Path, "/") {
+			return fmt.Errorf("health_check.path must start with /")
+		}
+	}
+	for _, code := range hc.ExpectedCodes {
+		if code < 100 || code >= 600 {
+			return fmt.Errorf("health_check.expected_codes contains invalid status code %d", code)
+		}
+	}
+	return nil
 }
 
 const (
@@ -223,6 +259,14 @@ type Upstream struct {
 	nextProbeAt     time.Time // 下次允许主动探测恢复的时间（指数退避）
 	nextCheckAt     time.Time // 下次健康检查时间（用于 per-upstream interval）
 	consecutiveDead int       // 连续处于 dead 的探测周期数（用于计算退避）
+	probeGeneration uint64    // 当前探测 generation
+	probeInFlight   bool      // 是否已有探测正在执行
+	successes       int       // 连续成功次数
+
+	// 能力状态：true 表示上游不支持该能力（如 BIND、UDP ASSOCIATE）。
+	// 由 UpstreamManager.mu 保护。默认 false（未知但允许尝试）。
+	bindUnsupported bool
+	udpUnsupported  bool
 
 	// activeConns 用于 least_connections 策略的当前活动连接计数。
 	activeConns atomic.Int64
@@ -315,8 +359,8 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		if _, exists := m.byName[name]; exists {
 			return nil, fmt.Errorf("duplicate upstream name %q", name)
 		}
-		if err := validateHealthCheckType(c.HealthCheck.Type); err != nil {
-			return nil, fmt.Errorf("upstreams[%d].health_check.type: %w", i, err)
+		if err := ValidateHealthCheckConfig(c.HealthCheck); err != nil {
+			return nil, fmt.Errorf("upstreams[%d].health_check: %w", i, err)
 		}
 		types, _, err := normalizeProxyTypes(c.Types)
 		if err != nil {
@@ -457,6 +501,37 @@ func (m *UpstreamManager) SelectForExcluding(names []string, exclude map[*Upstre
 }
 
 func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
+	return m.selectSocks5Internal(names, "", false, false)
+}
+
+// SelectSocks5ForWithSourceIP 类似 SelectSocks5For，但支持按源 IP 会话保持。
+func (m *UpstreamManager) SelectSocks5ForWithSourceIP(names []string, sourceIP string) *Upstream {
+	return m.selectSocks5Internal(names, sourceIP, false, false)
+}
+
+// SelectSocks5ForBind 选择支持 BIND 能力的 SOCKS5 上游。
+func (m *UpstreamManager) SelectSocks5ForBind(names []string) *Upstream {
+	return m.selectSocks5Internal(names, "", true, false)
+}
+
+// SelectSocks5ForBindWithSourceIP 选择支持 BIND 能力的 SOCKS5 上游，按源 IP 会话保持。
+func (m *UpstreamManager) SelectSocks5ForBindWithSourceIP(names []string, sourceIP string) *Upstream {
+	return m.selectSocks5Internal(names, sourceIP, true, false)
+}
+
+// SelectSocks5ForUDP 选择支持 UDP ASSOCIATE 能力的 SOCKS5 上游。
+func (m *UpstreamManager) SelectSocks5ForUDP(names []string) *Upstream {
+	return m.selectSocks5Internal(names, "", false, true)
+}
+
+// SelectSocks5ForUDPWithSourceIP 选择支持 UDP ASSOCIATE 能力的 SOCKS5 上游，按源 IP 会话保持。
+func (m *UpstreamManager) SelectSocks5ForUDPWithSourceIP(names []string, sourceIP string) *Upstream {
+	return m.selectSocks5Internal(names, sourceIP, false, true)
+}
+
+// selectSocks5Internal 统一的 SOCKS5 上游选择逻辑。
+// requireBind / requireUDP 为 true 时过滤掉已知不支持该能力的上游。
+func (m *UpstreamManager) selectSocks5Internal(names []string, sourceIP string, requireBind, requireUDP bool) *Upstream {
 	allowed := namesToSet(names)
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -468,33 +543,10 @@ func (m *UpstreamManager) SelectSocks5For(names []string) *Upstream {
 			if !m.isSelectable(u) || !u.supportsProxyType(ProxyTypeSocks5) {
 				continue
 			}
-			if allowed != nil {
-				if _, ok := allowed[u.Name]; !ok {
-					continue
-				}
+			if requireBind && u.bindUnsupported {
+				continue
 			}
-			alive = append(alive, u)
-		}
-		if len(alive) == 0 {
-			continue
-		}
-		strategy := groupStrategy(alive)
-		return pick(alive, selectKey(strategy, "", ""))
-	}
-	return nil
-}
-
-// SelectSocks5ForWithSourceIP 类似 SelectSocks5For，但支持按源 IP 会话保持。
-func (m *UpstreamManager) SelectSocks5ForWithSourceIP(names []string, sourceIP string) *Upstream {
-	allowed := namesToSet(names)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, p := range m.order {
-		group := m.groups[p]
-		alive := make([]*Upstream, 0, len(group))
-		for _, u := range group {
-			if !m.isSelectable(u) || !u.supportsProxyType(ProxyTypeSocks5) {
+			if requireUDP && u.udpUnsupported {
 				continue
 			}
 			if allowed != nil {
@@ -511,6 +563,138 @@ func (m *UpstreamManager) SelectSocks5ForWithSourceIP(names []string, sourceIP s
 		return pick(alive, selectKey(strategy, "", sourceIP))
 	}
 	return nil
+}
+
+// markCapabilityUnsupported 标记上游不支持指定能力。
+func (m *UpstreamManager) markCapabilityUnsupported(up *Upstream, capability string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if up == nil {
+		return
+	}
+	switch capability {
+	case "bind":
+		up.bindUnsupported = true
+	case "udp_associate":
+		up.udpUnsupported = true
+	}
+}
+
+// markCapabilitySupported 标记上游支持指定能力（成功后重置）。
+func (m *UpstreamManager) markCapabilitySupported(up *Upstream, capability string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if up == nil {
+		return
+	}
+	switch capability {
+	case "bind":
+		up.bindUnsupported = false
+	case "udp_associate":
+		up.udpUnsupported = false
+	}
+}
+
+// identity 返回上游的身份标识，用于热加载时判断节点是否变化。
+// 标识包含名称、标准化 URL（scheme+host+port+userinfo）和协议类型。
+func (u *Upstream) identity() string {
+	if u == nil {
+		return ""
+	}
+	urlStr := ""
+	if u.URL != nil {
+		urlStr = u.URL.Scheme + "://" + u.URL.Host
+		if u.URL.User != nil {
+			urlStr += "@" + u.URL.User.String()
+		}
+	}
+	types := ""
+	u.typesMu.RLock()
+	for _, t := range u.Types {
+		types += t + ","
+	}
+	u.typesMu.RUnlock()
+	return u.Name + "|" + urlStr + "|" + types
+}
+
+// MergeRuntimeState 从旧 manager 复制匹配上游的运行时状态。
+// 身份标识（名称+URL+协议类型）相同的上游视为同一节点，保留其
+// dead 状态、失败计数、退避调度、能力状态和活动连接计数。
+// 仅修改 newMgr 中的上游；oldMgr 不被修改。
+func (m *UpstreamManager) MergeRuntimeState(oldMgr *UpstreamManager) {
+	if oldMgr == nil {
+		return
+	}
+	oldMgr.mu.Lock()
+	defer oldMgr.mu.Unlock()
+	oldMap := make(map[string]*Upstream, len(oldMgr.upstreams))
+	for _, u := range oldMgr.upstreams {
+		oldMap[u.identity()] = u
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for _, nu := range m.upstreams {
+		ou, ok := oldMap[nu.identity()]
+		if !ok {
+			continue
+		}
+		nu.dead = ou.dead
+		nu.failures = ou.failures
+		nu.deadSince = ou.deadSince
+		nu.nextProbeAt = ou.nextProbeAt
+		nu.nextCheckAt = now // 立即触发一次检查
+		nu.consecutiveDead = ou.consecutiveDead
+		nu.successes = ou.successes
+		nu.bindUnsupported = ou.bindUnsupported
+		nu.udpUnsupported = ou.udpUnsupported
+		nu.activeConns.Store(ou.activeConns.Load())
+	}
+}
+
+// UpstreamStatuses 返回所有上游节点的运行时状态快照。
+func (m *UpstreamManager) UpstreamStatuses() []UpstreamStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]UpstreamStatus, 0, len(m.upstreams))
+	for _, u := range m.upstreams {
+		urlStr := ""
+		if u.URL != nil {
+			urlStr = u.URL.Scheme + "://" + u.URL.Host
+		}
+		u.typesMu.RLock()
+		types := append([]string(nil), u.Types...)
+		u.typesMu.RUnlock()
+		result = append(result, UpstreamStatus{
+			Name:            u.Name,
+			URL:             urlStr,
+			Types:           types,
+			Dead:            u.dead,
+			DeadSince:       u.deadSince,
+			Failures:        u.failures,
+			Successes:       u.successes,
+			ConsecutiveDead: u.consecutiveDead,
+			NextProbeAt:     u.nextProbeAt,
+			NextCheckAt:     u.nextCheckAt,
+			BindUnsupported: u.bindUnsupported,
+			UDPUnsupported:  u.udpUnsupported,
+			ActiveConns:     u.activeConns.Load(),
+		})
+	}
+	return result
+}
+
+// HasAliveUpstreams 返回是否存在至少一个非 dead 的上游。
+func (m *UpstreamManager) HasAliveUpstreams() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.upstreams {
+		if m.isSelectable(u) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *UpstreamManager) AttemptCount(names []string) int {
@@ -664,75 +848,125 @@ func pickWeighted(us []*Upstream) *Upstream {
 	return us[chosen]
 }
 
-// isSelectable 判断上游是否可被选中用于本次拨号尝试。
-// 未标记 dead 的始终可选；已 dead 但退避期已过的也允许被选中，
-// 以便通过一次真实请求探测其恢复（自愈）。这样即使关闭主动健康检查
-// （check_interval=0），基于实时拨号失败的故障转移与恢复仍然有效。
+// isSelectable 判断上游是否可被选中用于业务拨号。
+// open 上游只能通过受控健康探测恢复，不能以真实业务请求充当恢复探针。
 func (m *UpstreamManager) isSelectable(up *Upstream) bool {
-	if up == nil {
-		return false
-	}
-	if !up.dead {
-		return true
-	}
-	if up.nextProbeAt.IsZero() {
-		return true
-	}
-	return time.Now().After(up.nextProbeAt)
+	return up != nil && !up.dead
 }
 
-// markDead 记录一次失败。连续失败达到阈值才标记 dead，
-// 并按指数退避调度下次主动恢复探测。
+// probeBackoff 返回 capped exponential backoff，避免大位移和 Duration 溢出。
+func probeBackoff(consecutiveDead int) time.Duration {
+	if consecutiveDead <= 1 {
+		return deadProbeBaseInterval
+	}
+	backoff := deadProbeBaseInterval
+	for i := 1; i < consecutiveDead; i++ {
+		if backoff >= deadProbeMaxInterval/2 {
+			return deadProbeMaxInterval
+		}
+		backoff *= 2
+	}
+	if backoff > deadProbeMaxInterval {
+		return deadProbeMaxInterval
+	}
+	return backoff
+}
+
+func (m *UpstreamManager) markDeadLocked(up *Upstream, immediate bool, now time.Time) {
+	if up == nil {
+		return
+	}
+	up.successes = 0
+	if immediate {
+		up.failures = up.HealthCheckFailureThreshold()
+	} else {
+		up.failures++
+		if up.failures < up.HealthCheckFailureThreshold() {
+			return
+		}
+	}
+	if !up.dead {
+		up.dead = true
+		up.deadSince = now
+		up.consecutiveDead = 0
+		up.probeGeneration++
+		up.probeInFlight = false
+		MetricInc("yigate_upstream_state_transitions_total", "upstream="+up.Name, "from=alive", "to=dead")
+	}
+	up.consecutiveDead++
+	up.nextProbeAt = now.Add(probeBackoff(up.consecutiveDead))
+}
+
+// markDead 记录一次失败。连续失败达到阈值才进入 open 状态。
 func (m *UpstreamManager) markDead(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	up.failures++
-	if up.failures < up.HealthCheckFailureThreshold() {
-		// 未达阈值，暂不标记 dead，但记录下次可快速重试的时间。
-		return
-	}
-	if !up.dead {
-		up.dead = true
-		up.deadSince = time.Now()
-		up.consecutiveDead = 0
-	}
-	up.consecutiveDead++
-	// 指数退避：base * 2^(n-1)，上限 maxInterval。
-	backoff := deadProbeBaseInterval * time.Duration(1<<uint(up.consecutiveDead-1))
-	if backoff > deadProbeMaxInterval {
-		backoff = deadProbeMaxInterval
-	}
-	up.nextProbeAt = time.Now().Add(backoff)
+	m.markDeadLocked(up, false, time.Now())
 }
 
-// markDeadImmediate 立即将上游标记为 dead（跳过失败计数阈值）。
-// 用于 BIND/UDP 等特殊命令——上游对这些命令的失败通常意味着不支持，
-// 不应反复尝试导致请求挂起。
+// markDeadImmediate 立即将上游置为 open。
 func (m *UpstreamManager) markDeadImmediate(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !up.dead {
-		up.dead = true
-		up.deadSince = time.Now()
-		up.consecutiveDead = 0
-	}
-	up.failures = up.HealthCheckFailureThreshold()
-	up.consecutiveDead++
-	backoff := deadProbeBaseInterval * time.Duration(1<<uint(up.consecutiveDead-1))
-	if backoff > deadProbeMaxInterval {
-		backoff = deadProbeMaxInterval
-	}
-	up.nextProbeAt = time.Now().Add(backoff)
+	m.markDeadLocked(up, true, time.Now())
 }
 
-// markAlive 重置失败计数并清除 dead 状态。
+func (m *UpstreamManager) markAliveLocked(up *Upstream) bool {
+	if up == nil {
+		return false
+	}
+	up.failures = 0
+	up.successes++
+	if up.successes < up.HealthCheckSuccessThreshold() {
+		return false
+	}
+	wasDead := up.dead
+	up.dead = false
+	up.successes = 0
+	up.consecutiveDead = 0
+	up.nextProbeAt = time.Time{}
+	if wasDead {
+		MetricInc("yigate_upstream_state_transitions_total", "upstream="+up.Name, "from=dead", "to=alive")
+	}
+	return wasDead
+}
+
+// markAlive 记录一次成功；达到恢复阈值后才重新进入业务池。
 func (m *UpstreamManager) markAlive(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	up.failures = 0
-	up.dead = false
-	up.consecutiveDead = 0
-	up.nextProbeAt = time.Time{}
+	m.markAliveLocked(up)
+}
+
+// beginProbe 为到期的 open 上游获取单飞探测租约。
+func (m *UpstreamManager) beginProbe(up *Upstream, now time.Time) (uint64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if up == nil || !up.dead || up.probeInFlight || up.nextProbeAt.IsZero() || now.Before(up.nextProbeAt) {
+		return 0, false
+	}
+	up.probeGeneration++
+	up.probeInFlight = true
+	return up.probeGeneration, true
+}
+
+// applyProbeResult 仅应用当前租约的结果，防止旧探测覆盖较新的状态。
+func (m *UpstreamManager) applyProbeResult(up *Upstream, generation uint64, alive bool, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if up == nil || !up.probeInFlight || up.probeGeneration != generation {
+		return false
+	}
+	up.probeInFlight = false
+	if alive {
+		MetricInc("yigate_upstream_probe_total", "upstream="+up.Name, "result=success")
+		return m.markAliveLocked(up)
+	}
+	MetricInc("yigate_upstream_probe_total", "upstream="+up.Name, "result=failure")
+	up.successes = 0
+	up.consecutiveDead++
+	up.nextProbeAt = now.Add(probeBackoff(up.consecutiveDead))
+	return false
 }
 
 // HealthCheckType 返回上游的健康检查类型。
@@ -781,6 +1015,14 @@ func (u *Upstream) HealthCheckFailureThreshold() int {
 		return deadFailureThreshold
 	}
 	return u.HealthCheck.FailureThreshold
+}
+
+// HealthCheckSuccessThreshold 返回 open 上游恢复所需的连续成功次数。
+func (u *Upstream) HealthCheckSuccessThreshold() int {
+	if u == nil || u.HealthCheck.SuccessThreshold <= 0 {
+		return 1
+	}
+	return u.HealthCheck.SuccessThreshold
 }
 
 func (m *UpstreamManager) SelectForWithSourceIP(names []string, sourceIP string) *Upstream {

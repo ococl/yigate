@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -119,9 +118,6 @@ type Router struct {
 
 	// ipPrecedence 控制 DNS 解析后 IPv4/IPv6 的优先级。
 	ipPrecedence string
-
-	// socks5hBreaker 记录 socks5h 熔断到期时间（unix nano），0 表示未熔断。
-	socks5hBreaker atomic.Int64
 }
 
 type autoRuntimeConfig struct {
@@ -182,8 +178,8 @@ func NewRouter(cfg RoutingConfig, dnsCfg DNSConfig) (*Router, error) {
 			Enabled:   cfg.Socks5HRedirect.Enabled,
 			Upstreams: normalizeUpstreamNames(cfg.Socks5HRedirect.Upstreams),
 		},
-		cache:       NewRouteCache(),
-		resolver:    NewDNSResolver(dnsCfg),
+		cache:        NewRouteCache(),
+		resolver:     NewDNSResolver(dnsCfg),
 		ipPrecedence: normalizeIPPrecedence(dnsCfg.IPPrecedence),
 	}
 
@@ -300,7 +296,6 @@ func (r *Router) Dial(target string, mgr *UpstreamManager, sourceIP ...string) (
 		return r.dialAuto(target, mgr, sip)
 	}
 }
-
 
 // Policy 返回当前生效的目标访问策略（可能为 nil）。
 func (r *Router) Policy() *DestinationPolicy {

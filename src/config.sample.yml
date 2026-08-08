@@ -65,14 +65,16 @@ upstreams:
     weight: 5
     # strategy 可选：weighted_round_robin（默认）、least_connections、consistent_hash、source_ip_hash
     strategy: "weighted_round_robin"
-    # health_check 可选：未配置时按全局 check_interval 与默认 TCP/HTTP 探测。
+    # health_check 可选：未配置时按全局 check_interval 与默认探测。
+    # socks5/socks5h 上游默认执行真实 SOCKS5 协议握手探测（含认证），而非裸 TCP。
     health_check:
-      type: "http"              # tcp / http / https / tls
-      path: "/"                 # HTTP 检查路径
-      expected_codes: [200]     # HTTP 预期响应码
+      type: "socks5"            # tcp / http / https / tls / socks5 / socks5h
+      path: "/"                 # HTTP 检查路径（仅 http/https）
+      expected_codes: [200]     # HTTP 预期响应码（仅 http/https）
       interval: 0               # 0 表示使用全局 check_interval
       timeout: 5s
-      failure_threshold: 3
+      failure_threshold: 3      # 连续失败次数达到阈值后标记 dead
+      success_threshold: 1      # dead 节点连续探测成功次数达到阈值后恢复
 routing:
   final: auto
   geosite:

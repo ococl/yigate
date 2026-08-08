@@ -2,15 +2,18 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -260,4 +263,157 @@ func generateTestCerts(t *testing.T) (certFile, keyFile, caFile string) {
 		t.Fatal(err)
 	}
 	return certFile, keyFile, caFile
+}
+
+func TestCheckSOCKS5ProtocolCompletesUsernamePasswordAuthentication(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	up := &Upstream{URL: &url.URL{Scheme: "socks5", Host: "proxy:1080", User: url.UserPassword("alice", "secret")}}
+	serverDone := make(chan bool, 1)
+	go func() {
+		var greeting [4]byte
+		if _, err := io.ReadFull(server, greeting[:]); err != nil {
+			serverDone <- false
+			return
+		}
+		if !bytes.Equal(greeting[:], []byte{0x05, 0x02, 0x00, 0x02}) {
+			serverDone <- false
+			return
+		}
+		if _, err := server.Write([]byte{0x05, 0x02}); err != nil {
+			serverDone <- false
+			return
+		}
+		wantAuth := append([]byte{0x01, 0x05}, []byte("alice")...)
+		wantAuth = append(wantAuth, 0x06)
+		wantAuth = append(wantAuth, []byte("secret")...)
+		auth := make([]byte, len(wantAuth))
+		if _, err := io.ReadFull(server, auth); err != nil || !bytes.Equal(auth, wantAuth) {
+			serverDone <- false
+			return
+		}
+		_, err := server.Write([]byte{0x01, 0x00})
+		serverDone <- err == nil
+	}()
+
+	if !checkSOCKS5Protocol(client, up, time.Second) {
+		t.Fatal("authenticated SOCKS5 protocol check must succeed")
+	}
+	if !<-serverDone {
+		t.Fatal("health probe did not complete expected username/password exchange")
+	}
+}
+
+func TestCheckSOCKS5ProtocolNoAuthSucceeds(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	up := &Upstream{URL: &url.URL{Scheme: "socks5", Host: "proxy:1080"}}
+	serverDone := make(chan bool, 1)
+	go func() {
+		var greeting [3]byte
+		if _, err := io.ReadFull(server, greeting[:]); err != nil {
+			serverDone <- false
+			return
+		}
+		if !bytes.Equal(greeting[:], []byte{0x05, 0x01, 0x00}) {
+			serverDone <- false
+			return
+		}
+		_, err := server.Write([]byte{0x05, 0x00})
+		serverDone <- err == nil
+	}()
+
+	if !checkSOCKS5Protocol(client, up, time.Second) {
+		t.Fatal("no-auth SOCKS5 protocol check must succeed")
+	}
+	if !<-serverDone {
+		t.Fatal("server did not receive expected no-auth greeting")
+	}
+}
+
+func TestCheckSOCKS5ProtocolBadCredentialsFails(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	up := &Upstream{URL: &url.URL{Scheme: "socks5", Host: "proxy:1080", User: url.UserPassword("alice", "wrong")}}
+	serverDone := make(chan bool, 1)
+	go func() {
+		var greeting [4]byte
+		io.ReadFull(server, greeting[:])
+		server.Write([]byte{0x05, 0x02})
+		auth := make([]byte, 16)
+		n, _ := server.Read(auth)
+		_ = n
+		server.Write([]byte{0x01, 0x01}) // auth failure
+		serverDone <- true
+	}()
+
+	if checkSOCKS5Protocol(client, up, time.Second) {
+		t.Fatal("bad credentials must cause SOCKS5 protocol check to fail")
+	}
+	<-serverDone
+}
+
+func TestValidateHealthCheckConfig(t *testing.T) {
+	valid := []HealthCheckConfig{
+		{},
+		{Type: "socks5", Interval: Duration(time.Second), Timeout: Duration(time.Second), FailureThreshold: 1, SuccessThreshold: 2},
+		{Type: "http", Path: "/health", ExpectedCodes: []int{200, 204}},
+	}
+	for _, config := range valid {
+		if err := ValidateHealthCheckConfig(config); err != nil {
+			t.Fatalf("ValidateHealthCheckConfig(%+v): %v", config, err)
+		}
+	}
+	invalid := []HealthCheckConfig{
+		{Type: "smtp"},
+		{Interval: Duration(-time.Second)},
+		{Timeout: Duration(-time.Second)},
+		{FailureThreshold: -1},
+		{SuccessThreshold: -1},
+		{Type: "http", Path: "health"},
+		{Type: "http", ExpectedCodes: []int{99}},
+		{Type: "http", ExpectedCodes: []int{600}},
+	}
+	for _, config := range invalid {
+		if err := ValidateHealthCheckConfig(config); err == nil {
+			t.Fatalf("ValidateHealthCheckConfig(%+v) unexpectedly succeeded", config)
+		}
+	}
+}
+
+func TestNormalizeHealthCheckTypeDefaultsSocks5(t *testing.T) {
+	if got := normalizeHealthCheckType("", ProxyTypeSocks5); got != "socks5" {
+		t.Fatalf("expected socks5 default for socks5 upstream, got %q", got)
+	}
+	if got := normalizeHealthCheckType("", ProxyTypeSocks5H); got != "socks5" {
+		t.Fatalf("expected socks5 default for socks5h upstream, got %q", got)
+	}
+	if got := normalizeHealthCheckType("", ProxyTypeHTTP); got != "http" {
+		t.Fatalf("expected http default for http upstream, got %q", got)
+	}
+	if got := normalizeHealthCheckType("", ""); got != "tcp" {
+		t.Fatalf("expected tcp default, got %q", got)
+	}
+}
+
+func TestStartHealthCheckZeroStopsExistingChecker(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "u1", URL: "http://127.0.0.1:1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.StartHealthCheck(1)
+	mgr.StartHealthCheck(0) // must stop existing checker without panic
+	// Verify done is nil (stopped)
+	mgr.mu.Lock()
+	done := mgr.done
+	mgr.mu.Unlock()
+	if done != nil {
+		t.Fatal("expected health check stopped after StartHealthCheck(0)")
+	}
 }

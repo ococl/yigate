@@ -64,25 +64,25 @@ func socks5ClientHandshake(conn net.Conn, u *Upstream) error {
 	methods := []byte{0x00}
 	if user != "" || pass != "" {
 		if len(user) > 255 || len(pass) > 255 {
-			return errors.New("socks5 credentials too long")
+			return newDialError(ErrCategoryUpstream, "auth", errors.New("socks5 credentials too long"))
 		}
 		methods = append(methods, 0x02)
 	}
 	greeting := []byte{0x05, byte(len(methods))}
 	greeting = append(greeting, methods...)
 	if _, err := conn.Write(greeting); err != nil {
-		return err
+		return newDialError(ErrCategoryUpstream, "handshake", err)
 	}
 	var methodResp [2]byte
 	if _, err := io.ReadFull(conn, methodResp[:]); err != nil {
-		return err
+		return newDialError(ErrCategoryUpstream, "handshake", err)
 	}
 	if methodResp[0] != 0x05 || methodResp[1] == 0xff {
-		return errors.New("socks5 auth method rejected")
+		return newDialError(ErrCategoryUpstream, "handshake", errors.New("socks5 auth method rejected"))
 	}
 	if methodResp[1] == 0x02 {
 		if err := socks5Auth(conn, user, pass); err != nil {
-			return err
+			return newDialError(ErrCategoryUpstream, "auth", err)
 		}
 	}
 	return nil
@@ -115,10 +115,7 @@ func socks5SendRequest(conn net.Conn, cmd byte, target string) (string, error) {
 		return "", err
 	}
 	if reply[0] != 0x05 || reply[1] != 0x00 {
-		if reply[0] == 0x05 && reply[1] >= 0x01 && reply[1] <= 0x06 {
-			return "", fmt.Errorf("socks5 target unreachable: 0x%02x", reply[1])
-		}
-		return "", fmt.Errorf("socks5 upstream protocol failed: 0x%02x", reply[1])
+		return "", classifySOCKS5Reply(reply[1], cmd)
 	}
 	replyHost, err := readSOCKS5AddressValue(conn, reply[3])
 	if err != nil {

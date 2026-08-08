@@ -16,10 +16,11 @@ import (
 // 按指数退避调度检测，避免恢复延迟过大。
 // 若某个上游配置了 health_check.interval，则按该上游自己的间隔检查。
 func (m *UpstreamManager) StartHealthCheck(interval int) {
+	// interval <= 0 表示停止健康检查：先停旧再直接返回。
+	m.StopHealthCheck()
 	if interval <= 0 {
 		return
 	}
-	m.StopHealthCheck()
 
 	m.mu.Lock()
 	m.checkInterval = interval
@@ -92,11 +93,14 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 	m.mu.Lock()
 	globalIv := time.Duration(globalInterval) * time.Second
 	for _, u := range m.upstreams {
+		if u.dead {
+			continue
+		}
 		iv := u.HealthCheckInterval()
 		if iv <= 0 {
 			iv = globalIv
 		}
-		if now.After(u.nextCheckAt) {
+		if !now.Before(u.nextCheckAt) {
 			toCheck = append(toCheck, u)
 			u.nextCheckAt = now.Add(iv)
 		}
@@ -109,33 +113,20 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 		go func(u *Upstream) {
 			defer wg.Done()
 			alive := m.check(u)
-			m.mu.Lock()
-			if u.dead && alive {
-				Logger().Infow("upstream recovered", "upstream", u.URL.Host, "name", u.Name)
-				u.failures = 0
-				u.dead = false
-				u.consecutiveDead = 0
-				u.nextProbeAt = time.Time{}
-			} else if !u.dead {
-				if alive {
-					u.failures = 0
-				} else {
-					u.failures++
-					if u.failures >= u.HealthCheckFailureThreshold() {
-						u.dead = true
-						u.deadSince = time.Now()
-						u.consecutiveDead = 1
-						u.nextProbeAt = time.Now().Add(deadProbeBaseInterval)
-						Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
-					}
-				}
+			if alive {
+				m.markAlive(u)
+			} else {
+				m.markDead(u)
 			}
-			status := 0.0
-			if alive || !u.dead {
-				status = 1.0
+			m.mu.Lock()
+			dead := u.dead
+			m.mu.Unlock()
+			status := 1.0
+			if dead {
+				status = 0
+				Logger().Warnw("upstream dead", "upstream", u.URL.Host, "name", u.Name)
 			}
 			MetricSet("yigate_upstream_health_status", status, "upstream="+u.Name)
-			m.mu.Unlock()
 		}(u)
 	}
 	wg.Wait()
@@ -156,40 +147,44 @@ func (m *UpstreamManager) StopHealthCheck() {
 	m.wg.Wait()
 }
 
-// probeDeadUpstreams 检查 nextProbeAt 已到期的 dead 上游，成功则恢复。
+// probeDeadUpstreams 检查 nextProbeAt 已到期的 open 上游。
 func (m *UpstreamManager) probeDeadUpstreams() {
 	now := time.Now()
-	var toProbe []*Upstream
+	type probeLease struct {
+		up         *Upstream
+		generation uint64
+	}
+	leases := make([]probeLease, 0)
 	m.mu.Lock()
-	for _, u := range m.upstreams {
-		if u.dead && !u.nextProbeAt.IsZero() && now.After(u.nextProbeAt) {
-			toProbe = append(toProbe, u)
-		}
-	}
+	upstreams := append([]*Upstream(nil), m.upstreams...)
 	m.mu.Unlock()
-
-	for _, u := range toProbe {
-		alive := m.check(u)
-		m.mu.Lock()
-		if alive {
-			Logger().Infow("upstream recovered (probe)", "upstream", u.URL.Host, "name", u.Name)
-			u.failures = 0
-			u.dead = false
-			u.consecutiveDead = 0
-			u.nextProbeAt = time.Time{}
-			MetricSet("yigate_upstream_health_status", 1.0, "upstream="+u.Name)
-		} else {
-			// 仍未恢复，调度下次探测（指数退避）
-			u.consecutiveDead++
-			backoff := deadProbeBaseInterval * time.Duration(1<<uint(u.consecutiveDead-1))
-			if backoff > deadProbeMaxInterval {
-				backoff = deadProbeMaxInterval
-			}
-			u.nextProbeAt = time.Now().Add(backoff)
-			MetricSet("yigate_upstream_health_status", 0.0, "upstream="+u.Name)
+	for _, up := range upstreams {
+		if generation, ok := m.beginProbe(up, now); ok {
+			leases = append(leases, probeLease{up: up, generation: generation})
 		}
-		m.mu.Unlock()
 	}
+
+	var wg sync.WaitGroup
+	for _, lease := range leases {
+		wg.Add(1)
+		go func(lease probeLease) {
+			defer wg.Done()
+			alive := m.check(lease.up)
+			recovered := m.applyProbeResult(lease.up, lease.generation, alive, time.Now())
+			if recovered {
+				Logger().Infow("upstream recovered (probe)", "upstream", lease.up.URL.Host, "name", lease.up.Name)
+			}
+			m.mu.Lock()
+			dead := lease.up.dead
+			m.mu.Unlock()
+			status := 1.0
+			if dead {
+				status = 0
+			}
+			MetricSet("yigate_upstream_health_status", status, "upstream="+lease.up.Name)
+		}(lease)
+	}
+	wg.Wait()
 }
 
 func (m *UpstreamManager) check(u *Upstream) bool {
@@ -287,6 +282,7 @@ func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) boo
 		pass, _ = up.URL.User.Password()
 	}
 
+	// 协商认证方法：无认证 (0x00) 和用户名/密码 (0x02)。
 	methods := []byte{0x00}
 	if user != "" || pass != "" {
 		methods = append(methods, 0x02)
@@ -301,5 +297,34 @@ func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) boo
 	if _, err := io.ReadFull(conn, resp[:]); err != nil {
 		return false
 	}
-	return resp[0] == 0x05 && resp[1] != 0xff
+	if resp[0] != 0x05 {
+		return false
+	}
+	switch resp[1] {
+	case 0x00:
+		// 无需认证，协议握手成功。
+		return true
+	case 0x02:
+		// 用户名/密码认证 (RFC 1929)。
+		if user == "" && pass == "" {
+			return false
+		}
+		authReq := []byte{0x01, byte(len(user))}
+		authReq = append(authReq, []byte(user)...)
+		authReq = append(authReq, byte(len(pass)))
+		authReq = append(authReq, []byte(pass)...)
+		if _, err := conn.Write(authReq); err != nil {
+			return false
+		}
+		var authResp [2]byte
+		if _, err := io.ReadFull(conn, authResp[:]); err != nil {
+			return false
+		}
+		return authResp[0] == 0x01 && authResp[1] == 0x00
+	case 0xff:
+		// 服务器不接受任何支持的认证方法。
+		return false
+	default:
+		return false
+	}
 }

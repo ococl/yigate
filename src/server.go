@@ -95,14 +95,24 @@ func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 	for _, lc := range cur.Listeners {
 		listens = append(listens, lc.Listen)
 	}
+	mgr := s.Manager()
+	ready := s.Router() != nil && mgr != nil
+	if ready {
+		// 如果有上游配置但没有一个 alive，则 readiness 降级。
+		if !mgr.HasAliveUpstreams() && len(cur.Upstreams) > 0 {
+			ready = false
+		}
+	}
 	return proxy.StatusSnapshot{
 		Status:        "up",
 		Listen:        strings.Join(listens, ","),
 		Management:    cur.Management,
 		UpstreamCount: len(cur.Upstreams),
 		RouterReady:   s.Router() != nil,
-		ManagerReady:  s.Manager() != nil,
+		ManagerReady:  mgr != nil,
 		PprofEnabled:  pprofEnabled,
+		Ready:         ready,
+		Upstreams:     mgr.UpstreamStatuses(),
 	}
 }
 
@@ -163,6 +173,10 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
 	if err != nil {
 		return err
+	}
+	// 热加载时从旧 manager 复制未变化节点的运行时状态（健康、退避、能力等）。
+	if oldState := s.currentRuntime(); oldState != nil && oldState.manager != nil {
+		mgr.MergeRuntimeState(oldState.manager)
 	}
 	listenerRuntimes := make(map[string]*listenerRuntime, len(cfg.Listeners))
 	for i, lc := range cfg.Listeners {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestNormalizeProxyTypes(t *testing.T) {
@@ -115,6 +116,77 @@ func TestUpstreamSupportsProxyType(t *testing.T) {
 	var nilUp *Upstream
 	if nilUp.supportsProxyType("http") {
 		t.Fatal("expected nil upstream unsupported")
+	}
+}
+
+func TestOpenUpstreamDoesNotReenterTrafficPoolWhenProbeIsDue(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{
+		Name: "u1", URL: "http://127.0.0.1:1",
+		HealthCheck: HealthCheckConfig{FailureThreshold: 1},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := mgr.Select()
+	mgr.markDead(up)
+	mgr.mu.Lock()
+	up.nextProbeAt = time.Now().Add(-time.Second)
+	mgr.mu.Unlock()
+	if got := mgr.Select(); got != nil {
+		t.Fatalf("open upstream must remain outside traffic pool before probe succeeds, got %q", got.Name)
+	}
+}
+
+func TestProbeLeaseIsSingleFlightAndRejectsStaleResult(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "u1", URL: "http://127.0.0.1:1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := mgr.Select()
+	mgr.markDeadImmediate(up)
+	mgr.mu.Lock()
+	up.nextProbeAt = time.Now().Add(-time.Second)
+	mgr.mu.Unlock()
+	generation, ok := mgr.beginProbe(up, time.Now())
+	if !ok {
+		t.Fatal("expected first probe lease")
+	}
+	if _, ok := mgr.beginProbe(up, time.Now()); ok {
+		t.Fatal("second concurrent probe lease must be rejected")
+	}
+	mgr.applyProbeResult(up, generation+1, true, time.Now())
+	if !up.dead {
+		t.Fatal("stale probe result must not revive upstream")
+	}
+	mgr.applyProbeResult(up, generation, true, time.Now())
+	if up.dead {
+		t.Fatal("current successful probe must revive upstream")
+	}
+}
+
+func TestProbeBackoffIsCappedWithoutOverflow(t *testing.T) {
+	if got := probeBackoff(1000); got != deadProbeMaxInterval {
+		t.Fatalf("probeBackoff(1000) = %v, want %v", got, deadProbeMaxInterval)
+	}
+}
+
+func TestMarkAliveRequiresConfiguredSuccessThreshold(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{
+		Name: "u1", URL: "http://127.0.0.1:1",
+		HealthCheck: HealthCheckConfig{SuccessThreshold: 2},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := mgr.Select()
+	mgr.markDeadImmediate(up)
+	mgr.markAlive(up)
+	if !up.dead {
+		t.Fatal("one success must not revive an upstream with success_threshold=2")
+	}
+	mgr.markAlive(up)
+	if up.dead {
+		t.Fatal("two consecutive successes must revive upstream")
 	}
 }
 
@@ -359,4 +431,204 @@ func TestPickConsistentHashSingleUpstream(t *testing.T) {
 	if got == nil || got.Name != "only" {
 		t.Fatalf("expected only, got %v", got)
 	}
+}
+
+func TestCapabilityFilteringForBindAndUDP(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "s1", URL: "socks5://127.0.0.1:1", Types: []string{"socks5"}},
+		{Name: "s2", URL: "socks5://127.0.0.1:2", Types: []string{"socks5"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Initially both should be selectable for bind/udp
+	up1 := mgr.SelectSocks5ForBind(nil)
+	if up1 == nil {
+		t.Fatal("expected a bind-capable upstream")
+	}
+
+	// Mark s1 as bind-unsupported
+	s1 := mgr.upstreams[0]
+	mgr.markCapabilityUnsupported(s1, "bind")
+
+	// s1 should be filtered out from bind selection
+	up2 := mgr.SelectSocks5ForBind(nil)
+	if up2 == nil {
+		t.Fatal("expected another bind-capable upstream after filtering s1")
+	}
+	if up2.Name == "s1" {
+		t.Fatal("s1 should be filtered out from bind selection")
+	}
+
+	// s1 should still be selectable for regular CONNECT
+	up3 := mgr.SelectSocks5For(nil)
+	if up3 == nil {
+		t.Fatal("expected a socks5 upstream for connect")
+	}
+
+	// Mark s1 as udp-unsupported too
+	mgr.markCapabilityUnsupported(s1, "udp_associate")
+	up4 := mgr.SelectSocks5ForUDP(nil)
+	if up4 == nil {
+		t.Fatal("expected a udp-capable upstream")
+	}
+	if up4.Name == "s1" {
+		t.Fatal("s1 should be filtered out from udp selection")
+	}
+
+	// Reset bind capability for s1
+	mgr.markCapabilitySupported(s1, "bind")
+	up5 := mgr.SelectSocks5ForBind(nil)
+	if up5 == nil {
+		t.Fatal("expected s1 to be selectable for bind after reset")
+	}
+}
+
+func TestCapabilityErrorDoesNotKillUpstream(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "s1", URL: "socks5://127.0.0.1:1", Types: []string{"socks5"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1 := mgr.upstreams[0]
+
+	// Simulate capability error
+	capErr := newDialErrorCode(ErrCategoryCapability, "request", 0x07, "bind not supported")
+	mgr.markCapabilityUnsupported(s1, "bind")
+
+	// Upstream should NOT be dead
+	mgr.mu.Lock()
+	dead := s1.dead
+	bindUnsupported := s1.bindUnsupported
+	mgr.mu.Unlock()
+
+	if dead {
+		t.Fatal("upstream should not be dead after capability error")
+	}
+	if !bindUnsupported {
+		t.Fatal("bind capability should be marked unsupported")
+	}
+
+	// Should still be selectable for CONNECT
+	up := mgr.SelectSocks5For(nil)
+	if up == nil {
+		t.Fatal("upstream should still be selectable for connect")
+	}
+
+	// Should NOT be selectable for BIND
+	up = mgr.SelectSocks5ForBind(nil)
+	if up != nil {
+		t.Fatal("upstream should not be selectable for bind")
+	}
+
+	_ = capErr
+}
+
+func TestMergeRuntimeStatePreservesUnchangedUpstreams(t *testing.T) {
+	oldMgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "u1", URL: "http://127.0.0.1:8080", Weight: 2},
+		{Name: "u2", URL: "socks5://127.0.0.1:1080", Types: []string{"socks5"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mark u1 as dead with some failures
+	oldMgr.mu.Lock()
+	u1 := oldMgr.upstreams[0]
+	u1.dead = true
+	u1.failures = 3
+	u1.consecutiveDead = 2
+	u1.bindUnsupported = true
+	oldMgr.mu.Unlock()
+
+	// Create new manager with same upstreams but different weight
+	newMgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "u1", URL: "http://127.0.0.1:8080", Weight: 5}, // weight changed
+		{Name: "u2", URL: "socks5://127.0.0.1:1080", Types: []string{"socks5"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newMgr.MergeRuntimeState(oldMgr)
+
+	newMgr.mu.Lock()
+	nu1 := newMgr.upstreams[0]
+	nu2 := newMgr.upstreams[1]
+	nu1Dead := nu1.dead
+	nu1Failures := nu1.failures
+	nu1ConsecutiveDead := nu1.consecutiveDead
+	nu1BindUnsupported := nu1.bindUnsupported
+	nu2Dead := nu2.dead
+	nu2Weight := nu2.Weight
+	newMgr.mu.Unlock()
+
+	// u1 runtime state should be preserved even though weight changed
+	if !nu1Dead {
+		t.Fatal("u1 dead state should be preserved after merge")
+	}
+	if nu1Failures != 3 {
+		t.Fatalf("u1 failures = %d, want 3", nu1Failures)
+	}
+	if nu1ConsecutiveDead != 2 {
+		t.Fatalf("u1 consecutiveDead = %d, want 2", nu1ConsecutiveDead)
+	}
+	if !nu1BindUnsupported {
+		t.Fatal("u1 bindUnsupported should be preserved")
+	}
+	// u2 should be unchanged (alive)
+	if nu2Dead {
+		t.Fatal("u2 should be alive")
+	}
+	_ = nu2Weight
+}
+
+func TestMergeRuntimeStateDoesNotPreserveChangedUpstreams(t *testing.T) {
+	oldMgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "u1", URL: "http://127.0.0.1:8080"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mark u1 as dead
+	oldMgr.mu.Lock()
+	oldMgr.upstreams[0].dead = true
+	oldMgr.upstreams[0].failures = 5
+	oldMgr.mu.Unlock()
+
+	// Create new manager with changed URL (different identity)
+	newMgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "u1", URL: "http://127.0.0.1:9090"}, // URL changed
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newMgr.MergeRuntimeState(oldMgr)
+
+	newMgr.mu.Lock()
+	nu1Dead := newMgr.upstreams[0].dead
+	nu1Failures := newMgr.upstreams[0].failures
+	newMgr.mu.Unlock()
+
+	// URL changed → identity mismatch → state NOT preserved
+	if nu1Dead {
+		t.Fatal("changed upstream should NOT preserve dead state")
+	}
+	if nu1Failures != 0 {
+		t.Fatalf("changed upstream failures = %d, want 0", nu1Failures)
+	}
+}
+
+func TestMergeRuntimeStateNilOld(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "u1", URL: "http://127.0.0.1:8080"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should not panic
+	mgr.MergeRuntimeState(nil)
 }

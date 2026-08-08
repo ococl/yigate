@@ -45,7 +45,7 @@ func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
 		conn.Close()
-		return nil, fmt.Errorf("upstream CONNECT failed: %s", resp.Status)
+		return nil, classifyHTTPConnectStatus(resp.StatusCode, resp.Status)
 	}
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		conn.Close()
