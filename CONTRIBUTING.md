@@ -1,71 +1,92 @@
 # 贡献指南
 
-感谢你对 YiGate 项目的关注！本文档说明了参与贡献的流程和规范。
+感谢你关注 YiGate。本指南说明如何本地开发、提交规范与发布流程。
+
+## 项目边界
+
+YiGate 是 **合规、轻量、可运维** 的统一代理网关。我们 **明确不接受** 任何混淆协议、流量伪装、非合规隧道 / 传输方式相关的功能或代码。提交涉及此类需求的 PR 将不会被合并。
 
 ## 开发环境
 
-- Go 1.21+
-- 依赖使用国内镜像：`GOPROXY=https://goproxy.cn,direct`
+- Go 1.21（依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
+- Node 20+（仅前端 `web/`）
+- 推荐在 Linux 下进行透明代理（TPROXY）相关开发
 
-## 开发流程
+### 后端
 
-1. **Fork 并克隆仓库**，创建功能分支：`git checkout -b feature/your-feature`。
-2. **保持改动小而聚焦**，避免无关重构。
-3. **编写测试**：新增功能或修复 bug 时应补充对应测试。
-4. **本地验证**：确保以下命令全部通过：
-   ```bash
-   cd src
-   GOPROXY=https://goproxy.cn,direct go test ./...
-   GOPROXY=https://goproxy.cn,direct go vet ./...
-   ```
-5. **提交代码**，提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/) 格式。
-6. **创建 Pull Request**，描述改动内容和动机。
-
-## 代码规范
-
-- 遵循 `gofmt` 和 `go vet` 标准。
-- 协议入口改动需覆盖 HTTP、CONNECT、SOCKS5 三类路径。
-- 路由逻辑改动应补充或更新 `router`、`route_cache`、`socks5h` 相关测试。
-- 上游选择逻辑改动应关注优先级、权重、dead 标记、健康检查。
-- 热加载逻辑改动应确认旧组件停止、新组件原子替换。
-- 不要提交真实代理密码、管理 Token、上游账号或私有地址。
-- Go 模块名为 `yigate`，所有 import 路径使用 `yigate/proxy`。
-- Prometheus 指标前缀为 `yigate_`，环境变量前缀为 `YIGATE_`。
-
-## 提交信息格式
-
-```
-<type>(<scope>): <subject>
-
-<body>
+```bash
+cd src
+GOPROXY=https://goproxy.cn,direct go mod download
+GOPROXY=https://goproxy.cn,direct go build -o yigate .
+./yigate -config data/config.yml run
 ```
 
-**type**: `feat`（新功能）、`fix`（修复）、`refactor`（重构）、`docs`（文档）、`test`（测试）、`chore`（杂项）
+### 前端（独立项目）
 
-**scope**: 可选，影响的模块名（如 `proxy`、`config`、`server`、`deploy`）
+```bash
+cd web
+npm install
+npm run dev      # 开发服务器，代理 /api 到 127.0.0.1:8890
+npm run build    # 输出到 web/dist/
+```
+
+前端改动若要进入二进制，需将 `web/dist/` 内容拷贝到 `src/proxy/webui_dist/` 后重新编译 Go。
+
+## 代码约定
+
+- 改动在当前工作区原地完成，避免无关重构；保持 PR 小而聚焦。
+- 优先复用既有模块（路由、上游、DNS、审计），避免重复实现。
+- Go 代码通过 `go vet ./...` 与 `gofmt` 检查。
+- 监听 / socket 选项等平台差异，使用 build tag 拆分文件（如 `server_unix.go` / `server_windows.go`），勿在单一文件中用 `runtime.GOOS` 绕过。
+- 不要提交真实代理密码、管理 Token、上游账号或私有地址；凭据一律通过 `${ENV_VAR}` 注入。
+- `.codebuddy/` 为项目相关数据目录，请勿删除或提交其内容。
+
+## 测试要求
+
+- 修改后端后运行：
+
+  ```bash
+  cd src && GOPROXY=https://goproxy.cn,direct go test ./...
+  ```
+
+- 仅改动 `src/proxy` 时至少运行 `go test ./proxy`；涉及配置、启动、热加载或管理接口时运行全部测试。
+- 前端：`cd web && npm run type-check && npm run build`。
+- 协议入口改动需覆盖 HTTP、CONNECT、SOCKS5 三类路径；路由改动补充 `router` / `route_cache` / `socks5h` 测试；上游改动关注优先级、权重、健康检查与指定上游白名单。
+
+## 提交规范
+
+采用 Conventional Commits，消息使用 **中文** 类型前缀便于团队阅读：
+
+- `feat:` 新功能
+- `fix:` 缺陷修复
+- `refactor:` 重构（不含行为变化）
+- `docs:` 文档
+- `test:` 测试
+- `chore:` 构建 / 工具 / 杂项
 
 示例：
+
 ```
-feat(proxy): add consistent hash upstream selection
-fix(traffic-audit): enforce quota by terminating tunnel on limit exceeded
-docs(readme): add TLS configuration guide
+fix: 修复热加载时监听地址切换导致的 address already in use
+
+refactor: 将默认配置路径从 config/ 迁移到 data/config.yml
 ```
 
-## 测试指南
+提交信息应说明 **为什么** 改，而非仅描述改了什么。
 
-- 单元测试放在 `*_test.go` 文件中，与被测代码同包。
-- 使用标准 `testing` 包，避免引入额外测试框架。
-- 协议测试可使用 `net.Pipe()` 或本地 mock 服务器。
-- 热加载测试应验证旧组件正确停止、新组件原子替换。
+## PR 流程
 
-## 安全注意事项
+1. 从 `main` 或 `dev` 切出特性分支。
+2. 完成开发与测试，确保 `go vet` 与测试通过。
+3. 提交到 `main` / `dev` 的 PR 会触发 CNB 的 `pr-check`（lint + test），未通过不予合并。
+4. 在 PR 描述中说明动机、改动范围与验证方式。
 
-- 不要在代码或配置示例中使用真实凭证。
-- pprof 和管理接口属于敏感入口，不应默认暴露到公网。
-- 目标策略（`destination_policy`）是 SSRF 防护的最后防线，改动需谨慎。
-- TLS 终止在 listener 层统一包装，协议层应保持无感知。
+## 发布
 
-## 报告问题
+- 预览版由 `dev` / `main` 分支推送自动构建（详见 `VERSIONING.md`）。
+- 正式版由 `vX.Y.Z` 标签推送触发，请先确认测试与 changelog 就绪。
+- 发布构建脚本：`./scripts/release.sh X.Y.Z`；平台清单见 `scripts/platforms.sh`。
 
-- 使用 GitHub Issues 报告 bug 或提出功能建议。
-- 安全漏洞请私下联系维护者，不要公开 Issue。
+## 行为准则
+
+保持尊重与专业。对合规边界有疑问时，优先选择“不实现非合规能力”。

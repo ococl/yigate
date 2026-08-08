@@ -1,111 +1,60 @@
-# 版本管理方案
+# 版本与发布规范
 
-YiGate 采用三分支版本管理机制，通过 CNB CI 自动化驱动测试、构建和发布。
+YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨平台归档与 Docker 镜像同时发布，互为补充。
 
-## 分支策略
+## 版本号方案
 
-| 分支 | 用途 | 版本前缀 | 发布类型 |
-|------|------|----------|----------|
-| `dev` | 日常开发 | `0.0.0-dev.<commit>` | 早鸟预览版 (pre-release) |
-| `main` | 集成稳定 | `0.0.0-beta.<commit>` | Beta 版 (pre-release) |
-| `v*` tag | 正式发布 | `X.Y.Z` (取自 tag) | 正式版 (release) |
+版本号由 `scripts/version.sh` 根据 CI 上下文自动推导：
 
-## 工作流
+| 构建来源 | 版本号格式 | 说明 |
+|----------|------------|------|
+| `vX.Y.Z` 标签推送 | `X.Y.Z` | 正式版（去除 `v` 前缀，须为 `x.y.z`） |
+| `dev` 分支推送 | `0.0.0-dev.<short-sha>` | 早鸟预览版（pre-release） |
+| `main` 分支推送 | `0.0.0-beta.<short-sha>` | Beta 版（pre-release） |
+| 其他（本地 / 未匹配） | `0.0.0-dev.<short-sha>` | 开发版 |
 
-```
-dev (日常开发)
- │  push → CI: lint + test + build → 早鸟预览版
- │
- ▼  PR 合并
-main (集成稳定)
- │  push → CI: lint + test + build → Beta 版
- │
- ▼  打 tag (vX.Y.Z)
-tag_push → CI: lint + test + build + verify + release → 正式版
-```
+- `X.Y.Z` 为语义化版本；`short-sha` 为 7 位 commit 短哈希。
+- 本地构建（非 CI）回退到 `git rev-parse --short HEAD`。
 
-### 1. dev 分支 — 早鸟预览版
+## 分支与产物映射
 
-- 每次 push 触发完整 CI 流程
-- 版本号: `0.0.0-dev.<commit_short>` (如 `0.0.0-dev.abc12345`)
-- 创建/更新滚动 pre-release: `dev-latest`
-- 用途: 内部测试和早期预览
+| 触发 | 流水线 | 滚动标签 | 产物 |
+|------|--------|----------|------|
+| `dev` 分支 push | early-bird-preview | `dev-latest`（pre-release） | 全平台二进制归档 + SHA256SUMS |
+| `main` 分支 push | beta | `beta-latest`（pre-release） | 全平台二进制归档 + SHA256SUMS + Docker 镜像 `:beta-latest` |
+| `v*` 标签 push | formal-release | 正式 Release（`latest`） | 全平台二进制归档 + SHA256SUMS + Docker 镜像 `:latest` 与 `:X.Y.Z` |
+| PR to `main`/`dev` | pr-check | — | lint + test（质量守护，不发布） |
 
-### 2. main 分支 — Beta 版
+> 二进制产物每次发布前通过 `cnbcool/attachments` 的 `type: DELETE` 清空旧附件，避免累积。
 
-- 每次 push 触发完整 CI 流程
-- 版本号: `0.0.0-beta.<commit_short>` (如 `0.0.0-beta.abc12345`)
-- 创建/更新滚动 pre-release: `beta-latest`
-- 用途: 接近正式发布的公开测试版
+## Docker 镜像标签
 
-### 3. v* Tag — 正式版
+- `dev` 分支：`registry/...:dev-latest`
+- `main` 分支：`registry/...:beta-latest`
+- `v*` 标签：`registry/...:latest` 与 `registry/...:X.Y.Z`
 
-- 推送 `vX.Y.Z` 格式的 tag 触发正式发布流程
-- 版本号: `X.Y.Z` (从 tag 名提取，去掉 `v` 前缀)
-- 创建正式 Release，标记为 latest
-- 上传全部跨平台制品和校验和
-- 用途: 生产环境部署
+镜像基于 `golang:1.21` 多阶段构建，运行阶段使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
 
-## 版本号规则
+## 发布流程
 
-- 遵循 [Semantic Versioning](https://semver.org/) `MAJOR.MINOR.PATCH` 格式
-- Tag 格式: `vX.Y.Z` (如 `v1.2.0`)
-- dev/beta 版本号包含短 commit SHA，确保可追溯
+### 正式版（手动打标签触发）
 
-## CI 流程详情
+1. 在 `main` 上完成功能与回归测试（`go test ./...`、`web` 构建）。
+2. 更新 `CHANGELOG`（CI 通过 `cnbcool/changelog` 自动生成 `LATEST_CHANGELOG.md`）。
+3. 打标签并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。
+4. CI 执行 lint → test → 构建（含 WebUI 嵌入）→ `check-release-files.sh` 校验 → 生成 changelog → 创建 Release（`latest: true`）→ 上传附件 → 构建并推送镜像。
 
-所有分支触发相同的完整流程:
+### 预览版（分支推送自动触发）
 
-1. **lint** — `go vet ./...` 静态检查
-2. **test** — `go test ./...` 单元测试
-3. **build** — 跨平台编译 (20 个目标平台) + Linux 打包 + 校验和
-4. **release** — 创建 CNB Release (仅 tag_push 为正式版)
+- 推送到 `dev` / `main` 即自动构建预览版并更新对应滚动标签与 Docker 镜像（仅 `main` 与 `v*` 推送镜像）。
 
-正式版额外步骤:
+## 产物校验
 
-5. **verify** — 校验制品文件集合完整性
-6. **changelog** — 自动生成变更日志
-7. **upload** — 上传全部制品到 Release
+- 每次发布生成 `SHA256SUMS`，列出全部归档哈希。
+- `scripts/check-release-files.sh` 在正式版构建时校验产物完整性与命名规范。
+- 跨平台目标清单见 `scripts/platforms.sh`（当前 28 个平台）。
 
-## 如何发布正式版
+## 回滚
 
-```bash
-# 1. 确保 main 分支代码已测试通过
-git checkout main
-git pull origin main
-
-# 2. 创建版本 tag
-git tag v1.2.0
-git push origin v1.2.0
-
-# 3. CNB CI 自动触发正式发布流程
-#    构建完成后在仓库 Release 页面查看制品
-```
-
-## 版本号注入
-
-版本号通过 Go ldflags 注入到二进制文件:
-
-```
-go build -ldflags "-s -w \
-  -X main.version=<version> \
-  -X main.commit=<commit> \
-  -X main.buildTime=<build_time>"
-```
-
-运行 `yigate -version` 可查看版本信息:
-
-```
-yigate version 1.2.0 (commit abc12345, built 2025-07-15T10:00:00Z)
-```
-
-## 相关文件
-
-| 文件 | 说明 |
-|------|------|
-| `.cnb.yml` | CNB CI/CD 流水线配置 |
-| `scripts/version.sh` | 版本号确定逻辑 |
-| `scripts/ci-build.sh` | CI 构建脚本 |
-| `scripts/release.sh` | 本地正式发布脚本 (从已有 tag 构建) |
-| `scripts/platforms.sh` | 跨平台构建配置 |
-| `Makefile` | 本地构建入口 |
+- 滚动标签（`dev-latest` / `beta-latest`）通过 `git tag -f` 前移，旧版本可由历史 Release 归档获取。
+- 正式版标签不可变，回滚请发布新的 `vX.Y.Z` 或重新指向历史提交。

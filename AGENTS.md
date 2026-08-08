@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是让 HTTP、HTTPS CONNECT 和 SOCKS5 共用单端口接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和管理接口提供可运维的代理能力。项目定位为合规矩形、轻量可运维的统一代理网关，明确不支持任何混淆/非合规协议。
+YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是让 HTTP、HTTPS CONNECT 和 SOCKS5 共用单端口接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和管理接口提供可运维的代理能力。项目定位为合规、轻量、可运维的统一代理网关，明确不支持任何混淆/非合规协议。
 
 ## 工作约定
 
@@ -21,44 +21,50 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 - `zap`：结构化日志。
 - `lumberjack`：按大小滚动日志。
 - `yaml.v3`：YAML 配置解析。
-- 前端：Vue 3 + Vite + TypeScript + antdv-next + Pinia + Vue Router（位于 `web/`，独立管理）
+- 前端：Vue 3 + Vite + TypeScript + antdv-next + Pinia + Vue Router（位于 `web/`，独立管理）。
 
 ## 重要目录
 
 ```text
 .
-├── src/                 # Go 模块根目录（应用后端）
-│   ├── go.mod           # module yigate
+├── src/                 # Go 模块根目录（应用后端，module yigate）
+│   ├── go.mod
 │   ├── main.go          # CLI 入口、版本信息、服务命令
 │   ├── config.go        # YAML 配置加载、环境变量展开、校验
 │   ├── config_api_impl.go # 运行时配置 API 实现（持久化到 YAML）
 │   ├── server.go        # 统一 TCP Server、协议识别、配置热加载、多监听器
 │   ├── service.go       # system service 封装
 │   ├── config.sample.yml
-│   └── proxy/           # 代理核心
+│   ├── proxy/           # 代理核心
+│   └── proxy/webui_dist/ # 前端构建产物（go:embed 嵌入二进制）
 ├── web/                 # 前端项目（独立自治，非 monorepo）
-│   ├── package.json     # 前端依赖管理
-│   ├── vite.config.ts   # Vite 构建配置
-│   ├── tsconfig.json    # TypeScript 配置
-│   ├── index.html       # HTML 入口
-│   └── src/             # 前端源码
-│       ├── main.ts      # 应用入口
-│       ├── App.vue      # 根组件
-│       ├── router/      # Vue Router 路由配置
-│       ├── stores/      # Pinia 状态管理
-│       ├── views/       # 页面视图
-│       ├── layouts/     # 布局组件
-│       └── assets/      # 静态资源
-├── deploy/              # Docker/systemd 部署模板和公开配置
-│   ├── docker/
-│   ├── systemd/
-│   └── config/
+├── deploy/             # Docker/systemd 部署模板和公开配置
+│   ├── docker/          # Dockerfile、entrypoint.sh、compose.local.yml、compose.lan.yml
+│   ├── systemd/         # yigate.service、install.sh
+│   └── config/          # 配置模板（config.local.yml / config.lan.yml）
 ├── test/e2e/            # 联调和基准测试脚本
-├── scripts/             # 构建、发布和 TPROXY 示例脚本
+├── scripts/             # 构建、发布、平台清单、TPROXY 示例脚本
+├── docker-compose.yml   # 一键本地部署
 ├── build/               # 普通构建中间产物（忽略）
-├── release/             # 正式发布 staging（忽略，每次重建）
-└── .local/              # 本地运行配置、日志和数据（忽略）
+└── release/             # 正式发布 staging（忽略，每次重建）
 ```
+
+## 运行时目录（二进制与 Docker 一致）
+
+二进制原生运行与 Docker 容器使用相同的目录布局，便于在两种形态间切换：
+
+```text
+.
+├── data/
+│   ├── config.yml      # 运行配置（默认路径；首次启动自动从示例生成）
+│   └── geosite.dat     # GeoSite 数据（routing.geosite.path 默认 ../data/geosite.dat）
+└── logs/
+    └── yigate.log      # 滚动日志（log.file 默认 logs/yigate.log）
+```
+
+- 默认 `-config` 值为 `data/config.yml`（相对于启动工作目录）。
+- Docker 中映射为 `./data:/var/lib/yigate/data:rw` 与 `./logs:/var/lib/yigate/logs`。
+- 配置文件相对路径（如 `geosite.dat`）相对于配置文件所在目录解析；`log.file` 相对于启动工作目录解析。
 
 ## 核心模块
 
@@ -67,7 +73,7 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 - `src/main.go`：解析 `-config`、`-version` 和 `run/service/install/uninstall/start/stop/restart` 命令。
 - `src/config.go`：加载配置、展开环境变量、补默认值、校验监听地址和上游引用。包含 TLS、多监听器、DNS、流量审计、目标策略、TPROXY 配置。
 - `src/config_api_impl.go`：实现 `ConfigEditor` 接口，通过原子写入持久化 YAML 配置变更。
-- `src/server.go`：监听 TCP、识别协议、应用配置、管理连接计数、监听配置变更。支持多监听器、TLS 终止、TPROXY 模式。
+- `src/server.go`：监听 TCP、识别协议、应用配置、管理连接计数、监听配置变更。支持多监听器、TLS 终止、TPROXY 模式；热加载先关闭旧 listener 再创建新 listener。
 - `src/service.go`：通过 `kardianos/service` 支持系统服务安装与运行。
 
 ### 协议层
@@ -118,7 +124,7 @@ Go 应用：
 cd src
 GOPROXY=https://goproxy.cn,direct go mod download
 GOPROXY=https://goproxy.cn,direct go build -o yigate .
-./yigate -config config.sample.yml run
+./yigate -config data/config.yml run
 ```
 
 前端（`web/` 目录，独立管理）：
@@ -127,7 +133,7 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 cd web
 npm install
 npm run dev       # 开发服务器
-npm run build     # 生产构建（输出到 web/dist/）
+npm run build     # 生产构建（输出到 web/dist/，需拷贝到 src/proxy/webui_dist/ 后重新编译 Go 以嵌入）
 npm run preview   # 预览构建产物
 ```
 
@@ -140,11 +146,10 @@ make web-build    # 构建前端
 make web-dev      # 启动前端开发服务器
 ```
 
-Docker：
+Docker（一键本地部署）：
 
 ```bash
-cd deploy/docker
-docker compose -f compose.local.yml up --build
+docker compose up --build
 ```
 
 发布构建：
@@ -246,4 +251,6 @@ npm run build       # 构建即验证
 - Prometheus 指标前缀为 `yigate_`，环境变量前缀为 `YIGATE_`。
 - 前端代码位于 `web/`，独立于 Go 应用，有自己的 `package.json` 和构建流程，非 monorepo。
 - 前端使用 antdv-next 组件库，通过 `unplugin-vue-components` + `@antdv-next/auto-import-resolver` 实现按需自动导入。
-- 前端开发服务器默认代理 `/api` 请求到 `http://127.0.0.1:8081`（Go 管理端口）。
+- 前端开发服务器默认代理 `/api` 请求到 `http://127.0.0.1:8890`（Go 管理端口）。
+- 跨平台构建目标清单见 `scripts/platforms.sh`（当前 28 个平台），CI 使用 CNB（`.cnb.yml`）。
+- 监听使用 `SO_REUSEADDR`/`SO_REUSEPORT`（Linux），由 `reuseAddrListen` 实现（build tag 拆分到 `server_unix.go`/`server_windows.go`）。

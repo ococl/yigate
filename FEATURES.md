@@ -1,184 +1,106 @@
-# 项目特性
+# YiGate 功能清单
 
-## 代理协议
+本文档汇总 YiGate 当前已实现的核心能力。功能随版本演进，请以代码与 `src/config.sample.yml` 为准。
 
-- HTTP、HTTPS CONNECT、SOCKS5 共用单个监听端口。
-- 自动识别下游代理协议。
-- 支持 HTTP 普通请求代理转发。
-- 支持 HTTPS CONNECT 隧道转发。
-- 支持 SOCKS5 CONNECT 命令。
-- 支持 SOCKS5 BIND 命令。
-- 支持 SOCKS5 UDP ASSOCIATE 命令。
-- 支持匿名代理访问。
-- 支持 HTTP Basic 下游认证。
-- 支持 SOCKS5 用户名密码认证。
-- 支持 HTTP、HTTPS、SOCKS5、SOCKS5H 上游代理。
-- 支持上游代理认证。
-- 支持为上游声明可用代理类型。
-- 支持多上游代理配置与命名引用。
-- 支持上游优先级选择与同优先级加权轮询。
-- 支持上游健康检查与失败临时摘除、自动恢复。
-- 支持规则指定上游白名单。
-- 支持直连、代理、自动三种路由动作。
-- 支持 direct_first / proxy_first 自动策略。
-- 支持自动路由结果缓存。
-- 支持域名精确匹配、后缀匹配、关键词匹配、正则匹配规则。
-- 支持 IP CIDR 匹配规则（含 IPv6 CIDR）。
-- 支持 GEOSITE 匹配规则与 match 兜底规则。
-- 支持 geosite.dat 本地加载与自动更新。
-- 支持 socks5h 重定向优先转发与失败回退。
-- 支持通过 TLS SNI / HTTP Host 恢复 SOCKS5 IP 目标域名。
-- 支持 SOCKS5 BIND / UDP ASSOCIATE 上游级联与失败回退本地。
-- 支持 chunked HTTP 请求流式转发与大请求体流式转发。
-- 支持可缓冲 HTTP 请求体的上游失败重试。
-- 支持统一错误码分类与 HTTP/SOCKS5 错误响应映射。
-- 支持 SOCKS5 IPv6 地址类型（0x04）请求解析与回复。
+## 1. 协议接入
 
-## TLS 服务端终止
+- **单端口多协议**：同一监听端口自动识别并分流以下三类流量：
+  - HTTP 普通代理（`CONNECT` 以外的方法）
+  - HTTPS 隧道（`CONNECT` 方法）
+  - SOCKS5（含协商、命令分发、IPv6 回复）
+- **SOCKS5 扩展**：
+  - BIND（仅 SOCKS5 上游）
+  - UDP ASSOCIATE（仅 SOCKS5 上游）
+  - socks5h 远端域名解析（域名发往上由侧解析，降低本地 DNS 泄露）
+  - 首包 SNI / HTTP Host 嗅探恢复域名（`socks_sniff.go`，含 IPv6 处理）
+- **TLS 终止**：listener 层统一包装 TLS，支持服务端证书与客户端 CA（mTLS），协议层无感知。
 
-- 支持代理端口 HTTPS / SOCKS5 over TLS。
-- 支持 mTLS 客户端认证（client_ca_file）。
-- 支持全局和 per-listener 级别 TLS 配置。
-- 支持热加载时 TLS 配置变更切换 listener。
+## 2. 路由
 
-## 负载均衡
+- **规则类型**：
+  - `domain`：精确域名
+  - `domain_suffix`：后缀匹配
+  - `domain_keyword`：关键字包含
+  - `domain_regex`：正则匹配
+  - `ip_cidr`：IPv4 / IPv6 CIDR
+  - `geosite`：GeoSite 数据匹配
+  - `match`：通用匹配表达式
+- **动作**：
+  - `direct`：直连
+  - `proxy`：走上游
+  - `auto`：按策略依次尝试并缓存成功结果
+- **规则匹配**：`routing.rules` 按序匹配，首个命中生效；未命中时由 `routing.final` 兜底。
+- **路由缓存**：命中结果可缓存，降低重复解析开销。
 
-- 支持最少连接（least_connections）策略。
-- 支持一致性哈希（consistent_hash）会话保持。
-- 支持源 IP 哈希（source_ip_hash）会话保持。
-- 支持熔断与失败转移优化。
+## 3. 上游与负载
 
-## 健康检查
+- **类型**：`http` / `https` / `socks5` / `socks5h`。
+- **选择策略**：
+  - `weighted_round_robin`：加权轮询
+  - `least_connections`：最少连接
+  - `consistent_hash`：一致性哈希
+  - `source_ip_hash`：源 IP 哈希
+- **优先级与权重**：支持优先级分组、权重、dead 节点标记。
+- **健康检查**：TCP / HTTP / HTTPS / TLS 四种探测，异常节点自动摘除与恢复。
+- **指定上游白名单**：可按规则限定可用上游集合。
 
-- 支持 TCP、HTTP、HTTPS、TLS 握手四种健康检查类型。
-- 支持 HTTP 检查自定义路径与预期响应码。
-- 支持检查间隔、超时、失败阈值 per-upstream 配置。
+## 4. DNS
 
-## 多监听端口
+- 内置 **DoH / DoT** 解析器，可 fallback 到系统 DNS。
+- TTL 缓存，减少重复查询。
+- `ip_precedence`：`ipv4_first`（默认）/ `ipv6_first` / `system`，控制地址优先级。
 
-- 支持多个 listener 配置，每个端口独立规则/上游/认证策略。
-- 支持 per-listener TLS、访问控制、SOCKS5 命令、最大连接数配置。
-- 向后兼容单端口 listen 配置。
-- 支持热加载时按 listener 实例比较与切换。
+## 5. 透明代理（仅 Linux）
 
-## DNS 安全解析
+- 模式：`redirect`（iptables REDIRECT）/ `tproxy`（TPROXY）。
+- `SO_ORIGINAL_DST` 还原原始目标；`IP_TRANSPARENT` 透明转发。
+- `scripts/` 下提供 iptables 与 nftables 示例规则。
+- 非 Linux 平台提供桩函数，调用即返回错误。
 
-- 内置 DoH（DNS-over-HTTPS）解析器。
-- 内置 DoT（DNS-over-TLS）解析器。
-- 支持并行查询 A 和 AAAA 记录。
-- 支持 fallback 到系统 DNS。
-- 内置 60 秒 TTL DNS 结果缓存。
-- 支持 IPv4/IPv6 优先级策略（ipv4_first/ipv6_first/system）。
-- 支持 DNS wire format 编解码（含压缩指针）。
+## 6. 访问控制与安全
 
-## 运行时配置 API
+- **客户端访问控制**：CIDR 白名单、单 IP 限速、用户并发限制。
+- **身份认证**：`users` 定义凭据；为空则允许匿名。
+- **SSRF 防护**：`destination_policy.protect_private` 默认开启，拒绝回环 / 私网 / 链路本地 / 云元数据等敏感目标，独立于路由作为最后防线。
+- **管理接口保护**：`management_auth_token` 启用 Bearer 鉴权；非回环暴露时强制要求。
 
-- 支持通过 REST API 动态增删查改 upstream、路由规则、用户。
-- 变更持久化到 YAML 配置文件，原子写入（临时文件 + rename）。
-- 保留环境变量占位符（${ENV_VAR}）。
-- 上游 URL 脱敏输出，请求体严格校验未知字段。
-- 删除上游时自动清理路由规则和 socks5h_redirect 引用。
-- 所有端点要求管理 Token 认证。
+## 7. 配置与运维
 
-## 流量审计与配额
+- **YAML 配置**：`config.sample.yml` 为完整示例。
+- **环境变量展开**：`${ENV_NAME}` 严格展开，缺失 / 空值导致启动失败（避免泄露凭据）。
+- **热加载**：`fsnotify` 监听变更，原子替换组件；监听地址 / TLS / 上游 / 规则可热更新，先关旧 listener 再建新。
+- **运行时配置 API**：增删查改 upstream / rules / users，原子写入 YAML，保留 `${ENV_VAR}` 占位符。
+- **system service**：`kardianos/service` 支持 install / uninstall / start / stop / restart。
 
-- 按用户、上游、目标域名三维统计流量。
-- 支持每用户和每上游流量配额限制。
-- 支持可配置的配额统计窗口。
-- 通过 /api/v1/traffic 端点查询流量快照。
-- 通过 Prometheus 指标暴露流量统计。
-- 支持热加载时正确停止旧统计器。
+## 8. 可观测性
 
-## 透明代理 / TPROXY
+- `GET /health`：健康状态。
+- `GET /metrics`：Prometheus 文本指标，前缀 `yigate_`，含流量审计指标。
+- `GET /api/v1/status`：运行摘要。
+- `GET /api/v1/traffic`：流量统计快照。
+- `/debug/pprof/*`：仅 `enable_pprof: true` 时启用（敏感入口）。
 
-- Linux 下支持 TPROXY 透明代理模式。
-- 支持 redirect 模式（SO_ORIGINAL_DST）和 tproxy 模式（IP_TRANSPARENT，保留源 IP）。
-- 支持 IPv4 和 IPv6 透明代理。
-- 提供 iptables REDIRECT、iptables TPROXY（含策略路由）、nftables 配置示例脚本。
-- 支持 per-listener TPROXY 配置。
-- 非 Linux 平台有桩函数返回错误。
+## 9. 流量审计与配额
 
-## IPv6 支持
+- 按 `user` / `upstream` / `target` 三维统计收发字节与速率。
+- 支持配额限制，超出可拒绝或限速。
+- 隧道超时与流量统计封装（`timeout.go`）。
 
-- 监听地址支持 IPv6（[::]:port 双栈，[::1]:port 单栈）。
-- DNS 解析支持 IPv6（A + AAAA 并行查询）。
-- 路由规则支持 IPv6 CIDR。
-- SOCKS5 支持 IPv6 地址类型。
-- 目标策略保护 IPv6 敏感地址段（::1/128、::/128、fc00::/7、fe80::/10、ff00::/8）。
-- 访问控制支持 IPv6 CIDR 白名单。
-- SOCKS5 回复根据连接地址族选择 IPv4/IPv6 类型。
+## 10. 管理与 Web 界面
 
-## 目标地址访问策略
+- 内嵌 Vue 3 + antdv-next 管理界面，随二进制启动，无需额外部署。
+- 提供上游、规则、用户的可视化查看与运行时变更。
+- 前端开发服务器代理 `/api` 到 Go 管理端口 `127.0.0.1:8890`。
 
-- SSRF 防护：拒绝回环、RFC1918 私网、ULA、链路本地、元数据等敏感地址。
-- 支持 deny/allow CIDR、域名、端口列表。
-- 支持 default_action 配置（allow/deny）。
-- 直连路径在 DNS 解析后再次校验真实 IP。
+## 11. 部署形态
 
-## 配置管理
+- **原生二进制**：`data/config.yml` + `logs/`，便于与容器共享目录布局。
+- **Docker**：`docker-compose.yml` 一键部署，挂载 `./data` 与 `./logs`。
+- **systemd**：`deploy/systemd/` 提供 unit 与安装脚本。
+- **跨平台构建**：`scripts/platforms.sh` 定义 28 个目标（Linux / macOS / Windows / FreeBSD / OpenBSD / NetBSD，含 arm / mips / riscv / loong64 等）。
 
-- 支持配置文件相对路径解析。
-- 支持 YAML 配置未知字段校验。
-- 支持环境变量注入管理 Token、用户密码和上游地址。
-- 支持严格校验缺失或空值环境变量。
-- 支持上游引用合法性、名称重复、权重范围校验。
-- 支持路由规则 CIDR 和正则表达式合法性校验。
-- 支持访问控制 CIDR 合法性校验。
-- 支持 Go duration 字符串和裸数字按秒解析的时长配置。
-- 支持 DNS、TPROXY、目标策略配置校验。
+## 12. 明确不支持
 
-## 热加载
-
-- 支持配置文件保存后自动热加载。
-- 支持监听地址、管理端口、认证 Token、pprof 开关热切换。
-- 支持上游、路由、日志、超时、访问控制热加载。
-- 支持 TLS、DNS、流量审计、目标策略、TPROXY 配置热加载。
-- 支持手动触发配置重载。
-
-## 管理接口
-
-- 支持独立管理端口。
-- 支持健康检查、运行状态、Prometheus 指标接口。
-- 支持管理接口 POST 触发配置重载。
-- 支持流量统计查询接口。
-- 支持运行时配置 API（增删查改 upstream/规则/用户）。
-- 支持可选 pprof 调试接口。
-- 支持管理接口 Bearer Token 认证与公网管理端口强制认证。
-- 支持管理接口暴力破解防护（认证失败 IP 追踪与限流）。
-
-## 访问控制
-
-- 支持客户端 CIDR 白名单（含 IPv6）。
-- 支持单 IP 连接速率限制。
-- 支持单用户并发连接限制。
-- 支持全局和 per-listener 最大连接数限制。
-
-## 指标
-
-- 支持隧道流量字节和读写次数指标。
-- 支持连接数、请求数、路由决策指标。
-- 支持上游拨号失败和健康状态指标。
-- 支持路由缓存命中/未命中指标。
-- 支持管理接口请求指标。
-- 支持流量审计指标（yigate_traffic_bytes_total）。
-- 指标前缀统一为 `yigate_`，高基数标签有上限保护。
-
-## 日志
-
-- 支持结构化 JSON 和 console 日志格式。
-- 支持 stdout、stderr、文件日志输出。
-- 支持按大小和按日期滚动日志。
-- 支持历史日志 gzip 压缩、保留周期和备份数量配置。
-- 支持日志级别配置。
-
-## 部署与运维
-
-- 支持前台运行和系统服务运行模式。
-- 支持 systemd 服务安装与启停，自定义 systemd 单元模板（RestartSec=10、StartLimitBurst=64）。
-- 支持 Windows 服务延迟自动启动和 macOS launchd KeepAlive。
-- 支持 Docker 多阶段构建、Docker Compose 运行。
-- 支持非 root 容器用户运行。
-- 支持多平台交叉编译发布构建脚本。
-- 支持版本号、commit、构建时间输出。
-- 支持服务优雅停止并等待活跃连接结束。
-- 提供 TPROXY iptables/nftables 部署示例脚本。
+- 任何混淆协议、流量伪装、非合规隧道 / 传输方式。
+- BIND / UDP ASSOCIATE 对 HTTP / HTTPS 上游（仅 SOCKS5 上游支持）。
+- TPROXY 在非 Linux 平台（桩函数返回错误）。
