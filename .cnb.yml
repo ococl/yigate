@@ -88,7 +88,7 @@ dev:
               - "./release/SHA256SUMS"
           allowFailure: true
 
-# ==================== main 分支: Beta 版 ====================
+# ==================== main 分支: 每日构建 ====================
 main:
   push:
     - name: beta
@@ -153,6 +153,13 @@ main:
               - "./release/*.zip"
               - "./release/SHA256SUMS"
           allowFailure: true
+        # ---- 每日构建镜像：每次 main 提交均触发，:main 标签覆盖式推送 ----
+        # 同名标签 push 即覆盖，仓库中 :main 始终指向最后一次构建（每日最后一套产物）。
+        # 与正式 :latest / :X.Y.Z（仅 v* tag 触发）区分，避免污染正式镜像。
+        - name: docker-build
+          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main -f deploy/docker/Dockerfile .
+        - name: docker-push
+          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main
 
 # ==================== PR 检查: 代码质量守护 ====================
 "(main|dev)":

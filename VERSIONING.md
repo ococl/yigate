@@ -21,20 +21,19 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 | 触发 | 流水线 | 滚动标签 | 产物 |
 |------|--------|----------|------|
 | `dev` 分支 push | early-bird-preview | `dev-latest`（pre-release） | 全平台二进制归档 + SHA256SUMS |
-| `main` 分支 push | beta | —（不发布滚动 tag / 镜像） | 全平台二进制归档 + SHA256SUMS（附件桶标签 `main`） |
+| `main` 分支 push | 每日构建 | —（不发布滚动 git tag） | 全平台二进制归档 + SHA256SUMS（桶标签 `main`）+ Docker 镜像 `:main`（覆盖式，每日最后一套） |
 | `v*` 标签 push | formal-release | 正式 Release（`latest`） | 全平台二进制归档 + SHA256SUMS + Docker 镜像 `:latest` 与 `:X.Y.Z` |
 | PR to `main`/`dev` | pr-check | — | lint + test（质量守护，不发布） |
 
-> 注：main 分支不再自动打 `beta-latest` 滚动 git 标签、不再推送 `:beta-latest` Docker 镜像。滚动预览标签仅保留 `dev-latest`；正式镜像统一由 `v*` 标签流水线发布 `:latest` / `:X.Y.Z`。
+> 注：main 分支每次提交均触发每日构建，推送覆盖式 `:main` Docker 镜像（同名标签推送即覆盖，仓库中始终只保留最后一次构建）。滚动 git 标签仅保留 `dev-latest`；正式镜像 `:latest` / `:X.Y.Z` 统一由 `v*` 标签流水线发布。
 
 > 二进制产物每次发布前通过 `cnbcool/attachments` 的 `type: DELETE` 清空旧附件，避免累积。
 
 ## Docker 镜像标签
 
 - `dev` 分支：`registry/...:dev-latest`
+- `main` 分支：`registry/...:main`（每日构建，覆盖式）
 - `v*` 标签：`registry/...:latest` 与 `registry/...:X.Y.Z`
-
-> main 分支不再推送 Docker 镜像（无 `:beta-latest`）。
 
 镜像基于 `golang:1.21` 多阶段构建，运行阶段使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
 
@@ -49,7 +48,7 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 
 ### 预览版（分支推送自动触发）
 
-- 推送到 `dev` / `main` 即自动构建预览版：仅 `dev` 更新 `dev-latest` 滚动标签与镜像；`main` 仅做校验与归档，不发布滚动标签 / 镜像。正式镜像只在 `v*` 标签推送时发布。
+- 推送到 `dev` / `main` 即自动构建：`dev` 更新 `dev-latest` 滚动标签与镜像；`main` 每次提交均构建并覆盖推送 `:main` 每日镜像（仓库中始终只保留最后一套），同时上传归档。正式镜像 `:latest` / `:X.Y.Z` 只在 `v*` 标签推送时发布。
 
 ## 产物校验
 

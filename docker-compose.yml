@@ -1,6 +1,6 @@
 services:
   yigate:
-    image: ${YIGATE_IMAGE:-docker.cnb.cool/yi.team/yigate:latest}
+    image: ${YIGATE_IMAGE:-docker.cnb.cool/yi.team/yigate:main}
     container_name: yigate
     command: ["-config", "/var/lib/yigate/data/config.yml", "run"]
     ports:
