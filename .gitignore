@@ -66,4 +66,7 @@ web/vite.config.d.ts
 web/tsconfig.node.tsbuildinfo
 
 # Embedded webui assets (generated from web/dist at build time)
-src/proxy/webui_dist/
+# 保留占位 index.html（纳入版本控制），确保 `go vet`/`go test`/纯 `go build` 时
+# //go:embed all:webui_dist 始终有文件可嵌入；真实前端产物在构建期覆盖此文件。
+src/proxy/webui_dist/*
+!src/proxy/webui_dist/index.html
