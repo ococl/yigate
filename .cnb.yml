@@ -135,42 +135,24 @@ main:
             此版本来自 main 分支自动构建，接近正式发布但可能存在不稳定因素。
             运行 yigate -version 查看版本详情。
             EOF
-        - name: create-rolling-tag
-          script: |
-            git config user.name "CNB CI"
-            git config user.email "ci@cnb.cool"
-            git tag -f "beta-latest"
-            git push "https://${CNB_TOKEN_USER_NAME}:${CNB_TOKEN}@${CNB_REPO_URL_HTTPS#https://}" "beta-latest" -f
-          allowFailure: true
-        - name: create-release
-          type: git:release
-          options:
-            tag: beta-latest
-            title: YiGate Beta
-            descriptionFromFile: release/RELEASE_NOTES.md
-            preRelease: true
-            overlying: true
-          allowFailure: true
+        # 说明：main 分支不再自动打 beta-latest 滚动 tag、不再发布 beta 镜像。
+        # 正式 Docker 镜像 (`:latest` / `:vX.Y.Z`) 仅由 `v*` tag 流水线发布。
+        # 二进制归档仍照常发布，使用 main 作为附件桶标签（非 git 滚动 tag）。
         - name: clear-old-artifacts
           image: cnbcool/attachments
           settings:
             type: DELETE
-            tag: beta-latest
+            tag: main
           allowFailure: true
         - name: upload-artifacts
           image: cnbcool/attachments
           settings:
-            tag: beta-latest
+            tag: main
             attachments:
               - "./release/*.tar.gz"
               - "./release/*.zip"
               - "./release/SHA256SUMS"
           allowFailure: true
-        # ---- Docker 镜像发布（与二进制产物同时发布）----
-        - name: docker-build
-          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:beta-latest -f deploy/docker/Dockerfile .
-        - name: docker-push
-          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:beta-latest
 
 # ==================== PR 检查: 代码质量守护 ====================
 "(main|dev)":
