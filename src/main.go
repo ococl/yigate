@@ -67,11 +67,19 @@ func main() {
 
 func runForeground(cfgPath string) {
 	// 配置文件不存在时自动生成默认配置（同目录），方便首次启动。
-	if generated, err := WriteDefaultConfigIfMissing(cfgPath); err != nil {
+	// 首次生成会注入一个随机 management_auth_token，仅本次在日志中提示，之后请从配置文件读取。
+	if generated, token, err := WriteDefaultConfigIfMissing(cfgPath); err != nil {
 		fmt.Fprintf(os.Stderr, "init default config: %v\n", err)
 		os.Exit(1)
 	} else if generated {
 		fmt.Fprintf(os.Stderr, "config not found, generated default config at %s\n", cfgPath)
+		if token != "" {
+			fmt.Fprintf(os.Stderr, "======================================================================\n")
+			fmt.Fprintf(os.Stderr, " 首次启动已生成 WebUI 登录密码（management_auth_token）：\n")
+			fmt.Fprintf(os.Stderr, "   %s\n", token)
+			fmt.Fprintf(os.Stderr, " 该密码已写入配置文件，请妥善保存；重启后请从配置文件读取，日志将不再显示。\n")
+			fmt.Fprintf(os.Stderr, "======================================================================\n")
+		}
 	}
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
@@ -104,11 +112,18 @@ func runForeground(cfgPath string) {
 }
 
 func runService(cfgPath string) {
-	if generated, err := WriteDefaultConfigIfMissing(cfgPath); err != nil {
+	if generated, token, err := WriteDefaultConfigIfMissing(cfgPath); err != nil {
 		fmt.Fprintf(os.Stderr, "init default config: %v\n", err)
 		os.Exit(1)
 	} else if generated {
 		fmt.Fprintf(os.Stderr, "config not found, generated default config at %s\n", cfgPath)
+		if token != "" {
+			fmt.Fprintf(os.Stderr, "======================================================================\n")
+			fmt.Fprintf(os.Stderr, " 首次启动已生成 WebUI 登录密码（management_auth_token）：\n")
+			fmt.Fprintf(os.Stderr, "   %s\n", token)
+			fmt.Fprintf(os.Stderr, " 该密码已写入配置文件，请妥善保存；重启后请从配置文件读取，日志将不再显示。\n")
+			fmt.Fprintf(os.Stderr, "======================================================================\n")
+		}
 	}
 	s := newService(cfgPath)
 	if err := s.Run(); err != nil {

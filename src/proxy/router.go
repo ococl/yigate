@@ -32,6 +32,12 @@ const (
 // Duration supports Go duration strings in YAML, with bare numbers treated as seconds.
 type Duration time.Duration
 
+// MarshalYAML 输出人类可读的 duration 字符串（如 "24h"），与 UnmarshalYAML 兼容，
+// 确保默认配置生成后可被原样反序列化（避免被当作纳秒整数误读）。
+func (d Duration) MarshalYAML() (interface{}, error) {
+	return time.Duration(d).String(), nil
+}
+
 func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	if value == nil || strings.TrimSpace(value.Value) == "" {
 		return nil

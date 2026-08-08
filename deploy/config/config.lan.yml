@@ -1,13 +1,15 @@
 # yigate 局域网认证代理模板
 # 监听所有接口，要求用户认证和管理 Token，适合局域网或受信网络部署。
-# 启动前必须设置环境变量 YIGATE_PROXY_PASSWORD 和 YIGATE_MANAGEMENT_TOKEN。
+# 认证凭据请在此处或 WebUI 中手动配置，不再依赖环境变量注入。
 # 请按实际可信网段修改 allowed_clients。
 
 listen: "0.0.0.0:8891"
 users:
-  proxy: "${YIGATE_PROXY_PASSWORD}"
+  proxy: "change-me"   # 代理客户端密码，请修改为强密码
 management: "127.0.0.1:8890"
-management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"
+# management_auth_token: 管理端口鉴权令牌；非空时所有 /api/v1/* 端点要求 Bearer 认证。
+# 若留空且管理端口绑定非回环地址，启动将报错。可在此设置，或在 WebUI 中生成/修改。
+management_auth_token: "change-me-admin-token"
 upstreams: []
 routing:
   final: direct

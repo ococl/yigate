@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +13,16 @@ import (
 	"gopkg.in/yaml.v3"
 	"yigate/proxy"
 )
+
+// generateManagementToken 生成一个高强度随机管理令牌（32 字节，十六进制 64 字符）。
+// 用于首次生成默认配置时作为 WebUI 登录密码。
+func generateManagementToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate management token: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
 
 // TLSConfig 配置代理端口的 TLS 服务端终止。
 // 若 CertFile/KeyFile 均非空，则代理端口会升级为 TLS 监听；
@@ -482,8 +494,17 @@ func validateConfig(cfg *Config) error {
 }
 
 // DefaultConfigYAML 返回带有注释的默认配置 YAML 字符串。
-func DefaultConfigYAML() (string, error) {
+// 若 generateToken 为真，则为 management_auth_token 生成一个高强度随机令牌，
+// 用于首次启动即开启 WebUI 认证（无需用户手动预设密码）。
+func DefaultConfigYAML(generateToken bool) (string, error) {
 	cfg := defaultConfig()
+	if generateToken {
+		token, err := generateManagementToken()
+		if err != nil {
+			return "", err
+		}
+		cfg.ManagementAuthToken = token
+	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return "", err
@@ -495,26 +516,34 @@ func DefaultConfigYAML() (string, error) {
 }
 
 // WriteDefaultConfigIfMissing 若配置文件不存在则写入默认配置。
-// 返回 (written bool, err error)，written 为 true 表示本次生成了新文件。
-func WriteDefaultConfigIfMissing(path string) (bool, error) {
+// 首次生成时会自动注入一个高强度随机 management_auth_token，使 WebUI 默认开启认证。
+// 返回 (written bool, generatedToken string, err error)：
+//   - written 为 true 表示本次生成了新文件；
+//   - generatedToken 仅在 written 为 true 且成功生成随机令牌时非空，供调用方提示用户。
+func WriteDefaultConfigIfMissing(path string) (bool, string, error) {
 	if _, err := os.Stat(path); err == nil {
-		return false, nil
+		return false, "", nil
 	} else if !os.IsNotExist(err) {
-		return false, err
+		return false, "", err
 	}
 
-	content, err := DefaultConfigYAML()
+	content, err := DefaultConfigYAML(true)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	// 确保父目录存在
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
-			return false, mkErr
+			return false, "", mkErr
 		}
 	}
 	if wErr := os.WriteFile(path, []byte(content), 0644); wErr != nil {
-		return false, wErr
+		return false, "", wErr
 	}
-	return true, nil
+	// 从落盘内容中解析出刚生成的令牌（用户预置场景不会走到这里）。
+	var parsed Config
+	if uErr := yaml.Unmarshal([]byte(content), &parsed); uErr == nil {
+		return true, parsed.ManagementAuthToken, nil
+	}
+	return true, "", nil
 }

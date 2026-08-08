@@ -3,8 +3,8 @@
 # 实际代理入口由 listeners 定义。
 listeners:
   - listen: "127.0.0.1:4479"
-    users:
-      username: "${YIGATE_PROXY_PASSWORD}"
+    # users:  # 留空表示允许匿名代理；需要认证时在 WebUI 或此处添加用户名与密码
+    #   username: "change-me"
     access_control:
       allowed_clients: []
       rate_limit:
@@ -18,8 +18,8 @@ listeners:
     #   key_file: "certs/server.key"
     #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
   - listen: "127.0.0.1:4480"
-    users:
-      service: "${YIGATE_SERVICE_PASSWORD}"
+    # users:
+    #   service: "change-me"
     max_connections: 512
   # IPv6 监听示例：[::] 表示双栈监听（IPv4+IPv6），[::1] 仅监听 IPv6 回环。
   # - listen: "[::]:4482"
@@ -35,9 +35,11 @@ listeners:
 # 旧版单监听端口配置（listeners 为空时生效，与上述多监听配置二选一）。
 # listen: "127.0.0.1:4479"
 # users:
-#   username: "${YIGATE_PROXY_PASSWORD}"
+#   username: "change-me"
 management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
-management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"  # 非空时所有管理端点要求 Authorization: Bearer <token>
+# management_auth_token: 非空时所有管理端点要求 Authorization: Bearer <token>。
+# 若配置文件由程序首次自动生成，会注入一个随机高强度令牌（请从中读取）；
+# 也可在 WebUI 中修改，或在此处手动设置明文令牌。
 # 内置 WebUI：二进制已内置前端构建产物（web/dist），默认通过管理端口直接访问。
 # 设为 false 可关闭内置 UI（例如使用独立部署的前端服务）。
 webui:
@@ -60,7 +62,7 @@ webui:
 #   key_file: "certs/server.key"
 #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
 users:
-  username: "${YIGATE_PROXY_PASSWORD}"
+  # username: "change-me"  # 留空表示允许匿名代理；需认证时在此或 WebUI 添加
 upstreams:
   - name: "default"
     url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"

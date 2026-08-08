@@ -6,9 +6,7 @@ services:
     image: yigate:lan
     container_name: yigate-lan
     environment:
-      - YIGATE_PROXY_PASSWORD
-      - YIGATE_MANAGEMENT_TOKEN
-      - YIGATE_TEMPLATE=lan
+      # 认证与密码不通过环境变量注入：在配置文件或 WebUI 中手动配置 management_auth_token 与 users。
     ports:
       - "8891:8891"
       - "127.0.0.1:8890:8890"
