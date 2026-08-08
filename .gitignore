@@ -10,6 +10,11 @@ bin/
 /release/
 /tmp/
 
+# 规划/过程文档（对话与任务规划，不纳入版本控制）
+/findings.md
+/progress.md
+/task_plan.md
+
 # Local runtime state
 /.local/
 .env
