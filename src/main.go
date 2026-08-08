@@ -19,7 +19,7 @@ var (
 )
 
 func main() {
-	configPath := flag.String("config", "config.yml", "path to config file")
+	configPath := flag.String("config", "config/config.yml", "path to config file")
 	showVersion := flag.Bool("version", false, "show version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: yigate [-version] [-config <path>] <command>\n\n")

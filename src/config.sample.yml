@@ -84,7 +84,7 @@ upstreams:
 routing:
   final: auto
   geosite:
-    path: "geosite.dat"
+    path: "../data/geosite.dat"
     auto_update: true
     update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
     update_interval: 24h

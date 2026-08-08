@@ -40,12 +40,11 @@ LABEL org.opencontainers.image.version="${VERSION}" \
 
 RUN apk add --no-cache ca-certificates wget && \
     adduser -D -u 1000 yigate
-WORKDIR /k5
+WORKDIR /var/lib/yigate
 COPY --from=builder /build/yigate /usr/local/bin/yigate
 COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh && \
-    mkdir -p /var/lib/yigate/config /var/lib/yigate/data /var/log/yigate && \
-    chown -R yigate:yigate /var/lib/yigate /var/log/yigate
-USER yigate
+    mkdir -p /var/lib/yigate/config /var/lib/yigate/data /var/lib/yigate/logs && \
+    chown -R yigate:yigate /var/lib/yigate
 EXPOSE 8891 8890
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

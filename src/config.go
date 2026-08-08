@@ -100,6 +100,7 @@ func defaultConfig() *Config {
 				CacheTTL:      proxy.Duration(time.Hour),
 			},
 			GeoSite: proxy.GeoSiteConfig{
+				Path:           "../data/geosite.dat",
 				AutoUpdate:     true,
 				UpdateURL:      "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
 				UpdateInterval: proxy.Duration(24 * time.Hour),
