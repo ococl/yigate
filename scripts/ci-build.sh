@@ -23,6 +23,19 @@ if [[ -z "$VERSION" ]]; then
     VERSION="$(bash "${SCRIPTS_DIR}/version.sh")"
 fi
 
+# 校验 WebUI 前端是否已构建并拷贝到 embed 目录
+# webui_dist 需包含 assets/ 目录（真实前端产物），仅含占位 index.html 视为未集成前端。
+if [[ ! -d "${SRC_DIR}/proxy/webui_dist/assets" ]]; then
+    if [[ -n "${ALLOW_EMBED_FALLBACK:-}" ]]; then
+        echo "warning: webui_dist/assets 缺失，将使用占位页构建（WebUI 不可用）。"
+    else
+        echo "error: webui_dist/assets 不存在，未集成前端产物。" >&2
+        echo "       请先执行: cd web && npm install && npm run build && cp -r web/dist/* src/proxy/webui_dist/" >&2
+        echo "       或设置 ALLOW_EMBED_FALLBACK=1 允许降级构建。" >&2
+        exit 1
+    fi
+fi
+
 COMMIT="${CNB_COMMIT:-$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)}"
 BUILD_TIME="${CNB_BUILD_START_TIME:-$(git -C "${REPO_ROOT}" log -1 --format=%cI 2>/dev/null || echo unknown)}"
 

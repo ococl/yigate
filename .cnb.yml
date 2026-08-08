@@ -36,8 +36,14 @@ dev:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
+        - name: webui-build
+          image: node:20-alpine
+          script: |
+            cd web && npm install && npm run build
         - name: build
-          script: bash scripts/ci-build.sh "$BUILD_VERSION"
+          script: |
+            rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
+            bash scripts/ci-build.sh "$BUILD_VERSION"
         - name: prepare-release-notes
           script: |
             cat > release/RELEASE_NOTES.md <<EOF
@@ -103,8 +109,14 @@ main:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
+        - name: webui-build
+          image: node:20-alpine
+          script: |
+            cd web && npm install && npm run build
         - name: build
-          script: bash scripts/ci-build.sh "$BUILD_VERSION"
+          script: |
+            rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
+            bash scripts/ci-build.sh "$BUILD_VERSION"
         - name: prepare-release-notes
           script: |
             cat > release/RELEASE_NOTES.md <<EOF
@@ -194,8 +206,14 @@ main:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
+        - name: webui-build
+          image: node:20-alpine
+          script: |
+            cd web && npm install && npm run build
         - name: build
-          script: bash scripts/ci-build.sh "$BUILD_VERSION"
+          script: |
+            rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
+            bash scripts/ci-build.sh "$BUILD_VERSION"
         - name: verify-release
           script: bash scripts/check-release-files.sh "$BUILD_VERSION"
         - name: generate-changelog
