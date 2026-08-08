@@ -64,7 +64,10 @@ onUnmounted(() => {
 
 <template>
   <a-spin :spinning="loading">
-    <a-page-header title="仪表盘" sub-title="网关实时状态概览" style="padding: 0 0 16px 0;" />
+    <div style="display: flex; align-items: baseline; gap: 12px; padding: 0 0 16px 0;">
+      <a-typography-title :level="4" style="margin: 0;">仪表盘</a-typography-title>
+      <a-typography-text type="secondary">网关实时状态概览</a-typography-text>
+    </div>
 
     <!-- 状态卡片 -->
     <a-row :gutter="16" style="margin-bottom: 16px;">

@@ -132,11 +132,10 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <a-page-header title="上游管理" style="padding: 0 0 16px 0;">
-    <template #extra>
-      <a-button type="primary" @click="showAddModal">新增上游</a-button>
-    </template>
-  </a-page-header>
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 0 16px 0;">
+    <a-typography-title :level="4" style="margin: 0;">上游管理</a-typography-title>
+    <a-button type="primary" @click="showAddModal">新增上游</a-button>
+  </div>
 
   <a-table
     :data-source="dataSource"

@@ -38,6 +38,11 @@ request.interceptors.request.use(
 request.interceptors.response.use(
   (response) => response,
   (error) => {
+    // 调用方可通过 config._skipErrorHandler 跳过全局错误提示
+    if (error.config?._skipErrorHandler) {
+      return Promise.reject(error)
+    }
+
     if (error.response) {
       const { status } = error.response
 

@@ -76,11 +76,10 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <a-page-header title="路由规则" style="padding: 0 0 16px 0;">
-    <template #extra>
-      <a-button type="primary" @click="showAddModal">新增规则</a-button>
-    </template>
-  </a-page-header>
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 0 16px 0;">
+    <a-typography-title :level="4" style="margin: 0;">路由规则</a-typography-title>
+    <a-button type="primary" @click="showAddModal">新增规则</a-button>
+  </div>
 
   <a-table
     :data-source="dataSource"

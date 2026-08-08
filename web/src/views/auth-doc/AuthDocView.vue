@@ -4,11 +4,10 @@ import { authInfo } from '@/data/api-docs'
 
 <template>
   <div class="auth-doc">
-    <a-page-header
-      title="认证机制"
-      sub-title="YiGate 管理接口认证说明"
-      style="padding: 0 0 16px 0;"
-    />
+    <div style="display: flex; align-items: baseline; gap: 12px; padding: 0 0 16px 0;">
+      <a-typography-title :level="4" style="margin: 0;">认证机制</a-typography-title>
+      <a-typography-text type="secondary">YiGate 管理接口认证说明</a-typography-text>
+    </div>
 
     <!-- 认证概览 -->
     <a-card title="认证概览" size="small" style="margin-bottom: 16px;">

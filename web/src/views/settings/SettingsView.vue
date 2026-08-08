@@ -46,7 +46,7 @@ onMounted(fetchStatus)
 </script>
 
 <template>
-  <a-page-header title="系统设置" style="padding: 0 0 16px 0;" />
+  <a-typography-title :level="4" style="margin: 0 0 16px 0;">系统设置</a-typography-title>
 
   <!-- 配置热加载 -->
   <a-card title="配置热加载" size="small" style="margin-bottom: 16px;">

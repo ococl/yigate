@@ -43,16 +43,16 @@ function copyToClipboard(text: string) {
 <template>
   <div class="api-docs">
     <!-- 页面标题 -->
-    <a-page-header
-      title="API 文档"
-      sub-title="YiGate 管理接口完整说明"
-      style="padding: 0 0 16px 0;"
-    >
-      <template #extra>
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 0 16px 0;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <a-typography-title :level="4" style="margin: 0;">API 文档</a-typography-title>
+        <a-typography-text type="secondary">YiGate 管理接口完整说明</a-typography-text>
+      </div>
+      <div>
         <a-tag color="blue">{{ totalEndpoints }} 个端点</a-tag>
         <a-tag color="purple">{{ apiGroups.length }} 个分组</a-tag>
-      </template>
-    </a-page-header>
+      </div>
+    </div>
 
     <!-- 搜索框 -->
     <a-input-search

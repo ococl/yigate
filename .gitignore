@@ -57,3 +57,6 @@ web/dist-ssr/
 web/*.local
 web/src/auto-imports.d.ts
 web/src/components.d.ts
+web/vite.config.js
+web/vite.config.d.ts
+web/tsconfig.node.tsbuildinfo

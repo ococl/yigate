@@ -26,7 +26,7 @@ async function handleLogin() {
 </script>
 
 <template>
-  <a-card class="login-card" :bordered="false">
+  <a-card class="login-card" variant="borderless">
     <div class="login-header">
       <h1 class="login-title">YiGate</h1>
       <p class="login-subtitle">统一代理网关管理后台</p>
@@ -38,6 +38,7 @@ async function handleLogin() {
           v-model:value="token"
           placeholder="请输入 management_auth_token"
           size="large"
+          autocomplete="off"
           @press-enter="handleLogin"
         />
       </a-form-item>

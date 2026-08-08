@@ -77,21 +77,18 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to) => {
   const token = getToken()
   if (to.name === 'login') {
     if (token) {
-      next('/dashboard')
-    } else {
-      next()
+      return '/dashboard'
     }
-  } else {
-    if (!token) {
-      next('/login')
-    } else {
-      next()
-    }
+    return true
   }
+  if (!token) {
+    return '/login'
+  }
+  return true
 })
 
 export default router
