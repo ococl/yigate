@@ -12,13 +12,15 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-# 将前端构建产物拷贝到 Go embed 目录（webui_dist 已被 .gitignore，仅构建期存在）
-COPY --from=webui /webui/web/dist ./src/proxy/webui_dist
-
 COPY src/go.mod src/go.sum ./src/
 RUN cd src && GOPROXY=https://goproxy.cn,direct go mod download
 
 COPY src/ ./src/
+
+# 将前端构建产物拷贝到 Go embed 目录（webui_dist 已被 .gitignore，仅构建期存在）。
+# 注意：必须在 COPY src/ 之后执行，否则 src 中占位的 index.html 会覆盖真实前端入口。
+COPY --from=webui /webui/web/dist ./src/proxy/webui_dist
+
 COPY deploy/docker/entrypoint.sh ./entrypoint.sh
 RUN cd src && CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct \
     go build -trimpath -mod=readonly \
