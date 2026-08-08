@@ -6,17 +6,25 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-COPY src/go.mod src/go.sum ./
-RUN GOPROXY=https://goproxy.cn,direct go mod download
+# 先构建前端（生成 web/dist）
+COPY web/ ./web/
+RUN cd web && \
+    (command -v npm >/dev/null 2>&1 && npm install && npm run build) || \
+    echo "warning: npm not available, webui will be empty"
 
-COPY src/*.go ./
-COPY src/proxy/ ./proxy/
+# 将前端构建产物拷贝到 Go embed 目录
+RUN mkdir -p src/proxy/webui_dist && \
+    (test -d web/dist && cp -r web/dist/* src/proxy/webui_dist/ 2>/dev/null || true)
+
+COPY src/go.mod src/go.sum ./src/
+RUN cd src && GOPROXY=https://goproxy.cn,direct go mod download
+
+COPY src/ ./src/
 COPY deploy/docker/entrypoint.sh ./entrypoint.sh
-
-RUN CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct \
+RUN cd src && CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct \
     go build -trimpath -mod=readonly \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
-    -o yigate .
+    -o /build/yigate .
 
 # 运行阶段
 FROM alpine:3.20
@@ -29,7 +37,7 @@ LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/yi-team/yigate" \
       org.opencontainers.image.created="${BUILD_TIME}"
 
-RUN apk add --no-cache ca-certificates && \
+RUN apk add --no-cache ca-certificates wget && \
     adduser -D -u 1000 yigate
 WORKDIR /k5
 COPY --from=builder /build/yigate /usr/local/bin/yigate
@@ -38,5 +46,5 @@ RUN chmod +x /usr/local/bin/entrypoint.sh && \
     mkdir -p /var/lib/yigate/config /var/lib/yigate/data /var/log/yigate && \
     chown -R yigate:yigate /var/lib/yigate /var/log/yigate
 USER yigate
-EXPOSE 8891
+EXPOSE 8891 8890
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

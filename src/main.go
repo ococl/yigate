@@ -66,6 +66,13 @@ func main() {
 }
 
 func runForeground(cfgPath string) {
+	// 配置文件不存在时自动生成默认配置（同目录），方便首次启动。
+	if generated, err := WriteDefaultConfigIfMissing(cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "init default config: %v\n", err)
+		os.Exit(1)
+	} else if generated {
+		fmt.Fprintf(os.Stderr, "config not found, generated default config at %s\n", cfgPath)
+	}
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
@@ -97,6 +104,12 @@ func runForeground(cfgPath string) {
 }
 
 func runService(cfgPath string) {
+	if generated, err := WriteDefaultConfigIfMissing(cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "init default config: %v\n", err)
+		os.Exit(1)
+	} else if generated {
+		fmt.Fprintf(os.Stderr, "config not found, generated default config at %s\n", cfgPath)
+	}
 	s := newService(cfgPath)
 	if err := s.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "service run: %v\n", err)

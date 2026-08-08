@@ -1,0 +1,48 @@
+# yigate 快速启动 compose 文件
+# 使用方式：
+#   1. 复制本文件为 docker-compose.override.yml 并按需修改
+#   2. 准备配置文件（不提供则容器首次启动自动生成默认配置）：
+#      mkdir -p ./data && cp deploy/config/config.local.yml ./data/config.yml
+#   3. 启动：docker compose up -d
+#
+# 镜像默认从 CNB 镜像仓库拉取；如需本地构建，将 image 改为 build 上下文：
+#   build:
+#     context: .
+#     dockerfile: deploy/docker/Dockerfile
+
+services:
+  yigate:
+    # 替换为实际 CNB 镜像仓库地址，例如 registry.cnblt.com/your-org/yigate:latest
+    image: ${YIGATE_IMAGE:-yigate/yigate:latest}
+    container_name: yigate
+    command: ["-config", "/var/lib/yigate/config/config.yml", "run"]
+    environment:
+      - YIGATE_TEMPLATE=local
+      # 可选：通过环境变量注入敏感配置（在 config.yml 中使用 ${VAR} 引用）
+      - YIGATE_MANAGEMENT_TOKEN=${YIGATE_MANAGEMENT_TOKEN:-}
+      - YIGATE_PROXY_PASSWORD=${YIGATE_PROXY_PASSWORD:-}
+    ports:
+      - "8891:8891"   # 代理端口（HTTP/HTTPS/SOCKS5 共用）
+      - "127.0.0.1:8890:8890"  # 管理端口（WebUI + API，建议仅暴露到回环）
+    volumes:
+      - ./data/config.yml:/var/lib/yigate/config/config.yml:ro
+      - yigate-data:/var/lib/yigate/data
+      - yigate-logs:/var/log/yigate
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8890/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  yigate-data:
+  yigate-logs:

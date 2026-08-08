@@ -480,3 +480,41 @@ func validateConfig(cfg *Config) error {
 
 	return nil
 }
+
+// DefaultConfigYAML 返回带有注释的默认配置 YAML 字符串。
+func DefaultConfigYAML() (string, error) {
+	cfg := defaultConfig()
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	header := "# yigate 默认配置（自动生成）\n" +
+		"# 修改后可通过 POST /api/v1/reload 或 SIGHUP 热加载。\n" +
+		"# 详见文档：https://github.com/yi-team/yigate\n\n"
+	return header + string(data), nil
+}
+
+// WriteDefaultConfigIfMissing 若配置文件不存在则写入默认配置。
+// 返回 (written bool, err error)，written 为 true 表示本次生成了新文件。
+func WriteDefaultConfigIfMissing(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+
+	content, err := DefaultConfigYAML()
+	if err != nil {
+		return false, err
+	}
+	// 确保父目录存在
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
+			return false, mkErr
+		}
+	}
+	if wErr := os.WriteFile(path, []byte(content), 0644); wErr != nil {
+		return false, wErr
+	}
+	return true, nil
+}

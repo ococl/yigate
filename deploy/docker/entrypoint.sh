@@ -27,4 +27,4 @@ if [ ! -f "${DATA_DIR}/geosite.dat" ] && [ -f "/etc/yigate/geosite.dat" ]; then
   cp /etc/yigate/geosite.dat "${DATA_DIR}/geosite.dat"
 fi
 
-exec /usr/local/bin/yigate -config "$CONFIG_FILE"
+exec /usr/local/bin/yigate -config "$CONFIG_FILE" run
