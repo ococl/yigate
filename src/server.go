@@ -71,6 +71,13 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 		connections: make(map[net.Conn]struct{}),
 		listeners:   make(map[string]net.Listener),
 	}
+	// 应用 WebUI 配置（未设置时默认启用内置前端）
+	if cfg.WebUI != nil {
+		proxy.SetWebUIEnabled(cfg.WebUI.Enabled)
+	} else {
+		proxy.SetWebUIEnabled(true)
+	}
+
 	if err := s.ApplyConfig(cfg); err != nil {
 		return nil, err
 	}

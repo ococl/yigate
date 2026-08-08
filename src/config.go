@@ -50,6 +50,7 @@ type Config struct {
 	AccessControl       proxy.AccessControlConfig     `yaml:"access_control"`
 	Socks5              Socks5Config                  `yaml:"socks5"`
 	EnablePprof         bool                          `yaml:"enable_pprof"`
+	WebUI               *WebUIConfig                  `yaml:"webui"`
 	TLS                 TLSConfig                     `yaml:"tls"`
 	DNS                 proxy.DNSConfig               `yaml:"dns"`
 	TrafficAudit        proxy.TrafficAuditConfig      `yaml:"traffic_audit"`
@@ -60,6 +61,13 @@ type Config struct {
 type Socks5Config struct {
 	AllowBind         bool `yaml:"allow_bind"`
 	AllowUDPAssociate bool `yaml:"allow_udp_associate"`
+}
+
+// WebUIConfig 控制是否启用内置 Web 管理界面。
+// 二进制已内置前端构建产物，可通过此开关关闭（例如使用独立部署的前端）。
+// 配置项未设置时默认启用。
+type WebUIConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 const (

@@ -60,3 +60,6 @@ web/src/components.d.ts
 web/vite.config.js
 web/vite.config.d.ts
 web/tsconfig.node.tsbuildinfo
+
+# Embedded webui assets (generated from web/dist at build time)
+src/proxy/webui_dist/

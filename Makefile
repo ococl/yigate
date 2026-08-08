@@ -18,7 +18,8 @@ LDFLAGS := -s -w \
 
 all: build
 
-build:
+build: web-build
+	rm -rf $(SRC_DIR)/proxy/webui_dist && mkdir -p $(SRC_DIR)/proxy/webui_dist && cp -r $(WEB_DIR)/dist/* $(SRC_DIR)/proxy/webui_dist/
 	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BUILD_DIR)/yigate .
 
 test:

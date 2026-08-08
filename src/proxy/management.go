@@ -110,6 +110,15 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 	mux.HandleFunc("/api/v1/reload", m.handleReload)
 	mux.HandleFunc("/api/v1/config/", m.handleConfigAPI)
 	mux.HandleFunc("/api/v1/traffic", m.handleTraffic)
+
+	// 内置 WebUI：非 API 路径回退到 SPA 应用，由配置开关控制（默认启用）。
+	if WebUIEnabled() {
+		if h, err := WebUIHandler(); err == nil {
+			mux.Handle("/", h)
+		} else {
+			Logger().Warnw("webui handler setup failed", "error", err)
+		}
+	}
 	if enablePprof {
 		m.pprofHandlers = map[string]http.Handler{
 			"/debug/pprof/":             http.HandlerFunc(pprof.Index),
