@@ -539,7 +539,7 @@ func WriteDefaultConfigIfMissing(path string) (bool, string, error) {
 		}
 	}
 	if wErr := os.WriteFile(path, []byte(content), 0644); wErr != nil {
-		return false, "", wErr
+		return false, "", fmt.Errorf("write default config to %s failed: %w (check that the directory is mounted writable)", path, wErr)
 	}
 	// 从落盘内容中解析出刚生成的令牌（用户预置场景不会走到这里）。
 	var parsed Config

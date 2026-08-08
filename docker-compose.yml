@@ -8,7 +8,7 @@ services:
       - "127.0.0.1:8890:8890"  # 管理端口（WebUI + API，建议仅暴露到回环）
     volumes:
       - ./data:/var/lib/yigate/data:rw   # 运行数据目录（含 config.yml，可写，首次启动自动生成默认配置）
-      - ./logs:/var/lib/yigate/logs
+      - ./logs:/var/lib/yigate/logs:rw     # 日志目录需可写（read_only: true 下必须显式 :rw）
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777

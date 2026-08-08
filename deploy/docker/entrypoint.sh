@@ -10,9 +10,9 @@ LOGS_DIR="/var/lib/yigate/logs"
 CONFIG_FILE="${DATA_DIR}/config.yml"
 
 # bind mount 的目录所有者通常是宿主机用户，容器内 yigate 用户可能无写权限。
-# entrypoint 以 root 运行时修正 /var/lib/yigate 下所有目录的属主，确保日志/数据可写。
+# 仅修正挂载点 data/logs 的属主（read_only: true 下不能 chown 只读层父目录，否则 EROFS）。
 if [ "$(id -u)" = "0" ]; then
-  chown -R yigate:yigate /var/lib/yigate
+  chown -R yigate:yigate "${DATA_DIR}" "${LOGS_DIR}" 2>/dev/null || true
 fi
 
 # 若存在打包的 GeoSite 数据种子，复制到 data 目录。
