@@ -72,6 +72,12 @@ dev:
             preRelease: true
             overlying: true
           allowFailure: true
+        - name: clear-old-artifacts
+          image: cnbcool/attachments
+          settings:
+            type: DELETE
+            tag: dev-latest
+          allowFailure: true
         - name: upload-artifacts
           image: cnbcool/attachments
           settings:
@@ -144,6 +150,12 @@ main:
             descriptionFromFile: release/RELEASE_NOTES.md
             preRelease: true
             overlying: true
+          allowFailure: true
+        - name: clear-old-artifacts
+          image: cnbcool/attachments
+          settings:
+            type: DELETE
+            tag: beta-latest
           allowFailure: true
         - name: upload-artifacts
           image: cnbcool/attachments

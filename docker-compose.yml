@@ -3,9 +3,6 @@ services:
     image: ${YIGATE_IMAGE:-docker.cnb.cool/yi.team/yigate:latest}
     container_name: yigate
     command: ["-config", "/var/lib/yigate/config/config.yml", "run"]
-    environment:
-      # 认证与密码不再通过环境变量注入：首次启动会自动生成高强度随机 management_auth_token
-      # 并写入挂载的配置文件，登录 WebUI 后可在界面中修改。
     ports:
       - "8891:8891"   # 代理端口（HTTP/HTTPS/SOCKS5 共用）
       - "127.0.0.1:8890:8890"  # 管理端口（WebUI + API，建议仅暴露到回环）
