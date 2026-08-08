@@ -10,15 +10,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
-	"syscall"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"golang.org/x/sys/unix"
 	"yigate/proxy"
 )
 
@@ -750,31 +747,9 @@ func createListener(addr string, tlsCfg TLSConfig, tproxyCfg proxy.TProxyConfig)
 	return tls.NewListener(baseLn, config), nil
 }
 
-// reuseAddrListen 创建一个开启 SO_REUSEADDR（及 SO_REUSEPORT）的 TCP 监听器。
-// 开启这两个选项后，旧监听器关闭（或处于 TIME_WAIT）时，新监听器可立即
-// 绑定同一地址，避免热加载监听地址回退到原端口时 bind: address already in use。
-// Windows 上不支持 SO_REUSEPORT 且 SO_REUSEADDR 语义不同，故仅使用标准 net.Listen。
-func reuseAddrListen(network, addr string) (net.Listener, error) {
-	if runtime.GOOS == "windows" {
-		return net.Listen(network, addr)
-	}
-	lc := net.ListenConfig{
-		Control: func(_, _ string, c syscall.RawConn) error {
-			var opErr error
-			if err := c.Control(func(fd uintptr) {
-				if opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); opErr != nil {
-					return
-				}
-				// SO_REUSEPORT 让同地址可被多实例复用，进一步降低热加载切换窗口。
-				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-			}); err != nil {
-				return err
-			}
-			return opErr
-		},
-	}
-	return lc.Listen(context.Background(), network, addr)
-}
+// reuseAddrListen 在各平台有独立实现：见 server_unix.go 与 server_windows.go。
+// Unix 上开启 SO_REUSEADDR（及 Linux 的 SO_REUSEPORT），避免热加载时
+// bind: address already in use；Windows 上直接使用标准 net.Listen。
 
 func (s *Server) handle(conn net.Conn, addr string) {
 	state := s.currentRuntime()
