@@ -47,13 +47,17 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		"adduser -D -u 1000 yigate",
 		"COPY --from=builder /build/yigate /usr/local/bin/yigate",
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
-		"USER yigate",
+		"chown -R yigate:yigate /var/lib/yigate",
 		"EXPOSE 8891",
 		"ENTRYPOINT",
 	} {
 		if !bytes.Contains(dockerfile, []byte(want)) {
 			t.Fatalf("Dockerfile missing %q", want)
 		}
+	}
+	// 运行阶段不再使用 USER 指令，由 entrypoint 在 root 启动时降权到 yigate。
+	if bytes.Contains(dockerfile, []byte("\nUSER yigate")) {
+		t.Fatalf("Dockerfile should not contain a USER directive (use entrypoint privilege drop)")
 	}
 
 	// Compose 模板已拆分至 deploy/docker/
@@ -74,7 +78,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/yigate -config /var/lib/yigate/config/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "User=yigate", "Group=yigate", "WantedBy=multi-user.target"} {
+	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/yigate -config /var/lib/yigate/data/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "User=yigate", "Group=yigate", "WantedBy=multi-user.target"} {
 		if !bytes.Contains(serviceUnit, []byte(want)) {
 			t.Fatalf("yigate.service missing %q", want)
 		}

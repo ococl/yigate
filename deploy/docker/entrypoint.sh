@@ -5,10 +5,9 @@ set -e
 # 与 docker-compose 的 volumes 挂载点一致。
 cd /var/lib/yigate
 
-CONFIG_DIR="/var/lib/yigate/config"
 DATA_DIR="/var/lib/yigate/data"
 LOGS_DIR="/var/lib/yigate/logs"
-CONFIG_FILE="${CONFIG_DIR}/config.yml"
+CONFIG_FILE="${DATA_DIR}/config.yml"
 
 # bind mount 的目录所有者通常是宿主机用户，容器内 yigate 用户可能无写权限。
 # entrypoint 以 root 运行时修正 /var/lib/yigate 下所有目录的属主，确保日志/数据可写。

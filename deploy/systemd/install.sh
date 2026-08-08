@@ -7,7 +7,6 @@ set -e
 
 INSTALL_DIR="/usr/local/bin"
 TEMPLATE_DIR="/etc/yigate"
-CONFIG_DIR="/var/lib/yigate/config"
 DATA_DIR="/var/lib/yigate/data"
 LOG_DIR="/var/log/yigate"
 SERVICE_FILE="/etc/systemd/system/yigate.service"
@@ -61,18 +60,18 @@ mkdir -p "${TEMPLATE_DIR}"
 install -m 644 "$TEMPLATE_FILE" "${TEMPLATE_DIR}/${TEMPLATE_FILE}"
 
 # 创建可写运行目录
-mkdir -p "${CONFIG_DIR}" "${DATA_DIR}" "${LOG_DIR}"
+mkdir -p "${DATA_DIR}" "${LOG_DIR}"
 
 # 首次安装时从模板初始化运行配置
-if [ ! -f "${CONFIG_DIR}/config.yml" ]; then
-    install -m 640 -o yigate -g yigate "$TEMPLATE_FILE" "${CONFIG_DIR}/config.yml"
-    echo "运行配置已初始化: ${CONFIG_DIR}/config.yml"
+if [ ! -f "${DATA_DIR}/config.yml" ]; then
+    install -m 640 -o yigate -g yigate "$TEMPLATE_FILE" "${DATA_DIR}/config.yml"
+    echo "运行配置已初始化: ${DATA_DIR}/config.yml"
 else
-    echo "运行配置已存在，跳过覆盖: ${CONFIG_DIR}/config.yml"
+    echo "运行配置已存在，跳过覆盖: ${DATA_DIR}/config.yml"
 fi
 
 # 确保目录归属运行用户
-chown -R yigate:yigate "${CONFIG_DIR}" "${DATA_DIR}" "${LOG_DIR}"
+chown -R yigate:yigate "${DATA_DIR}" "${LOG_DIR}"
 
 # 安装服务文件
 install -m 644 yigate.service "${SERVICE_FILE}"

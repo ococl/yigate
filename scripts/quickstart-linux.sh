@@ -4,7 +4,7 @@
 #
 # 功能：
 #   1. 若缺失则自动下载/构建二进制（已存在 ./yigate 或 /usr/local/bin/yigate 时跳过）
-#   2. 若缺失则自动生成默认配置文件（同目录 config.yml）
+#   2. 若缺失则自动生成默认配置文件（data/config.yml）
 #   3. 前台启动 yigate，Ctrl+C 退出
 #   4. 支持 install 子命令注册为 systemd 服务
 #
@@ -20,7 +20,7 @@ set -euo pipefail
 YIGATE_VERSION="${YIGATE_VERSION:-latest}"
 YIGATE_BIN_DIR="${YIGATE_BIN_DIR:-/usr/local/bin}"
 YIGATE_DATA_DIR="${YIGATE_DATA_DIR:-/var/lib/yigate}"
-YIGATE_CONFIG="${YIGATE_CONFIG:-$PWD/config.yml}"
+YIGATE_CONFIG="${YIGATE_CONFIG:-$PWD/data/config.yml}"
 YIGATE_LOG_DIR="${YIGATE_LOG_DIR:-/var/log/yigate}"
 GITHUB_REPO="${GITHUB_REPO:-yi-team/yigate}"
 

@@ -138,8 +138,8 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 ## 常用命令
 
 ```bash
-# 前台运行
-./yigate -config config.yml run
+# 前台运行（默认配置位于 data/config.yml，首次运行自动生成）
+./yigate -config data/config.yml run
 
 # 安装为系统服务
 sudo ./yigate -config /etc/yigate/config.yml install

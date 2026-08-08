@@ -2,13 +2,12 @@ services:
   yigate:
     image: ${YIGATE_IMAGE:-docker.cnb.cool/yi.team/yigate:latest}
     container_name: yigate
-    command: ["-config", "/var/lib/yigate/config/config.yml", "run"]
+    command: ["-config", "/var/lib/yigate/data/config.yml", "run"]
     ports:
       - "8891:8891"   # 代理端口（HTTP/HTTPS/SOCKS5 共用）
       - "127.0.0.1:8890:8890"  # 管理端口（WebUI + API，建议仅暴露到回环）
     volumes:
-      - ./config:/var/lib/yigate/config:rw   # 配置文件目录（可写，首次启动自动生成默认配置）
-      - ./data:/var/lib/yigate/data
+      - ./data:/var/lib/yigate/data:rw   # 运行数据目录（含 config.yml，可写，首次启动自动生成默认配置）
       - ./logs:/var/lib/yigate/logs
     read_only: true
     tmpfs:

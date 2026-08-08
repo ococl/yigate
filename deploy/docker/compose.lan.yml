@@ -11,9 +11,9 @@ services:
       - "8891:8891"
       - "127.0.0.1:8890:8890"
     volumes:
-      - ../config/config.lan.yml:/etc/yigate/config.lan.yml:ro
-      - yigate-data:/var/lib/yigate
-      - yigate-logs:/var/log/yigate
+      - ../config/config.lan.yml:/var/lib/yigate/data/config.yml:ro
+      - yigate-data:/var/lib/yigate/data
+      - yigate-logs:/var/lib/yigate/logs
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
