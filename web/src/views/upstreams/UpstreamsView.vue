@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { message } from 'antdv-next'
 import {
   listUpstreams,
@@ -9,18 +9,24 @@ import {
   checkUpstream,
   checkAllUpstreams,
 } from '@/api/upstreams'
+import { getStatus } from '@/api/system'
 import type {
   UpstreamInfo,
   AddUpstreamRequest,
   UpdateUpstreamRequest,
   UpstreamCheckResult,
+  UpstreamStatus,
 } from '@/types/api'
 
 const dataSource = ref<UpstreamInfo[]>([])
 const loading = ref(false)
 const checking = ref(false)
 const checkingAll = ref(false)
+// 本次会话内手动检查的结果，仅用于补充失败原因文案
 const lastChecks = ref<Map<string, UpstreamCheckResult>>(new Map())
+// 服务端运行时健康状态（进程内存态），刷新页面后仍可读取
+const runtimeStatus = ref<Map<string, UpstreamStatus>>(new Map())
+let statusTimer: number | undefined
 
 const modalVisible = ref(false)
 const modalTitle = ref('')
@@ -53,13 +59,29 @@ const columns = [
   { title: '策略', dataIndex: 'strategy', key: 'strategy' },
   { title: '健康检查', dataIndex: 'health_check_type', key: 'health_check_type', width: 110 },
   { title: '健康状态', key: 'check_status', width: 120 },
+  { title: '最后检查', key: 'last_check', width: 180 },
   { title: '操作', key: 'action', width: 200, fixed: 'right' as const },
 ]
+
+// 从 /api/v1/status 拉取服务端运行时健康状态。
+// 状态由网关进程周期性健康检查维护，前端只做读取展示。
+async function fetchRuntimeStatus() {
+  try {
+    const snapshot = await getStatus()
+    const next = new Map<string, UpstreamStatus>()
+    for (const s of snapshot.upstreams || []) {
+      next.set(s.name, s)
+    }
+    runtimeStatus.value = next
+  } catch {
+    // 状态读取失败不阻塞列表展示
+  }
+}
 
 async function fetchData() {
   loading.value = true
   try {
-    const res = await listUpstreams()
+    const [res] = await Promise.all([listUpstreams(), fetchRuntimeStatus()])
     dataSource.value = res.upstreams || []
   } finally {
     loading.value = false
@@ -194,18 +216,38 @@ async function handleCheckAll() {
 }
 
 function statusText(record: UpstreamInfo) {
-  const check = lastChecks.value.get(record.name)
-  if (!check) return '—'
-  return check.alive ? '可用' : `不可用：${check.error || 'unknown'}`
+  const rt = runtimeStatus.value.get(record.name)
+  if (!rt) return '未知'
+  if (!rt.dead) return '可用'
+  const err = lastChecks.value.get(record.name)?.error
+  return err ? `不可用：${err}` : '不可用'
 }
 
 function statusColor(record: UpstreamInfo) {
-  const check = lastChecks.value.get(record.name)
-  if (!check) return 'default'
-  return check.alive ? 'success' : 'error'
+  const rt = runtimeStatus.value.get(record.name)
+  if (!rt) return 'default'
+  return rt.dead ? 'error' : 'success'
 }
 
-onMounted(fetchData)
+function lastCheckText(record: UpstreamInfo) {
+  const at = runtimeStatus.value.get(record.name)?.last_check_at
+  if (!at) return '—'
+  const t = new Date(at)
+  if (Number.isNaN(t.getTime()) || t.getTime() <= 0) return '—'
+  return t.toLocaleString()
+}
+
+onMounted(() => {
+  fetchData()
+  // 定期同步服务端健康状态，避免页面长时间停留后展示过期信息
+  statusTimer = window.setInterval(fetchRuntimeStatus, 15000)
+})
+
+onUnmounted(() => {
+  if (statusTimer !== undefined) {
+    window.clearInterval(statusTimer)
+  }
+})
 </script>
 
 <template>
@@ -231,6 +273,9 @@ onMounted(fetchData)
       </template>
       <template v-else-if="column.key === 'check_status'">
         <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
+      </template>
+      <template v-else-if="column.key === 'last_check'">
+        <a-typography-text type="secondary">{{ lastCheckText(record) }}</a-typography-text>
       </template>
       <template v-else-if="column.key === 'action'">
         <a-space>

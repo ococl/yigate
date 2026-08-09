@@ -258,6 +258,7 @@ type Upstream struct {
 	deadSince       time.Time // 最近一次被标记 dead 的时间
 	nextProbeAt     time.Time // 下次允许主动探测恢复的时间（指数退避）
 	nextCheckAt     time.Time // 下次健康检查时间（用于 per-upstream interval）
+	lastCheckAt     time.Time // 最近一次健康检查完成的时间（内存态，用于展示）
 	consecutiveDead int       // 连续处于 dead 的探测周期数（用于计算退避）
 	probeGeneration uint64    // 当前探测 generation
 	probeInFlight   bool      // 是否已有探测正在执行
@@ -645,6 +646,7 @@ func (m *UpstreamManager) MergeRuntimeState(oldMgr *UpstreamManager) {
 		nu.deadSince = ou.deadSince
 		nu.nextProbeAt = ou.nextProbeAt
 		nu.nextCheckAt = now // 立即触发一次检查
+		nu.lastCheckAt = ou.lastCheckAt
 		nu.consecutiveDead = ou.consecutiveDead
 		nu.successes = ou.successes
 		nu.bindUnsupported = ou.bindUnsupported
@@ -677,6 +679,7 @@ func (m *UpstreamManager) UpstreamStatuses() []UpstreamStatus {
 			ConsecutiveDead: u.consecutiveDead,
 			NextProbeAt:     u.nextProbeAt,
 			NextCheckAt:     u.nextCheckAt,
+			LastCheckAt:     u.lastCheckAt,
 			BindUnsupported: u.bindUnsupported,
 			UDPUnsupported:  u.udpUnsupported,
 			ActiveConns:     u.activeConns.Load(),

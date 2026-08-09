@@ -106,8 +106,8 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
 }
 
 .code-block {
-  background: #f5f5f5;
-  border: 1px solid #e8e8e8;
+  background: var(--ant-color-fill-quaternary, #f5f5f5);
+  border: 1px solid var(--ant-color-border-secondary, #e8e8e8);
   border-radius: 6px;
   overflow: hidden;
   margin: 8px 0;
@@ -118,10 +118,10 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
   justify-content: space-between;
   align-items: center;
   padding: 4px 12px;
-  background: #fafafa;
-  border-bottom: 1px solid #e8e8e8;
+  background: var(--ant-color-fill-tertiary, #fafafa);
+  border-bottom: 1px solid var(--ant-color-border-secondary, #e8e8e8);
   font-size: 12px;
-  color: #666;
+  color: var(--ant-color-text-secondary, #666);
 }
 
 .code-block pre {

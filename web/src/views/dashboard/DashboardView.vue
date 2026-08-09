@@ -76,7 +76,7 @@ onUnmounted(() => {
           <a-statistic
             title="运行状态"
             :value="health?.status || '-'"
-            :value-style="{ color: health?.status === 'up' ? '#3f8600' : '#cf1322' }"
+            :value-style="{ color: health?.status === 'up' ? 'var(--ant-color-success, #3f8600)' : 'var(--ant-color-error, #cf1322)' }"
           />
         </a-card>
       </a-col>
@@ -90,7 +90,7 @@ onUnmounted(() => {
           <a-statistic
             title="路由就绪"
             :value="health?.router_ready ? '是' : '否'"
-            :value-style="{ color: health?.router_ready ? '#3f8600' : '#cf1322' }"
+            :value-style="{ color: health?.router_ready ? 'var(--ant-color-success, #3f8600)' : 'var(--ant-color-error, #cf1322)' }"
           />
         </a-card>
       </a-col>
@@ -99,7 +99,7 @@ onUnmounted(() => {
           <a-statistic
             title="管理就绪"
             :value="health?.manager_ready ? '是' : '否'"
-            :value-style="{ color: health?.manager_ready ? '#3f8600' : '#cf1322' }"
+            :value-style="{ color: health?.manager_ready ? 'var(--ant-color-success, #3f8600)' : 'var(--ant-color-error, #cf1322)' }"
           />
         </a-card>
       </a-col>
@@ -133,7 +133,7 @@ onUnmounted(() => {
           <a-statistic
             title="总流入"
             :value="formatBytes(totalBytesIn)"
-            :value-style="{ color: '#3f8600' }"
+            :value-style="{ color: 'var(--ant-color-success, #3f8600)' }"
           />
         </a-col>
         <a-col :span="8">

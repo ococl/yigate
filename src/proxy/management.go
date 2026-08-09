@@ -35,6 +35,7 @@ type UpstreamStatus struct {
 	ConsecutiveDead int       `json:"consecutive_dead"`
 	NextProbeAt     time.Time `json:"next_probe_at,omitempty"`
 	NextCheckAt     time.Time `json:"next_check_at,omitempty"`
+	LastCheckAt     time.Time `json:"last_check_at,omitempty"`
 	BindUnsupported bool      `json:"bind_unsupported"`
 	UDPUnsupported  bool      `json:"udp_unsupported"`
 	ActiveConns     int64     `json:"active_conns"`

@@ -9,6 +9,23 @@ export interface HealthStatus {
   timestamp: string
 }
 
+export interface UpstreamStatus {
+  name: string
+  url: string
+  types: string[]
+  dead: boolean
+  dead_since?: string
+  failures: number
+  successes: number
+  consecutive_dead: number
+  next_probe_at?: string
+  next_check_at?: string
+  last_check_at?: string
+  bind_unsupported: boolean
+  udp_unsupported: boolean
+  active_conns: number
+}
+
 export interface StatusSnapshot {
   status: string
   listen: string
@@ -17,6 +34,8 @@ export interface StatusSnapshot {
   router_ready: boolean
   manager_ready: boolean
   pprof_enabled: boolean
+  ready?: boolean
+  upstreams?: UpstreamStatus[]
   timestamp: string
 }
 

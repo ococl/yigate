@@ -120,6 +120,7 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 				m.markDead(u)
 			}
 			m.mu.Lock()
+			u.lastCheckAt = time.Now()
 			dead := u.dead
 			m.mu.Unlock()
 			status := 1.0
@@ -173,7 +174,9 @@ func (m *UpstreamManager) CheckUpstream(name string) (UpstreamCheckResult, error
 		m.markDead(u)
 	}
 
+	checkedAt := time.Now()
 	m.mu.Lock()
+	u.lastCheckAt = checkedAt
 	dead := u.dead
 	consecutiveDead := u.consecutiveDead
 	m.mu.Unlock()
@@ -187,7 +190,7 @@ func (m *UpstreamManager) CheckUpstream(name string) (UpstreamCheckResult, error
 	res := UpstreamCheckResult{
 		Name:      u.Name,
 		Alive:     !dead,
-		CheckedAt: time.Now(),
+		CheckedAt: checkedAt,
 	}
 	if dead {
 		res.Error = fmt.Sprintf("unhealthy (consecutive dead: %d)", consecutiveDead)
@@ -251,6 +254,7 @@ func (m *UpstreamManager) probeDeadUpstreams() {
 				Logger().Infow("upstream recovered (probe)", "upstream", lease.up.URL.Host, "name", lease.up.Name)
 			}
 			m.mu.Lock()
+			lease.up.lastCheckAt = time.Now()
 			dead := lease.up.dead
 			m.mu.Unlock()
 			status := 1.0

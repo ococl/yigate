@@ -27,7 +27,7 @@ function handleLogout() {
       v-model:collapsed="appStore.sidebarCollapsed"
       :trigger="null"
       collapsible
-      :theme="appStore.isDark ? 'dark' : 'dark'"
+      :theme="appStore.isDark ? 'light' : 'dark'"
     >
       <div class="logo">
         <span v-if="!appStore.sidebarCollapsed" class="logo-text">YiGate</span>
@@ -129,7 +129,7 @@ function handleLogout() {
 }
 
 .header {
-  background: #fff;
+  background: var(--ant-color-bg-container, #fff);
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -147,7 +147,7 @@ function handleLogout() {
   margin: 16px;
   padding: 24px;
   min-height: 360px;
-  background: #fff;
+  background: var(--ant-color-bg-container, #fff);
   border-radius: 8px;
 }
 </style>

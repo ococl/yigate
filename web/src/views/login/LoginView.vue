@@ -79,11 +79,11 @@ async function handleLogin() {
   font-size: 28px;
   font-weight: bold;
   margin: 0;
-  color: #1677ff;
+  color: var(--ant-color-primary, #1677ff);
 }
 
 .login-subtitle {
-  color: #666;
+  color: var(--ant-color-text-secondary, #666);
   margin-top: 4px;
 }
 
