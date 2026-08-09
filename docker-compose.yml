@@ -16,6 +16,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - SETGID   # su 降权到 yigate 需要 setgroups
+      - SETUID   # su 降权到 yigate 需要 setuid
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8890/health"]

@@ -38,7 +38,7 @@ LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/yi-team/yigate" \
       org.opencontainers.image.created="${BUILD_TIME}"
 
-RUN apk add --no-cache ca-certificates wget && \
+RUN apk add --no-cache ca-certificates wget util-linux && \
     adduser -D -u 1000 yigate
 WORKDIR /var/lib/yigate
 COPY --from=builder /build/yigate /usr/local/bin/yigate

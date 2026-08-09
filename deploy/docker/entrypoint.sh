@@ -24,8 +24,10 @@ if [ ! -f "${DATA_DIR}/geosite.dat" ] && [ -f "/etc/yigate/geosite.dat" ]; then
 fi
 
 # 降权到 yigate 运行主程序，避免以 root 长期运行。
+# 使用 setpriv 直接 setuid/setgid 并清空附加组，避免 su 的 login shell 与 setgroups 副作用。
 if [ "$(id -u)" = "0" ]; then
-  exec su -s /bin/sh yigate -c "exec /usr/local/bin/yigate -config \"$CONFIG_FILE\" run"
+  exec setpriv --reuid=1000 --regid=1000 --clear-groups \
+    /usr/local/bin/yigate -config "$CONFIG_FILE" run
 else
   exec /usr/local/bin/yigate -config "$CONFIG_FILE" run
 fi
