@@ -149,10 +149,24 @@ func (e *configEditor) UpdateUpstream(name string, up proxy.UpstreamConfig) erro
 		return err
 	}
 	name = strings.TrimSpace(name)
+	newName := strings.TrimSpace(up.Name)
+	if newName == "" {
+		newName = name
+	}
+
+	// 如果要改名，先校验新名称未被占用
+	if newName != name {
+		for _, existing := range cfg.Upstreams {
+			if existing.Name == newName {
+				return fmt.Errorf("upstream %q already exists", newName)
+			}
+		}
+	}
+
 	found := false
 	for i, existing := range cfg.Upstreams {
 		if existing.Name == name {
-			up.Name = name
+			up.Name = newName
 			cfg.Upstreams[i] = up
 			found = true
 			break
@@ -161,6 +175,23 @@ func (e *configEditor) UpdateUpstream(name string, up proxy.UpstreamConfig) erro
 	if !found {
 		return fmt.Errorf("%w: upstream %q not found", errNotFound, name)
 	}
+
+	// 改名时同步更新路由规则与 socks5h_redirect 中对旧名称的引用
+	if newName != name {
+		for i := range cfg.Routing.Rules {
+			for j, ref := range cfg.Routing.Rules[i].Upstreams {
+				if strings.TrimSpace(ref) == name {
+					cfg.Routing.Rules[i].Upstreams[j] = newName
+				}
+			}
+		}
+		for i, ref := range cfg.Routing.Socks5HRedirect.Upstreams {
+			if strings.TrimSpace(ref) == name {
+				cfg.Routing.Socks5HRedirect.Upstreams[i] = newName
+			}
+		}
+	}
+
 	return e.saveAndApply(cfg)
 }
 

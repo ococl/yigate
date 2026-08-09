@@ -60,6 +60,8 @@ type ManagementServer struct {
 	getStatus         func() HealthStatus
 	getStatusSnapshot func() StatusSnapshot
 	reload            func() error
+	checkUpstream     func(name string) (UpstreamCheckResult, error)
+	checkAllUpstreams func() []UpstreamCheckResult
 	enablePprof       bool
 	authToken         string
 	configEditor      ConfigEditor
@@ -321,6 +323,14 @@ func (m *ManagementServer) SetReload(reload func() error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.reload = reload
+}
+
+// SetUpstreamChecker 设置上游手动巡检回调。
+func (m *ManagementServer) SetUpstreamChecker(check func(name string) (UpstreamCheckResult, error), checkAll func() []UpstreamCheckResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.checkUpstream = check
+	m.checkAllUpstreams = checkAll
 }
 
 // Start 在指定地址启动管理接口。若 addr 为空则不会监听。

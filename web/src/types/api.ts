@@ -57,11 +57,27 @@ export interface AddUpstreamRequest {
 }
 
 export interface UpdateUpstreamRequest {
+  name?: string // 非空且与原名称不同时执行改名
   url: string
   types: string[]
   priority?: number
   weight?: number
   strategy: string
+}
+
+export interface UpstreamCheckResult {
+  name: string
+  alive: boolean
+  error?: string
+  checked_at: string
+}
+
+export interface UpstreamCheckResponse {
+  result: UpstreamCheckResult
+}
+
+export interface UpstreamCheckAllResponse {
+  results: UpstreamCheckResult[]
 }
 
 export interface RuleInfo {

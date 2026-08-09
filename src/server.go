@@ -409,6 +409,22 @@ func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
 	mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
 	mgmt.SetReload(s.reloadConfig)
 	mgmt.SetConfigEditor(newConfigEditor(s.cfgPath, s.reloadConfig))
+	mgmt.SetUpstreamChecker(
+		func(name string) (proxy.UpstreamCheckResult, error) {
+			mgr := s.Manager()
+			if mgr == nil {
+				return proxy.UpstreamCheckResult{}, errors.New("upstream manager not ready")
+			}
+			return mgr.CheckUpstream(name)
+		},
+		func() []proxy.UpstreamCheckResult {
+			mgr := s.Manager()
+			if mgr == nil {
+				return nil
+			}
+			return mgr.CheckAllUpstreams()
+		},
+	)
 	return mgmt
 }
 

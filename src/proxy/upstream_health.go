@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -145,6 +146,81 @@ func (m *UpstreamManager) StopHealthCheck() {
 	m.mu.Unlock()
 
 	m.wg.Wait()
+}
+
+// UpstreamCheckResult 表示一次手动健康检查结果。
+type UpstreamCheckResult struct {
+	Name      string    `json:"name"`
+	Alive     bool      `json:"alive"`
+	Error     string    `json:"error,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+// CheckUpstream 立即对指定名称的上游执行一次健康检查，并同步更新其 alive/dead 状态。
+// 该检查不影响定时健康检查调度，适合 WebUI 手动触发或单点巡检。
+func (m *UpstreamManager) CheckUpstream(name string) (UpstreamCheckResult, error) {
+	m.mu.Lock()
+	u := m.byName[name]
+	m.mu.Unlock()
+	if u == nil {
+		return UpstreamCheckResult{}, fmt.Errorf("upstream %q not found", name)
+	}
+
+	alive := m.check(u)
+	if alive {
+		m.markAlive(u)
+	} else {
+		m.markDead(u)
+	}
+
+	m.mu.Lock()
+	dead := u.dead
+	consecutiveDead := u.consecutiveDead
+	m.mu.Unlock()
+
+	status := 1.0
+	if dead {
+		status = 0
+	}
+	MetricSet("yigate_upstream_health_status", status, "upstream="+u.Name)
+
+	res := UpstreamCheckResult{
+		Name:      u.Name,
+		Alive:     !dead,
+		CheckedAt: time.Now(),
+	}
+	if dead {
+		res.Error = fmt.Sprintf("unhealthy (consecutive dead: %d)", consecutiveDead)
+	}
+	return res, nil
+}
+
+// CheckAllUpstreams 立即对所有上游执行一次并发健康检查，并同步更新各自状态。
+// 返回结果按上游名称排序，便于前端展示巡检报告。
+func (m *UpstreamManager) CheckAllUpstreams() []UpstreamCheckResult {
+	m.mu.Lock()
+	ups := make([]*Upstream, 0, len(m.upstreams))
+	for _, u := range m.upstreams {
+		ups = append(ups, u)
+	}
+	m.mu.Unlock()
+
+	results := make([]UpstreamCheckResult, len(ups))
+	var wg sync.WaitGroup
+	for i, u := range ups {
+		wg.Add(1)
+		go func(idx int, up *Upstream) {
+			defer wg.Done()
+			res, _ := m.CheckUpstream(up.Name)
+			results[idx] = res
+		}(i, u)
+	}
+	wg.Wait()
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Name < results[j].Name
+	})
+	return results
 }
 
 // probeDeadUpstreams 检查 nextProbeAt 已到期的 open 上游。

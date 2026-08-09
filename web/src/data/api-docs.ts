@@ -309,7 +309,58 @@ yigate_connections_total 12345
         path: '/api/v1/config/upstreams/{name}',
         summary: '更新上游',
         description:
-          '更新指定上游代理配置。priority 和 weight 为可选字段（指针类型），未提供时保持原值。name 通过 URL 路径指定。',
+          '更新指定上游代理配置。priority 和 weight 为可选字段（指针类型），未提供时保持原值。请求体中 name 非空且与路径中旧名称不同时执行改名，并同步更新路由规则中对旧名称的引用。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [
+          {
+            name: 'name',
+            type: 'string (path)',
+            required: true,
+            description: '上游原名称，URL 路径参数',
+          },
+        ],
+        requestBody: `{
+  "name": "my-upstream-new",
+  "url": "socks5://127.0.0.1:1081",
+  "types": ["socks5"],
+  "priority": 2,
+  "weight": 3,
+  "strategy": "round_robin"
+}`,
+        responseBody: `{
+  "status": "ok",
+  "name": "my-upstream-new"
+}`,
+        example: {
+          request: `curl -X PUT http://127.0.0.1:8081/api/v1/config/upstreams/my-upstream \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "my-upstream-new",
+    "url": "socks5://127.0.0.1:1081",
+    "types": ["socks5"],
+    "priority": 2,
+    "weight": 3,
+    "strategy": "round_robin"
+  }'`,
+          response: `{
+  "status": "ok",
+  "name": "my-upstream-new"
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '更新成功' },
+          { code: 400, description: '请求体格式错误或 name 已被占用' },
+          { code: 404, description: '上游不存在' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'upstreams-check',
+        method: 'POST',
+        path: '/api/v1/config/upstreams/{name}/check',
+        summary: '手动检查单个上游',
+        description: '立即对指定上游执行一次健康检查，返回 alive/dead 结果，并同步更新运行时上游状态。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [
@@ -320,36 +371,63 @@ yigate_connections_total 12345
             description: '上游名称，URL 路径参数',
           },
         ],
-        requestBody: `{
-  "url": "socks5://127.0.0.1:1081",
-  "types": ["socks5"],
-  "priority": 2,
-  "weight": 3,
-  "strategy": "round_robin"
-}`,
         responseBody: `{
-  "status": "ok",
-  "name": "my-upstream"
+  "result": {
+    "name": "my-upstream",
+    "alive": true,
+    "checked_at": "2025-01-01T00:00:00Z"
+  }
 }`,
         example: {
-          request: `curl -X PUT http://127.0.0.1:8081/api/v1/config/upstreams/my-upstream \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "url": "socks5://127.0.0.1:1081",
-    "types": ["socks5"],
-    "priority": 2,
-    "weight": 3,
-    "strategy": "round_robin"
-  }'`,
+          request: 'curl -X POST http://127.0.0.1:8081/api/v1/config/upstreams/my-upstream/check',
           response: `{
-  "status": "ok",
-  "name": "my-upstream"
+  "result": {
+    "name": "my-upstream",
+    "alive": true,
+    "checked_at": "2025-01-01T00:00:00Z"
+  }
 }`,
         },
         statusCodes: [
-          { code: 200, description: '更新成功' },
-          { code: 400, description: '请求体格式错误' },
-          { code: 404, description: '上游不存在' },
+          { code: 200, description: '检查完成（无论 alive 与否）' },
+          { code: 400, description: '上游不存在或检查失败' },
+          { code: 503, description: '上游管理器未就绪' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'upstreams-check-all',
+        method: 'POST',
+        path: '/api/v1/config/upstreams/check',
+        summary: '一键巡检所有上游',
+        description: '并发对所有上游执行一次健康检查，返回每个上游的 alive/dead 结果，并同步更新运行时状态。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        responseBody: `{
+  "results": [
+    {
+      "name": "my-upstream",
+      "alive": true,
+      "checked_at": "2025-01-01T00:00:00Z"
+    }
+  ]
+}`,
+        example: {
+          request: 'curl -X POST http://127.0.0.1:8081/api/v1/config/upstreams/check',
+          response: `{
+  "results": [
+    {
+      "name": "my-upstream",
+      "alive": true,
+      "checked_at": "2025-01-01T00:00:00Z"
+    }
+  ]
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '巡检完成' },
+          { code: 503, description: '上游管理器未就绪' },
           { code: 401, description: '未认证' },
         ],
       },

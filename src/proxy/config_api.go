@@ -60,6 +60,7 @@ type addUpstreamRequest struct {
 
 // updateUpstreamRequest 是更新上游的请求体。
 type updateUpstreamRequest struct {
+	Name     string   `json:"name,omitempty"` // 非空且与路径中旧名称不同时执行改名
 	URL      string   `json:"url"`
 	Types    []string `json:"types,omitempty"`
 	Priority *int     `json:"priority,omitempty"`
@@ -164,32 +165,59 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusOK, map[string]any{"upstreams": result})
 
 	case http.MethodPost:
-		if len(rest) > 0 {
+		switch len(rest) {
+		case 0:
+			var req addUpstreamRequest
+			if err := decodeJSON(r, &req); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if strings.TrimSpace(req.URL) == "" {
+				writeJSONError(w, http.StatusBadRequest, "url must not be empty")
+				return
+			}
+			up := UpstreamConfig{
+				Name:     req.Name,
+				URL:      req.URL,
+				Types:    req.Types,
+				Priority: req.Priority,
+				Weight:   req.Weight,
+				Strategy: req.Strategy,
+			}
+			if err := editor.AddUpstream(up); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusCreated, map[string]string{"status": "ok", "name": up.Name})
+		case 1:
+			if rest[0] != "check" {
+				writeJSONError(w, http.StatusNotFound, "unknown path")
+				return
+			}
+			if m.checkAllUpstreams == nil {
+				writeJSONError(w, http.StatusServiceUnavailable, "upstream checker not ready")
+				return
+			}
+			results := m.checkAllUpstreams()
+			writeJSON(w, http.StatusOK, map[string]any{"results": results})
+		case 2:
+			if rest[1] != "check" {
+				writeJSONError(w, http.StatusNotFound, "unknown path")
+				return
+			}
+			if m.checkUpstream == nil {
+				writeJSONError(w, http.StatusServiceUnavailable, "upstream checker not ready")
+				return
+			}
+			res, err := m.checkUpstream(rest[0])
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"result": res})
+		default:
 			writeJSONError(w, http.StatusNotFound, "unknown path")
-			return
 		}
-		var req addUpstreamRequest
-		if err := decodeJSON(r, &req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if strings.TrimSpace(req.URL) == "" {
-			writeJSONError(w, http.StatusBadRequest, "url must not be empty")
-			return
-		}
-		up := UpstreamConfig{
-			Name:     req.Name,
-			URL:      req.URL,
-			Types:    req.Types,
-			Priority: req.Priority,
-			Weight:   req.Weight,
-			Strategy: req.Strategy,
-		}
-		if err := editor.AddUpstream(up); err != nil {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]string{"status": "ok", "name": up.Name})
 
 	case http.MethodPut:
 		if len(rest) != 1 {
@@ -202,8 +230,12 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		newName := strings.TrimSpace(req.Name)
+		if newName == "" {
+			newName = name
+		}
 		up := UpstreamConfig{
-			Name:     name,
+			Name:     newName,
 			URL:      req.URL,
 			Types:    req.Types,
 			Strategy: req.Strategy,
@@ -222,7 +254,7 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			}
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "name": name})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "name": newName})
 
 	case http.MethodDelete:
 		if len(rest) != 1 {
