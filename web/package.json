@@ -7,23 +7,24 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "update:deps": "npx taze -r -w"
   },
   "dependencies": {
-    "antdv-next": "^1.4.3",
-    "axios": "^1.18.1",
+    "antdv-next": "^1.5.0",
+    "axios": "^1.19.0",
     "pinia": "^4.0.2",
-    "vue": "^3.5.39",
+    "vue": "^3.5.41",
     "vue-router": "^5.2.0"
   },
   "devDependencies": {
     "@antdv-next/auto-import-resolver": "^1.1.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "typescript": "~5.9.3",
-    "unplugin-auto-import": "^21.0.0",
+    "unplugin-auto-import": "^21.1.0",
     "unplugin-vue-components": "^32.1.0",
-    "vite": "^8.1.4",
-    "vue-tsc": "^3.3.7"
+    "vite": "^8.2.1",
+    "vue-tsc": "^3.3.9"
   }
 }
