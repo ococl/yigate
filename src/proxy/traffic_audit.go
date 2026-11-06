@@ -215,6 +215,7 @@ func (a *TrafficAccounter) recordAggregates(k TrafficKey, bytesIn, bytesOut, tot
 
 // TrafficSnapshot 是流量统计快照。
 type TrafficSnapshot struct {
+	Enabled bool                   `json:"enabled"`
 	Entries []TrafficEntrySnapshot `json:"entries"`
 }
 
@@ -254,7 +255,7 @@ func (a *TrafficAccounter) Snapshot() TrafficSnapshot {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Total > entries[j].Total
 	})
-	return TrafficSnapshot{Entries: entries}
+	return TrafficSnapshot{Enabled: a != nil && a.enabled, Entries: entries}
 }
 
 // UserUsage 返回指定用户的当前窗口流量总量。

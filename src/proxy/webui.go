@@ -12,6 +12,9 @@ import (
 //go:embed all:webui_dist
 var webUIDistFS embed.FS
 
+//go:embed webui_fallback.html
+var webUIFallbackHTML []byte
+
 var (
 	webUIEnabledMu sync.RWMutex
 	webUIEnabled   = true
@@ -70,6 +73,7 @@ func WebUIHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	hasAssets := hasWebUIAssets(sub)
 	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := path.Clean(r.URL.Path)
@@ -80,12 +84,27 @@ func WebUIHandler() (http.Handler, error) {
 			http.NotFound(w, r)
 			return
 		}
+		// 未集成前端产物时显示构建提示页，避免直接返回空白页。
+		if !hasAssets {
+			if path.Ext(clean) != "" && clean != "/index.html" {
+				http.NotFound(w, r)
+				return
+			}
+			serveFallback(w)
+			return
+		}
 		if clean == "/" || clean == "/index.html" {
 			serveIndex(sub, w, r)
 			return
 		}
 		f, err := sub.Open(strings.TrimPrefix(clean, "/"))
 		if err != nil {
+			// 静态资源缺失时返回真正的 404，避免浏览器把 HTML 当 JS/CSS 解析；
+			// 仅无扩展名的前端路由回退到 index.html。
+			if path.Ext(clean) != "" {
+				http.NotFound(w, r)
+				return
+			}
 			serveIndex(sub, w, r)
 			return
 		}
@@ -94,7 +113,22 @@ func WebUIHandler() (http.Handler, error) {
 	}), nil
 }
 
-// serveIndex 写入 index.html 内容。
+// hasWebUIAssets 判断嵌入的前端产物是否包含可用的 JS 资源。
+// 仅存在占位 index.html 时视为未构建前端。
+func hasWebUIAssets(sub fs.FS) bool {
+	entries, err := fs.ReadDir(sub, "assets")
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".js") {
+			return true
+		}
+	}
+	return false
+}
+
+// serveIndex 写入 index.html 内容。入口页不缓存，避免升级后引用旧的资源哈希。
 func serveIndex(sub fs.FS, w http.ResponseWriter, r *http.Request) {
 	data, err := fs.ReadFile(sub, "index.html")
 	if err != nil {
@@ -102,5 +136,13 @@ func serveIndex(sub fs.FS, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(data)
+}
+
+// serveFallback 返回前端未构建提示页。
+func serveFallback(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(webUIFallbackHTML)
 }

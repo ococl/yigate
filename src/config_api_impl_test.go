@@ -539,3 +539,37 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestConfigEditorDisableUpstreamPersistsAndLeavesManagerPool(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+routing:
+  final: auto
+`)
+	disabled := false
+	if err := editor.UpdateUpstream("up1", proxy.UpstreamConfig{
+		Name: "up1", URL: "socks5://host1:1080", Enabled: &disabled,
+	}); err != nil {
+		t.Fatalf("UpdateUpstream() error = %v", err)
+	}
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "enabled: false") {
+		t.Fatalf("config not persisted with enabled=false:\n%s", raw)
+	}
+	ups := editor.ListUpstreams()
+	if len(ups) != 1 || ups[0].IsEnabled() {
+		t.Fatalf("ListUpstreams() = %#v, want one disabled upstream", ups)
+	}
+	mgr, err := proxy.NewUpstreamManager(ups)
+	if err != nil {
+		t.Fatalf("NewUpstreamManager() error = %v", err)
+	}
+	if up := mgr.Select(); up != nil {
+		t.Fatalf("Select() = %#v, want nil when all upstreams are disabled", up)
+	}
+}

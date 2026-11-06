@@ -41,6 +41,17 @@ type TimeoutConfig struct {
 	TunnelIdle   Duration `yaml:"tunnel_idle"`
 }
 
+// DefaultTimeoutConfig 返回内置的默认超时配置，
+// 供配置读取/展示时把“零值表示继承默认”转换为具体数值。
+func DefaultTimeoutConfig() TimeoutConfig {
+	return TimeoutConfig{
+		Dial:         Duration(defaultProxyDialTimeout),
+		Handshake:    Duration(defaultProxyHandshakeTimeout),
+		HTTPExchange: Duration(defaultHTTPExchangeTimeout),
+		TunnelIdle:   Duration(defaultTunnelIdleTimeout),
+	}
+}
+
 func ValidateTimeoutConfig(cfg TimeoutConfig) error {
 	values := []struct {
 		name  string

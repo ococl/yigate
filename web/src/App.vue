@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch, onMounted } from 'vue'
 import { ConfigProvider, App as AntApp, theme } from 'antdv-next'
+import zhCN from 'antdv-next/locale/zh_CN'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
@@ -19,7 +20,7 @@ watch(() => appStore.isDark, syncBodyClass)
 </script>
 
 <template>
-  <ConfigProvider :theme="themeConfig">
+  <ConfigProvider :theme="themeConfig" :locale="zhCN">
     <AntApp>
       <RouterView />
     </AntApp>

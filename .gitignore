@@ -55,6 +55,7 @@ Thumbs.db
 
 # Test artifacts
 .last_proxy_test_summary
+.playwright-cli/
 
 # Frontend (web/)
 web/node_modules/

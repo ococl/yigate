@@ -3,6 +3,7 @@ import type {
   HealthStatus,
   StatusSnapshot,
   TrafficSnapshot,
+  VersionInfo,
   ApiResult,
 } from '@/types/api'
 
@@ -16,6 +17,10 @@ export function getMetrics(): Promise<string> {
 
 export function getStatus(): Promise<StatusSnapshot> {
   return request.get('/api/v1/status').then((r) => r.data)
+}
+
+export function getVersion(): Promise<VersionInfo> {
+  return request.get('/api/v1/version').then((r) => r.data)
 }
 
 export function reloadConfig(): Promise<ApiResult> {

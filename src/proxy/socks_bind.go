@@ -10,7 +10,7 @@ import (
 
 // handleSOCKS5Bind 实现 SOCKS5 BIND 命令。
 // 优先尝试通过 SOCKS5 上游级联；失败时自动回退到本地监听。
-func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, router *Router) {
+func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, router *Router, user string) {
 	if router != nil && router.Policy() != nil {
 		if err := router.Policy().CheckTarget(target); err != nil {
 			Logger().Warnw("socks5 bind target denied by policy", "target", target, "error", err)
@@ -22,7 +22,7 @@ func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, rout
 		upConn, listenAddr, _, err := mgr.DialSOCKS5Bind(target, nil)
 		if err == nil {
 			defer upConn.Close()
-			if err := relaySOCKS5Bind(client, upConn, listenAddr); err == nil {
+			if err := relaySOCKS5Bind(client, upConn, listenAddr, user); err == nil {
 				return
 			}
 			Logger().Warnw("socks5 bind upstream relay failed", "error", err)
@@ -31,11 +31,11 @@ func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, rout
 		}
 	}
 	// 回退：本地 BIND
-	localSOCKS5Bind(client, target, router.Policy())
+	localSOCKS5Bind(client, target, router.Policy(), user)
 }
 
 // relaySOCKS5Bind 将上游 SOCKS5 BIND 的两次回复中继给客户端，并转发后续数据。
-func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string) error {
+func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string, user string) error {
 	if !socks5ReplyWithAddr(client, 0x00, listenAddr) {
 		return errors.New("failed to send first bind reply to client")
 	}
@@ -60,12 +60,12 @@ func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string) error {
 		return fmt.Errorf("set upstream deadline: %w", err)
 	}
 
-	Tunnel(client, nil, upConn, TrafficKey{}, globalTrafficAccounter)
+	Tunnel(client, nil, upConn, TrafficKey{User: user, Upstream: upstreamNameOf(upConn)}, globalTrafficAccounter)
 	return nil
 }
 
 // localSOCKS5Bind 本地实现 SOCKS5 BIND。
-func localSOCKS5Bind(client net.Conn, target string, policy *DestinationPolicy) {
+func localSOCKS5Bind(client net.Conn, target string, policy *DestinationPolicy, user string) {
 	if policy != nil {
 		if err := policy.CheckTarget(target); err != nil {
 			Logger().Warnw("socks5 bind target denied by policy", "target", target, "error", err)
@@ -121,12 +121,12 @@ func localSOCKS5Bind(client net.Conn, target string, policy *DestinationPolicy) 
 		return
 	}
 
-	Tunnel(client, nil, incoming, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
+	Tunnel(client, nil, incoming, newTrafficKey(user, incoming, target), globalTrafficAccounter)
 }
 
 // handleSOCKS5UDPAssociate 实现 SOCKS5 UDP ASSOCIATE 命令。
 // 优先尝试通过 SOCKS5 上游级联；失败时自动回退到本地 UDP 中继。
-func handleSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router) {
+func handleSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router, user string) {
 	policy := router.Policy()
 	if mgr != nil && mgr.Socks5AttemptCount(nil) > 0 {
 		upConn, upUDPAddr, _, err := mgr.DialSOCKS5UDP(target, nil)

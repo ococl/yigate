@@ -222,15 +222,21 @@ npm run build       # 构建即验证
 
 - `GET /health`：返回健康状态。
 - `GET /metrics`：返回 Prometheus 指标。
-- `GET /api/v1/status`：返回运行摘要。
+- `GET /api/v1/status`：返回运行摘要（含版本与运行时长）。
+- `GET /api/v1/version`：返回版本信息。
 - `POST /api/v1/reload`：手动重新加载配置。
-- `GET /api/v1/traffic`：返回流量统计快照。
-- `GET/POST /api/v1/config/upstreams`：列出/添加上游。
-- `PUT/DELETE /api/v1/config/upstreams/{name}`：更新/删除上游。
+- `GET /api/v1/traffic`：返回流量统计快照（`enabled` 表示审计开关）。
+- `GET/POST /api/v1/config/upstreams`：列出/添加上游（含健康检查配置与 `enabled` 开关）。
+- `PUT/DELETE /api/v1/config/upstreams/{name}`：更新/删除上游；更新为局部更新，`enabled=false` 时暂停调度与健康检查。
 - `GET/POST /api/v1/config/rules`：列出/添加路由规则。
+- `PUT /api/v1/config/rules/{index}`：更新路由规则。
+- `POST /api/v1/config/rules/{index}/move`：上移/下移路由规则。
 - `DELETE /api/v1/config/rules/{index}`：删除路由规则。
 - `GET/POST /api/v1/config/users`：列出/添加用户。
+- `PUT /api/v1/config/users/{username}`：修改用户密码。
 - `DELETE /api/v1/config/users/{username}`：删除用户。
+- `GET/PUT /api/v1/config/settings`：读取/部分更新全局设置。
+- 配置写入前校验，热加载失败时自动回滚配置文件。
 - `/debug/pprof/*`：仅在 `enable_pprof: true` 时启用。
 
 ## 开发注意事项

@@ -36,33 +36,33 @@ func HandleSOCKS5(client net.Conn, clientReader *bufio.Reader, users map[string]
 
 	switch cmd {
 	case 0x01: // CONNECT
-		handleSOCKS5Connect(client, clientReader, target, mgr, router, access)
+		handleSOCKS5Connect(client, clientReader, target, mgr, router, access, user)
 	case 0x02: // BIND
 		if !allowBind {
 			Logger().Warnw("socks5 bind command disabled", "target", target)
 			socks5Reply(client, 0x07)
 			return
 		}
-		handleSOCKS5Bind(client, target, mgr, router)
+		handleSOCKS5Bind(client, target, mgr, router, user)
 	case 0x03: // UDP ASSOCIATE
 		if !allowUDP {
 			Logger().Warnw("socks5 udp associate command disabled", "target", target)
 			socks5Reply(client, 0x07)
 			return
 		}
-		handleSOCKS5UDPAssociate(client, clientReader, target, mgr, router)
+		handleSOCKS5UDPAssociate(client, clientReader, target, mgr, router, user)
 	default:
 		Logger().Warnw("socks5 unsupported command", "command", cmd)
 		socks5Reply(client, 0x07)
 	}
 }
 
-func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router, access *AccessController) {
+func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router, access *AccessController, user string) {
 	sourceIP := clientSourceIP(client)
 	host, _, err := net.SplitHostPort(target)
 	if router != nil && router.Socks5HEnabled() && err == nil && net.ParseIP(host) != nil {
 		Logger().Infow("socks5 ip target will be handled with sniff/rewrite", "target", target)
-		handleSOCKS5ConnectWithSniff(client, target, mgr, router, access, sourceIP)
+		handleSOCKS5ConnectWithSniff(client, target, mgr, router, access, user, sourceIP)
 		return
 	}
 
@@ -84,5 +84,5 @@ func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target str
 	}
 
 	socks5Reply(client, 0x00)
-	Tunnel(client, clientReader, targetConn, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
+	Tunnel(client, clientReader, targetConn, newTrafficKey(user, targetConn, target), globalTrafficAccounter)
 }

@@ -33,3 +33,26 @@ body.app-dark {
   background: #000;
   color: rgba(255, 255, 255, 0.85);
 }
+
+/* 页面通用布局 */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+}
+
+.muted {
+  color: rgba(128, 128, 128, 0.85);
+}
+
+.link {
+  color: #1677ff;
+}
+
+/* 表格横向滚动时避免 fixed 列阴影错位 */
+.ant-table-wrapper {
+  width: 100%;
+}

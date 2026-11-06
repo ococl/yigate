@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ConfigEditor 提供运行时配置变更能力。
@@ -26,6 +27,10 @@ type ConfigEditor interface {
 	ListRules() []RouteRule
 	// AddRule 在末尾添加路由规则并持久化。
 	AddRule(rule RouteRule) error
+	// UpdateRule 按索引更新路由规则并持久化。
+	UpdateRule(index int, rule RouteRule) error
+	// MoveRule 按索引上移/下移路由规则并持久化。
+	MoveRule(index int, direction string) error
 	// RemoveRule 按索引删除路由规则并持久化。
 	RemoveRule(index int) error
 
@@ -33,39 +38,113 @@ type ConfigEditor interface {
 	ListUsers() []string
 	// AddUser 添加用户并持久化。
 	AddUser(username, password string) error
+	// UpdateUser 修改用户密码并持久化。
+	UpdateUser(username, password string) error
 	// RemoveUser 按用户名删除用户并持久化。
 	RemoveUser(username string) error
+
+	// GetSettings 返回全局设置视图。
+	GetSettings() (SettingsView, error)
+	// UpdateSettings 部分更新全局设置并持久化。
+	UpdateSettings(patch SettingsPatch) error
+}
+
+// healthCheckInfo 是健康检查配置的 API 表示（时间单位为秒）。
+type healthCheckInfo struct {
+	Type             string  `json:"type"`
+	Path             string  `json:"path,omitempty"`
+	ExpectedCodes    []int   `json:"expected_codes,omitempty"`
+	IntervalSeconds  float64 `json:"interval_seconds"`
+	TimeoutSeconds   float64 `json:"timeout_seconds"`
+	FailureThreshold int     `json:"failure_threshold"`
+	SuccessThreshold int     `json:"success_threshold"`
+}
+
+// healthCheckRequest 是健康检查配置的写入请求（时间单位为秒）。
+type healthCheckRequest struct {
+	Type             string  `json:"type"`
+	Path             string  `json:"path"`
+	ExpectedCodes    []int   `json:"expected_codes"`
+	IntervalSeconds  float64 `json:"interval_seconds"`
+	TimeoutSeconds   float64 `json:"timeout_seconds"`
+	FailureThreshold int     `json:"failure_threshold"`
+	SuccessThreshold int     `json:"success_threshold"`
+}
+
+func newHealthCheckInfo(hc HealthCheckConfig) healthCheckInfo {
+	return healthCheckInfo{
+		Type:             hc.Type,
+		Path:             hc.Path,
+		ExpectedCodes:    hc.ExpectedCodes,
+		IntervalSeconds:  time.Duration(hc.Interval).Seconds(),
+		TimeoutSeconds:   time.Duration(hc.Timeout).Seconds(),
+		FailureThreshold: hc.FailureThreshold,
+		SuccessThreshold: hc.SuccessThreshold,
+	}
+}
+
+func (h healthCheckRequest) toConfig() HealthCheckConfig {
+	hc := HealthCheckConfig{
+		Type:             strings.TrimSpace(h.Type),
+		Path:             strings.TrimSpace(h.Path),
+		ExpectedCodes:    h.ExpectedCodes,
+		FailureThreshold: h.FailureThreshold,
+		SuccessThreshold: h.SuccessThreshold,
+	}
+	if h.IntervalSeconds > 0 {
+		hc.Interval = Duration(time.Duration(h.IntervalSeconds * float64(time.Second)))
+	}
+	if h.TimeoutSeconds > 0 {
+		hc.Timeout = Duration(time.Duration(h.TimeoutSeconds * float64(time.Second)))
+	}
+	return hc
 }
 
 // upstreamInfo 是上游的 API 响应表示，URL 中的凭证被脱敏。
 type upstreamInfo struct {
-	Name        string   `json:"name"`
-	URL         string   `json:"url"`
-	Types       []string `json:"types,omitempty"`
-	Priority    int      `json:"priority,omitempty"`
-	Weight      int      `json:"weight,omitempty"`
-	Strategy    string   `json:"strategy,omitempty"`
-	HealthCheck string   `json:"health_check_type,omitempty"`
+	Name        string          `json:"name"`
+	URL         string          `json:"url"`
+	Enabled     bool            `json:"enabled"`
+	Types       []string        `json:"types,omitempty"`
+	Priority    int             `json:"priority"`
+	Weight      int             `json:"weight"`
+	Strategy    string          `json:"strategy"`
+	HealthCheck healthCheckInfo `json:"health_check"`
 }
 
 // addUpstreamRequest 是添加上游的请求体。
 type addUpstreamRequest struct {
-	Name     string   `json:"name"`
-	URL      string   `json:"url"`
-	Types    []string `json:"types,omitempty"`
-	Priority int      `json:"priority,omitempty"`
-	Weight   int      `json:"weight,omitempty"`
-	Strategy string   `json:"strategy,omitempty"`
+	Name        string              `json:"name"`
+	URL         string              `json:"url"`
+	Enabled     *bool               `json:"enabled,omitempty"`
+	Types       []string            `json:"types,omitempty"`
+	Priority    int                 `json:"priority,omitempty"`
+	Weight      int                 `json:"weight,omitempty"`
+	Strategy    string              `json:"strategy,omitempty"`
+	HealthCheck *healthCheckRequest `json:"health_check,omitempty"`
 }
 
 // updateUpstreamRequest 是更新上游的请求体。
+// 未提供的字段（nil / 空）保持原值，便于 WebUI 做局部更新。
 type updateUpstreamRequest struct {
-	Name     string   `json:"name,omitempty"` // 非空且与路径中旧名称不同时执行改名
-	URL      string   `json:"url"`
-	Types    []string `json:"types,omitempty"`
-	Priority *int     `json:"priority,omitempty"`
-	Weight   *int     `json:"weight,omitempty"`
-	Strategy string   `json:"strategy,omitempty"`
+	Name        string              `json:"name,omitempty"` // 非空且与路径中旧名称不同时执行改名
+	URL         string              `json:"url"`
+	Enabled     *bool               `json:"enabled,omitempty"`
+	Types       []string            `json:"types,omitempty"`
+	Priority    *int                `json:"priority,omitempty"`
+	Weight      *int                `json:"weight,omitempty"`
+	Strategy    string              `json:"strategy,omitempty"`
+	HealthCheck *healthCheckRequest `json:"health_check,omitempty"`
+}
+
+// moveRuleRequest 是规则排序请求体。
+type moveRuleRequest struct {
+	Direction string `json:"direction"` // up / down
+}
+
+// updateUserRequest 是修改用户密码的请求体。
+type updateUserRequest struct {
+	Password string `json:"password"`
 }
 
 // ruleInfo 是路由规则的 API 响应表示。
@@ -124,10 +203,12 @@ func (m *ManagementServer) handleConfigAPI(w http.ResponseWriter, r *http.Reques
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/config")
 	path = strings.TrimPrefix(path, "/")
-	segments := strings.Split(path, "/")
+	path = strings.TrimSuffix(path, "/")
 	if path == "" {
-		segments = []string{}
+		writeJSONError(w, http.StatusNotFound, "config API path required")
+		return
 	}
+	segments := strings.Split(path, "/")
 
 	switch segments[0] {
 	case "upstreams":
@@ -136,6 +217,12 @@ func (m *ManagementServer) handleConfigAPI(w http.ResponseWriter, r *http.Reques
 		m.handleRulesAPI(w, r, editor, segments[1:])
 	case "users":
 		m.handleUsersAPI(w, r, editor, segments[1:])
+	case "settings":
+		if len(segments) > 1 {
+			writeJSONError(w, http.StatusNotFound, "unknown config API path")
+			return
+		}
+		m.handleSettingsAPI(w, r, editor)
 	default:
 		writeJSONError(w, http.StatusNotFound, "unknown config API path")
 	}
@@ -155,11 +242,12 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			result = append(result, upstreamInfo{
 				Name:        up.Name,
 				URL:         redactURLString(up.URL),
+				Enabled:     up.IsEnabled(),
 				Types:       up.Types,
 				Priority:    up.Priority,
 				Weight:      up.Weight,
-				Strategy:    up.Strategy,
-				HealthCheck: up.HealthCheck.Type,
+				Strategy:    normalizeStrategy(up.Strategy),
+				HealthCheck: newHealthCheckInfo(up.HealthCheck),
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"upstreams": result})
@@ -177,12 +265,16 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 				return
 			}
 			up := UpstreamConfig{
-				Name:     req.Name,
+				Name:     strings.TrimSpace(req.Name),
 				URL:      req.URL,
+				Enabled:  req.Enabled,
 				Types:    req.Types,
 				Priority: req.Priority,
 				Weight:   req.Weight,
 				Strategy: req.Strategy,
+			}
+			if req.HealthCheck != nil {
+				up.HealthCheck = req.HealthCheck.toConfig()
 			}
 			if err := editor.AddUpstream(up); err != nil {
 				writeJSONError(w, http.StatusBadRequest, err.Error())
@@ -234,17 +326,40 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 		if newName == "" {
 			newName = name
 		}
+		// 局部更新：未提供的字段沿用已有配置，避免编辑弹窗抹掉
+		// 健康检查、类型、策略等未在表单中展示的字段。
 		up := UpstreamConfig{
 			Name:     newName,
 			URL:      req.URL,
 			Types:    req.Types,
 			Strategy: req.Strategy,
 		}
+		if existing, ok := findUpstream(editor.ListUpstreams(), name); ok {
+			if up.URL == "" {
+				up.URL = existing.URL
+			}
+			up.Enabled = existing.Enabled
+			if up.Types == nil {
+				up.Types = existing.Types
+			}
+			if up.Strategy == "" {
+				up.Strategy = existing.Strategy
+			}
+			up.HealthCheck = existing.HealthCheck
+			up.Priority = existing.Priority
+			up.Weight = existing.Weight
+		}
 		if req.Priority != nil {
 			up.Priority = *req.Priority
 		}
 		if req.Weight != nil {
 			up.Weight = *req.Weight
+		}
+		if req.HealthCheck != nil {
+			up.HealthCheck = req.HealthCheck.toConfig()
+		}
+		if req.Enabled != nil {
+			up.Enabled = req.Enabled
 		}
 		if err := editor.UpdateUpstream(name, up); err != nil {
 			if errors.Is(err, errNotFound) {
@@ -300,6 +415,29 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, map[string]any{"rules": result})
 
 	case http.MethodPost:
+		// POST /api/v1/config/rules/{index}/move 调整规则顺序
+		if len(rest) == 2 && rest[1] == "move" {
+			index, err := strconv.Atoi(rest[0])
+			if err != nil {
+				writeJSONError(w, http.StatusBadRequest, "invalid rule index")
+				return
+			}
+			var req moveRuleRequest
+			if err := decodeJSON(r, &req); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err := editor.MoveRule(index, req.Direction); err != nil {
+				if errors.Is(err, errNotFound) {
+					writeJSONError(w, http.StatusNotFound, err.Error())
+				} else {
+					writeJSONError(w, http.StatusBadRequest, err.Error())
+				}
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			return
+		}
 		if len(rest) > 0 {
 			writeJSONError(w, http.StatusNotFound, "unknown path")
 			return
@@ -329,6 +467,45 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
 
+	case http.MethodPut:
+		if len(rest) != 1 {
+			writeJSONError(w, http.StatusBadRequest, "rule index required in path")
+			return
+		}
+		index, err := strconv.Atoi(rest[0])
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid rule index")
+			return
+		}
+		var req addRuleRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if strings.TrimSpace(req.Type) == "" {
+			writeJSONError(w, http.StatusBadRequest, "type must not be empty")
+			return
+		}
+		if strings.TrimSpace(req.Action) == "" {
+			writeJSONError(w, http.StatusBadRequest, "action must not be empty")
+			return
+		}
+		rule := RouteRule{
+			Type:      req.Type,
+			Values:    req.Values,
+			Action:    req.Action,
+			Upstreams: req.Upstreams,
+		}
+		if err := editor.UpdateRule(index, rule); err != nil {
+			if errors.Is(err, errNotFound) {
+				writeJSONError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+
 	case http.MethodDelete:
 		if len(rest) != 1 {
 			writeJSONError(w, http.StatusBadRequest, "rule index required in path")
@@ -350,7 +527,7 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "index": rest[0]})
 
 	default:
-		w.Header().Set("Allow", "GET, POST, DELETE")
+		w.Header().Set("Allow", "GET, POST, PUT, DELETE")
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
@@ -394,6 +571,31 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "ok", "username": req.Username})
 
+	case http.MethodPut:
+		if len(rest) != 1 {
+			writeJSONError(w, http.StatusBadRequest, "username required in path")
+			return
+		}
+		username := rest[0]
+		var req updateUserRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if strings.TrimSpace(req.Password) == "" {
+			writeJSONError(w, http.StatusBadRequest, "password must not be empty")
+			return
+		}
+		if err := editor.UpdateUser(username, req.Password); err != nil {
+			if errors.Is(err, errNotFound) {
+				writeJSONError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "username": username})
+
 	case http.MethodDelete:
 		if len(rest) != 1 {
 			writeJSONError(w, http.StatusBadRequest, "username required in path")
@@ -411,13 +613,27 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "username": username})
 
 	default:
-		w.Header().Set("Allow", "GET, POST, DELETE")
+		w.Header().Set("Allow", "GET, POST, PUT, DELETE")
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
-// errNotFound 表示资源不存在，用于区分 404 和 400 响应。
-var errNotFound = errors.New("not found")
+// findUpstream 在列表中按名称查找上游。
+func findUpstream(ups []UpstreamConfig, name string) (UpstreamConfig, bool) {
+	for _, up := range ups {
+		if strings.TrimSpace(up.Name) == name {
+			return up, true
+		}
+	}
+	return UpstreamConfig{}, false
+}
+
+// ErrNotFound 表示资源不存在，用于区分 404 和 400 响应。
+// 配置编辑器实现位于 main 包，必须复用同一个哨兵值才能让 errors.Is 生效。
+var ErrNotFound = errors.New("not found")
+
+// errNotFound 保留包内别名，便于既有代码与测试引用。
+var errNotFound = ErrNotFound
 
 // writeJSON 写入 JSON 响应。
 func writeJSON(w http.ResponseWriter, code int, v any) {

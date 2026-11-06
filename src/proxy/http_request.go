@@ -14,13 +14,13 @@ const maxBufferedRequestBody = 1 << 20 // 1 MiB
 
 // handleHTTPRequest 处理单个非 CONNECT 的 HTTP 请求，将响应写回客户端。
 // 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
-func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string) bool {
+func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string, user string) bool {
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 
 	// Chunked 或超大请求体无法缓冲重试，直接透传。
 	if isChunkedRequest(req) || req.ContentLength < 0 || req.ContentLength > maxBufferedRequestBody {
-		return handleStreamedRequest(client, req, mgr, router, sourceIP)
+		return handleStreamedRequest(client, req, mgr, router, sourceIP, user)
 	}
 	var bodyBytes []byte
 	if req.Body != nil {
@@ -65,6 +65,7 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 				Logger().Warnw("write response to client failed", "error", err)
 				return false
 			}
+			recordHTTPTraffic(user, req, resp, int64(len(bodyBytes)))
 			return !req.Close
 		}
 		Logger().Warnw("socks5h request failed, fallback to routing", "error", err)
@@ -94,7 +95,29 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 		Logger().Warnw("write response to client failed", "error", err)
 		return false
 	}
+	recordHTTPTraffic(user, req, resp, int64(len(bodyBytes)))
 	return !req.Close
+}
+
+// recordHTTPTraffic 记录普通 HTTP 请求的流量。
+// 上游名称来自上游连接上的标记，直连请求为空。
+func recordHTTPTraffic(user string, req *http.Request, resp *http.Response, reqBytes int64) {
+	if globalTrafficAccounter == nil {
+		return
+	}
+	var bytesOut int64
+	upstream := ""
+	if rb, ok := resp.Body.(*responseBody); ok {
+		bytesOut = rb.bytes
+		upstream = upstreamNameOf(rb.conn)
+	}
+	if reqBytes < 0 {
+		reqBytes = 0
+	}
+	key := TrafficKey{User: user, Upstream: upstream, Target: targetHost(req)}
+	if err := globalTrafficAccounter.Record(key, reqBytes, bytesOut); err != nil {
+		Logger().Warnw("traffic quota exceeded", "user", user, "upstream", upstream, "target", key.Target, "error", err)
+	}
 }
 
 func isChunkedRequest(req *http.Request) bool {
@@ -108,7 +131,7 @@ func isChunkedRequest(req *http.Request) bool {
 
 // handleStreamedRequest 处理无法缓冲重试的流式请求（chunked 或超大请求体）。
 // 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
-func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string) bool {
+func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string, user string) bool {
 	var resp *http.Response
 	var err error
 	if router.Socks5HEnabled() {
@@ -123,6 +146,7 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 				Logger().Warnw("write streamed response to client failed", "error", err)
 				return false
 			}
+			recordHTTPTraffic(user, req, resp, req.ContentLength)
 			return !req.Close
 		}
 		Logger().Warnw("socks5h streamed request failed, fallback to routing", "error", err)
@@ -155,6 +179,7 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 		Logger().Warnw("write streamed response to client failed", "error", err)
 		return false
 	}
+	recordHTTPTraffic(user, req, resp, req.ContentLength)
 	return !req.Close
 }
 

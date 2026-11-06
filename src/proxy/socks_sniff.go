@@ -11,7 +11,7 @@ import (
 
 const socks5SniffTimeout = 2 * time.Second
 
-func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router, access *AccessController, sourceIP ...string) {
+func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamManager, router *Router, access *AccessController, user string, sourceIP ...string) {
 	sip := ""
 	if len(sourceIP) > 0 {
 		sip = sourceIP[0]
@@ -26,7 +26,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 		if !writeSOCKS5ConnectReply(client, 0x00) {
 			return
 		}
-		Tunnel(client, nil, remote, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
+		Tunnel(client, nil, remote, newTrafficKey(user, remote, target), globalTrafficAccounter)
 		return
 	}
 
@@ -53,7 +53,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 			return
 		}
 	}
-	Tunnel(client, nil, remote, TrafficKey{Target: targetHostFromAddr(rewritten)}, globalTrafficAccounter)
+	Tunnel(client, nil, remote, newTrafficKey(user, remote, rewritten), globalTrafficAccounter)
 }
 
 func dialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {

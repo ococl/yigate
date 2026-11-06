@@ -38,7 +38,7 @@ async function handleLogin() {
           v-model:value="token"
           placeholder="请输入 management_auth_token"
           size="large"
-          autocomplete="off"
+          autocomplete="current-password"
           @press-enter="handleLogin"
         />
       </a-form-item>

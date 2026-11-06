@@ -75,7 +75,7 @@ func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names [
 			// 拨号成功即视为上游恢复健康，清除 dead 状态，使故障转移后能自愈，
 			// 即使关闭了主动健康检查（check_interval=0）也生效。
 			m.markAlive(up)
-			return conn, up, nil
+			return tagUpstream(conn, up.Name), up, nil
 		}
 		lastErr = err
 		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
@@ -112,7 +112,7 @@ func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, err
 	}
 	// 拨号成功即视为上游恢复健康，清除 dead 状态（与 DialProxyWithSourceIP 一致）。
 	m.markAlive(up)
-	return conn, up, nil
+	return tagUpstream(conn, up.Name), up, nil
 }
 
 func (u *Upstream) isSocks5() bool {

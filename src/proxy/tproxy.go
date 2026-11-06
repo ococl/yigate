@@ -57,7 +57,7 @@ func HandleTProxy(client net.Conn, mgr *UpstreamManager, router *Router, mode st
 	}
 
 	Logger().Infow("tproxy tunnel established", "target", target, "source", sourceIP)
-	Tunnel(client, nil, targetConn, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
+	Tunnel(client, nil, targetConn, newTrafficKey("", targetConn, target), globalTrafficAccounter)
 }
 
 // getOriginalDestination 根据模式获取原始目标地址。

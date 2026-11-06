@@ -91,10 +91,11 @@ func forwardRequest(req *http.Request, up *Upstream) (*http.Response, error) {
 }
 
 func viaHTTPUpstream(req *http.Request, up *Upstream) (*http.Response, error) {
-	conn, err := dialRaw(up)
+	rawConn, err := dialRaw(up)
 	if err != nil {
 		return nil, err
 	}
+	conn := tagUpstream(rawConn, up.Name)
 	if err := setConnDeadline(conn, HTTPExchangeTimeout()); err != nil {
 		conn.Close()
 		return nil, err
@@ -117,10 +118,11 @@ func viaSOCKS5Upstream(req *http.Request, up *Upstream) (*http.Response, error) 
 	if target == "" {
 		return nil, errors.New("missing target host")
 	}
-	conn, err := up.Dial(target)
+	rawConn, err := up.Dial(target)
 	if err != nil {
 		return nil, err
 	}
+	conn := tagUpstream(rawConn, up.Name)
 	if err := setConnDeadline(conn, HTTPExchangeTimeout()); err != nil {
 		conn.Close()
 		return nil, err

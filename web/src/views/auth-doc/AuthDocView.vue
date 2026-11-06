@@ -55,7 +55,7 @@ import { authInfo } from '@/data/api-docs'
           <span>cURL</span>
         </div>
         <pre><code>curl -H "Authorization: Bearer &lt;your-token&gt;" \
-  http://127.0.0.1:8081/api/v1/status</code></pre>
+  http://127.0.0.1:8890/api/v1/status</code></pre>
       </div>
 
       <a-typography-title :level="5">未携带令牌的请求（token 非空时）</a-typography-title>
@@ -63,7 +63,7 @@ import { authInfo } from '@/data/api-docs'
         <div class="code-block-header">
           <span>cURL</span>
         </div>
-        <pre><code>curl http://127.0.0.1:8081/api/v1/status
+        <pre><code>curl http://127.0.0.1:8890/api/v1/status
 
 # 响应:
 # HTTP/1.1 401 Unauthorized
@@ -87,7 +87,7 @@ import { authInfo } from '@/data/api-docs'
         <div class="code-block-header">
           <span>config.yml</span>
         </div>
-        <pre><code>management: 127.0.0.1:8081
+        <pre><code>management: 127.0.0.1:8890
 management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
       </div>
 

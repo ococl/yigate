@@ -92,6 +92,41 @@ func (m *mockConfigEditor) AddRule(rule RouteRule) error {
 	return nil
 }
 
+func (m *mockConfigEditor) UpdateRule(index int, rule RouteRule) error {
+	if m.applyErr != nil {
+		return m.applyErr
+	}
+	if index < 0 || index >= len(m.rules) {
+		return errNotFound
+	}
+	m.rules[index] = rule
+	return nil
+}
+
+func (m *mockConfigEditor) MoveRule(index int, direction string) error {
+	if m.applyErr != nil {
+		return m.applyErr
+	}
+	if index < 0 || index >= len(m.rules) {
+		return errNotFound
+	}
+	switch direction {
+	case "up":
+		if index == 0 {
+			return errors.New("already at top")
+		}
+		m.rules[index-1], m.rules[index] = m.rules[index], m.rules[index-1]
+	case "down":
+		if index == len(m.rules)-1 {
+			return errors.New("already at bottom")
+		}
+		m.rules[index], m.rules[index+1] = m.rules[index+1], m.rules[index]
+	default:
+		return errors.New("invalid direction")
+	}
+	return nil
+}
+
 func (m *mockConfigEditor) RemoveRule(index int) error {
 	if m.applyErr != nil {
 		return m.applyErr
@@ -125,6 +160,17 @@ func (m *mockConfigEditor) AddUser(username, password string) error {
 	return nil
 }
 
+func (m *mockConfigEditor) UpdateUser(username, password string) error {
+	if m.applyErr != nil {
+		return m.applyErr
+	}
+	if _, exists := m.users[username]; !exists {
+		return errNotFound
+	}
+	m.users[username] = password
+	return nil
+}
+
 func (m *mockConfigEditor) RemoveUser(username string) error {
 	if m.applyErr != nil {
 		return m.applyErr
@@ -134,6 +180,17 @@ func (m *mockConfigEditor) RemoveUser(username string) error {
 	}
 	delete(m.users, username)
 	return nil
+}
+
+func (m *mockConfigEditor) GetSettings() (SettingsView, error) {
+	if m.applyErr != nil {
+		return SettingsView{}, m.applyErr
+	}
+	return SettingsView{RoutingFinal: "auto", LogLevel: "info"}, nil
+}
+
+func (m *mockConfigEditor) UpdateSettings(patch SettingsPatch) error {
+	return m.applyErr
 }
 
 // startConfigAPITestServer 启动一个带 ConfigEditor 的管理服务器用于测试。

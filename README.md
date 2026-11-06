@@ -119,15 +119,22 @@ sudo systemctl enable --now yigate
 |------|------|
 | `GET /health` | 健康状态 |
 | `GET /metrics` | Prometheus 指标（`yigate_` 前缀） |
-| `GET /api/v1/status` | 运行摘要 |
+| `GET /api/v1/status` | 运行摘要（含版本与运行时长） |
+| `GET /api/v1/version` | 版本信息 |
 | `POST /api/v1/reload` | 手动重载配置 |
-| `GET /api/v1/traffic` | 流量统计快照 |
-| `GET/POST /api/v1/config/upstreams` | 列出 / 添加上游 |
-| `PUT/DELETE /api/v1/config/upstreams/{name}` | 更新 / 删除上游 |
+| `GET /api/v1/traffic` | 流量统计快照（`enabled` 表示审计开关） |
+| `GET/POST /api/v1/config/upstreams` | 列出 / 添加上游（含健康检查配置与 `enabled` 开关） |
+| `PUT/DELETE /api/v1/config/upstreams/{name}` | 更新 / 删除上游（局部更新，未提交字段保持原值；`enabled=false` 暂停调度与健康检查） |
 | `GET/POST /api/v1/config/rules` | 列出 / 添加路由规则 |
+| `PUT /api/v1/config/rules/{index}` | 更新路由规则 |
+| `POST /api/v1/config/rules/{index}/move` | 上移 / 下移路由规则 |
 | `DELETE /api/v1/config/rules/{index}` | 删除路由规则 |
 | `GET/POST /api/v1/config/users` | 列出 / 添加用户 |
+| `PUT /api/v1/config/users/{username}` | 修改用户密码 |
 | `DELETE /api/v1/config/users/{username}` | 删除用户 |
+| `GET/PUT /api/v1/config/settings` | 读取 / 部分更新全局设置（持久化 + 热加载） |
+
+配置写入前会做校验，写入后若热加载失败会自动回滚配置文件，避免残留无法启动的配置。
 
 `/debug/pprof/*` 仅在 `enable_pprof: true` 时启用（敏感入口，勿公网暴露）。
 

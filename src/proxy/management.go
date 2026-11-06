@@ -52,6 +52,11 @@ type StatusSnapshot struct {
 	PprofEnabled  bool             `json:"pprof_enabled"`
 	Ready         bool             `json:"ready"`
 	Upstreams     []UpstreamStatus `json:"upstreams,omitempty"`
+	Version       string           `json:"version"`
+	Commit        string           `json:"commit"`
+	BuildTime     string           `json:"build_time"`
+	GoVersion     string           `json:"go_version"`
+	UptimeSeconds int64            `json:"uptime_seconds"`
 	Timestamp     time.Time        `json:"timestamp"`
 }
 
@@ -110,6 +115,7 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 	mux.HandleFunc("/health", m.handleHealth)
 	mux.HandleFunc("/metrics", m.handleMetrics)
 	mux.HandleFunc("/api/v1/status", m.handleStatus)
+	mux.HandleFunc("/api/v1/version", m.handleVersion)
 	mux.HandleFunc("/api/v1/reload", m.handleReload)
 	mux.HandleFunc("/api/v1/config/", m.handleConfigAPI)
 	mux.HandleFunc("/api/v1/traffic", m.handleTraffic)
@@ -142,8 +148,8 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 	}
 	m.srv = &http.Server{
 		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 	return m
@@ -471,10 +477,29 @@ func (m *ManagementServer) handleStatus(w http.ResponseWriter, r *http.Request) 
 			PprofEnabled:  m.PprofEnabled(),
 		}
 	}
+	vi := CurrentVersionInfo()
+	snapshot.Version = vi.Version
+	snapshot.Commit = vi.Commit
+	snapshot.BuildTime = vi.BuildTime
+	snapshot.GoVersion = vi.GoVersion
+	snapshot.UptimeSeconds = vi.UptimeSeconds
 	snapshot.Timestamp = time.Now()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(snapshot)
+}
+
+func (m *ManagementServer) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !m.requireAuth(w, r) {
+		return
+	}
+	MetricInc("yigate_management_requests_total", "path=/api/v1/version")
+	writeJSON(w, http.StatusOK, CurrentVersionInfo())
 }
 
 func (m *ManagementServer) handleReload(w http.ResponseWriter, r *http.Request) {

@@ -50,6 +50,11 @@ func validateStrategy(value string) error {
 	}
 }
 
+// ValidateUpstreamStrategy 校验上游负载策略取值。
+func ValidateUpstreamStrategy(value string) error {
+	return validateStrategy(value)
+}
+
 // HealthCheckConfig 单个上游的健康检查配置。
 // 未显式配置的字段继承全局默认值。
 type HealthCheckConfig struct {
@@ -230,13 +235,21 @@ func ValidateProxyTypes(values []string) error {
 
 // UpstreamConfig 单个上游代理配置
 type UpstreamConfig struct {
-	Name        string            `yaml:"name"`
-	URL         string            `yaml:"url"`
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
+	// Enabled 控制该上游是否参与流量调度与健康检查。
+	// nil 表示未配置，按启用处理，兼容旧配置文件。
+	Enabled     *bool             `yaml:"enabled,omitempty"`
 	Types       []string          `yaml:"types"`
 	Priority    int               `yaml:"priority"`
 	Weight      int               `yaml:"weight"`
 	Strategy    string            `yaml:"strategy"`
 	HealthCheck HealthCheckConfig `yaml:"health_check"`
+}
+
+// IsEnabled 返回上游是否启用。未显式配置 enabled 时默认启用。
+func (c UpstreamConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // Upstream 表示一个已解析的上游代理
@@ -339,6 +352,11 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 	}
 	for i, c := range configs {
 		if c.URL == "" {
+			continue
+		}
+		// 已禁用的上游不会进入调度池，也不参与健康检查；
+		// 配置本身仍保留，便于通过 WebUI 开关随时恢复。
+		if !c.IsEnabled() {
 			continue
 		}
 		// config.go 已用严格的环境展开处理过 URL（缺失/空值会启动失败），

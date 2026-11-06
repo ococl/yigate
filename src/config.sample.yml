@@ -66,6 +66,9 @@ users:
 upstreams:
   - name: "default"
     url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"
+    # enabled 可选，默认 true。设为 false 后该上游不参与流量调度与健康检查，
+    # 配置保留，可在 WebUI 上游管理中随时重新启用。
+    enabled: true
     types: ["http", "https", "socks5", "socks5h"]
     priority: 1
     weight: 5

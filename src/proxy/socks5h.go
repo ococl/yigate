@@ -21,7 +21,7 @@ func (r *Router) DialSocks5H(target string, mgr *UpstreamManager, sourceIP ...st
 			conn, err := up.DialSOCKS5H(target)
 			if err == nil {
 				mgr.markAlive(up)
-				return conn, nil
+				return tagUpstream(conn, up.Name), nil
 			}
 			r.cache.Delete(key)
 			if IsUpstreamError(err) {
@@ -55,7 +55,7 @@ func (r *Router) DialSocks5H(target string, mgr *UpstreamManager, sourceIP ...st
 		if err == nil {
 			mgr.markAlive(up)
 			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
-			return conn, nil
+			return tagUpstream(conn, up.Name), nil
 		}
 		lastErr = err
 		if IsUpstreamError(err) {

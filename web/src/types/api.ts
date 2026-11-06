@@ -36,7 +36,21 @@ export interface StatusSnapshot {
   pprof_enabled: boolean
   ready?: boolean
   upstreams?: UpstreamStatus[]
+  version: string
+  commit: string
+  build_time: string
+  go_version: string
+  uptime_seconds: number
   timestamp: string
+}
+
+export interface VersionInfo {
+  version: string
+  commit: string
+  build_time: string
+  go_version: string
+  platform: string
+  uptime_seconds: number
 }
 
 export interface TrafficEntrySnapshot {
@@ -49,17 +63,29 @@ export interface TrafficEntrySnapshot {
 }
 
 export interface TrafficSnapshot {
+  enabled: boolean
   entries: TrafficEntrySnapshot[]
+}
+
+export interface HealthCheckConfig {
+  type: string
+  path: string
+  expected_codes: number[]
+  interval_seconds: number
+  timeout_seconds: number
+  failure_threshold: number
+  success_threshold: number
 }
 
 export interface UpstreamInfo {
   name: string
   url: string
+  enabled: boolean
   types: string[]
   priority: number
   weight: number
   strategy: string
-  health_check_type: string
+  health_check: HealthCheckConfig
 }
 
 export interface UpstreamListResponse {
@@ -69,19 +95,23 @@ export interface UpstreamListResponse {
 export interface AddUpstreamRequest {
   name: string
   url: string
+  enabled?: boolean
   types: string[]
   priority: number
   weight: number
   strategy: string
+  health_check?: HealthCheckConfig
 }
 
 export interface UpdateUpstreamRequest {
   name?: string // 非空且与原名称不同时执行改名
-  url: string
-  types: string[]
+  url?: string // 留空表示沿用现有 URL（避免把脱敏后的 URL 写回配置）
+  enabled?: boolean
+  types?: string[]
   priority?: number
   weight?: number
-  strategy: string
+  strategy?: string
+  health_check?: HealthCheckConfig
 }
 
 export interface UpstreamCheckResult {
@@ -111,12 +141,14 @@ export interface RuleListResponse {
   rules: RuleInfo[]
 }
 
-export interface AddRuleRequest {
+export interface RuleRequest {
   type: string
   values: string[]
   action: string
   upstreams: string[]
 }
+
+export type AddRuleRequest = RuleRequest
 
 export interface UserInfo {
   username: string
@@ -130,6 +162,63 @@ export interface AddUserRequest {
   username: string
   password: string
 }
+
+export interface SettingsView {
+  listen: string
+  management: string
+  management_token_set: boolean
+  webui_enabled: boolean
+  check_interval_seconds: number
+  max_connections: number
+  enable_pprof: boolean
+  socks5_allow_bind: boolean
+  socks5_allow_udp_associate: boolean
+
+  routing_final: string
+  auto_mode: string
+  auto_direct_timeout_seconds: number
+  auto_cache_ttl_seconds: number
+  geosite_path: string
+  geosite_auto_update: boolean
+  geosite_update_url: string
+  geosite_update_interval_hours: number
+  socks5h_redirect_enabled: boolean
+
+  dns_type: string
+  doh_url: string
+  dot_addr: string
+  dns_fallback: boolean
+  dns_timeout_seconds: number
+  ip_precedence: string
+
+  dial_timeout_seconds: number
+  handshake_timeout_seconds: number
+  http_exchange_timeout_seconds: number
+  tunnel_idle_timeout_seconds: number
+
+  protect_private: boolean
+  default_action: string
+  deny_cidrs: string[]
+  allow_cidrs: string[]
+  deny_domains: string[]
+  allow_domains: string[]
+  deny_ports: number[]
+  allow_ports: number[]
+
+  allowed_clients: string[]
+  rate_limit_connections_per_second: number
+  rate_limit_burst: number
+  max_conns_per_user: number
+
+  traffic_audit_enabled: boolean
+  per_user_quota: number
+  per_upstream_quota: number
+  quota_window_seconds: number
+
+  log_level: string
+}
+
+export type SettingsPatch = Partial<Omit<SettingsView, 'listen' | 'management' | 'management_token_set' | 'webui_enabled'>>
 
 export interface ApiResult {
   status: string

@@ -87,6 +87,11 @@ const defaultDNSTimeout = 5 * time.Second
 // dnsCacheTTL 是 DNS 缓存的默认 TTL。
 const dnsCacheTTL = 60 * time.Second
 
+// DefaultDNSTimeout 返回 DNS 查询的默认超时时间。
+func DefaultDNSTimeout() Duration {
+	return Duration(defaultDNSTimeout)
+}
+
 // NewDNSResolver 根据配置创建 DNS 解析器。
 func NewDNSResolver(cfg DNSConfig) *DNSResolver {
 	typ := strings.ToLower(strings.TrimSpace(cfg.Type))

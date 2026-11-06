@@ -41,6 +41,9 @@ func main() {
 		return
 	}
 
+	// 注入版本信息，供 WebUI/管理接口展示。
+	proxy.SetBuildInfo(version, commit, buildTime)
+
 	cmd := "run"
 	if flag.NArg() > 0 {
 		cmd = flag.Arg(0)

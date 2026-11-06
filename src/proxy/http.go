@@ -12,7 +12,15 @@ import (
 // responseBody 包装上游/目标返回的响应体，关闭时同时关闭底层连接。
 type responseBody struct {
 	io.ReadCloser
-	conn net.Conn
+	conn  net.Conn
+	bytes int64
+}
+
+// Read 统计响应体字节数，用于流量审计。
+func (b *responseBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.bytes += int64(n)
+	return n, err
 }
 
 func (b *responseBody) Close() error {
@@ -130,14 +138,14 @@ func serveOneHTTPRequest(client net.Conn, req *http.Request, reqReader *bufio.Re
 	if req.Method == "CONNECT" {
 		// 必须沿用读取请求所用的 reqReader（而非原始 clientReader），
 		// 否则本层 bufio 预读的 CONNECT 之后的字节会丢失，导致 HTTPS 隧道损坏。
-		handleConnect(client, reqReader, req.Host, users, mgr, router)
+		handleConnect(client, reqReader, req.Host, users, mgr, router, user)
 		return false
 	}
 
-	return handleHTTPRequest(client, req, mgr, router, clientSourceIP(client))
+	return handleHTTPRequest(client, req, mgr, router, clientSourceIP(client), user)
 }
 
-func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager, router *Router) {
+func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, users map[string]string, mgr *UpstreamManager, router *Router, user string) {
 	sourceIP := clientSourceIP(client)
 	targetConn, err := dialTargetForRequest(target, mgr, router, sourceIP)
 	if err != nil {
@@ -157,7 +165,7 @@ func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, u
 		return
 	}
 	writeResponse(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	Tunnel(client, clientReader, targetConn, TrafficKey{Target: targetHostFromAddr(target)}, globalTrafficAccounter)
+	Tunnel(client, clientReader, targetConn, newTrafficKey(user, targetConn, target), globalTrafficAccounter)
 }
 
 func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {

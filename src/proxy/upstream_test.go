@@ -192,3 +192,36 @@ func mustURL(s string) *url.URL {
 	}
 	return u
 }
+
+func TestUpstreamConfigIsEnabledDefaultsToTrue(t *testing.T) {
+	disabled := false
+	if !(UpstreamConfig{}).IsEnabled() {
+		t.Fatal("UpstreamConfig without enabled should default to enabled")
+	}
+	if (UpstreamConfig{Enabled: &disabled}).IsEnabled() {
+		t.Fatal("UpstreamConfig with enabled=false should be disabled")
+	}
+}
+
+func TestNewUpstreamManagerSkipsDisabledUpstream(t *testing.T) {
+	enabled := true
+	disabled := false
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "off", URL: "socks5://127.0.0.1:1080", Enabled: &disabled},
+		{Name: "on", URL: "socks5://127.0.0.1:1081", Enabled: &enabled},
+	})
+	if err != nil {
+		t.Fatalf("NewUpstreamManager() error = %v", err)
+	}
+	if got := mgr.AttemptCount(nil); got != 1 {
+		t.Fatalf("AttemptCount() = %d, want 1 (disabled upstream must be skipped)", got)
+	}
+	up := mgr.Select()
+	if up == nil || up.Name != "on" {
+		t.Fatalf("Select() = %#v, want on", up)
+	}
+	statuses := mgr.UpstreamStatuses()
+	if len(statuses) != 1 || statuses[0].Name != "on" {
+		t.Fatalf("UpstreamStatuses() = %#v, want only on", statuses)
+	}
+}

@@ -57,7 +57,7 @@ export const apiGroups: ApiGroup[] = [
   "timestamp": "2025-01-01T00:00:00Z"
 }`,
         example: {
-          request: 'curl http://127.0.0.1:8081/health',
+          request: 'curl http://127.0.0.1:8890/health',
           response: `{
   "status": "up",
   "listen": "127.0.0.1:1080",
@@ -92,7 +92,7 @@ yigate_bytes_total{direction="in"} 1073741824
 yigate_bytes_total{direction="out"} 2147483648
 ...`,
         example: {
-          request: 'curl http://127.0.0.1:8081/metrics',
+          request: 'curl http://127.0.0.1:8890/metrics',
           response: `# HELP yigate_connections_total Total connections
 # TYPE yigate_connections_total counter
 yigate_connections_total 12345
@@ -115,7 +115,7 @@ yigate_connections_total 12345
         responseBody: `{
   "status": "up",
   "listen": "127.0.0.1:1080",
-  "management": "127.0.0.1:8081",
+  "management": "127.0.0.1:8890",
   "upstream_count": 3,
   "router_ready": true,
   "manager_ready": true,
@@ -123,11 +123,11 @@ yigate_connections_total 12345
   "timestamp": "2025-01-01T00:00:00Z"
 }`,
         example: {
-          request: 'curl http://127.0.0.1:8081/api/v1/status',
+          request: 'curl http://127.0.0.1:8890/api/v1/status',
           response: `{
   "status": "up",
   "listen": "127.0.0.1:1080",
-  "management": "127.0.0.1:8081",
+  "management": "127.0.0.1:8890",
   "upstream_count": 3,
   "router_ready": true,
   "manager_ready": true,
@@ -154,7 +154,7 @@ yigate_connections_total 12345
   "status": "ok"
 }`,
         example: {
-          request: 'curl -X POST http://127.0.0.1:8081/api/v1/reload',
+          request: 'curl -X POST http://127.0.0.1:8890/api/v1/reload',
           response: `{
   "status": "ok"
 }`,
@@ -189,7 +189,7 @@ yigate_connections_total 12345
   ]
 }`,
         example: {
-          request: 'curl http://127.0.0.1:8081/api/v1/traffic',
+          request: 'curl http://127.0.0.1:8890/api/v1/traffic',
           response: `{
   "entries": [
     {
@@ -208,6 +208,39 @@ yigate_connections_total 12345
           { code: 401, description: '未认证' },
         ],
       },
+      {
+        id: 'version',
+        method: 'GET',
+        path: '/api/v1/version',
+        summary: '版本信息',
+        description: '返回网关版本、提交、构建时间、Go 版本与运行时长。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        responseBody: `{
+  "version": "0.0.0-beta",
+  "commit": "abcdef0",
+  "build_time": "2025-01-01T00:00:00Z",
+  "go_version": "go1.22.12",
+  "platform": "linux/amd64",
+  "uptime_seconds": 3600
+}`,
+        example: {
+          request: 'curl http://127.0.0.1:8890/api/v1/version',
+          response: `{
+  "version": "0.0.0-beta",
+  "commit": "abcdef0",
+  "build_time": "2025-01-01T00:00:00Z",
+  "go_version": "go1.22.12",
+  "platform": "linux/amd64",
+  "uptime_seconds": 3600
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '返回版本信息' },
+          { code: 401, description: '未认证' },
+        ],
+      },
     ],
   },
   {
@@ -220,7 +253,8 @@ yigate_connections_total 12345
         method: 'GET',
         path: '/api/v1/config/upstreams',
         summary: '列出所有上游',
-        description: '返回所有上游代理配置列表。URL 已脱敏，不含凭证信息。',
+        description:
+          '返回所有上游代理配置列表。URL 已脱敏，不含凭证信息；enabled=false 表示已暂停调度与健康检查。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -229,6 +263,7 @@ yigate_connections_total 12345
     {
       "name": "us-east-1",
       "url": "socks5://127.0.0.1:1080",
+      "enabled": true,
       "types": ["socks5"],
       "priority": 1,
       "weight": 1,
@@ -238,12 +273,13 @@ yigate_connections_total 12345
   ]
 }`,
         example: {
-          request: 'curl http://127.0.0.1:8081/api/v1/config/upstreams',
+          request: 'curl http://127.0.0.1:8890/api/v1/config/upstreams',
           response: `{
   "upstreams": [
     {
       "name": "us-east-1",
       "url": "socks5://127.0.0.1:1080",
+      "enabled": true,
       "types": ["socks5"],
       "priority": 1,
       "weight": 1,
@@ -281,7 +317,7 @@ yigate_connections_total 12345
   "name": "my-upstream"
 }`,
         example: {
-          request: `curl -X POST http://127.0.0.1:8081/api/v1/config/upstreams \\
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/upstreams \\
   -H "Content-Type: application/json" \\
   -d '{
     "name": "my-upstream",
@@ -299,7 +335,7 @@ yigate_connections_total 12345
         statusCodes: [
           { code: 201, description: '添加成功' },
           { code: 400, description: '请求体格式错误或字段校验失败' },
-          { code: 409, description: '上游名称已存在' },
+          { code: 400, description: '上游名称已存在或配置校验失败' },
           { code: 401, description: '未认证' },
         ],
       },
@@ -309,7 +345,7 @@ yigate_connections_total 12345
         path: '/api/v1/config/upstreams/{name}',
         summary: '更新上游',
         description:
-          '更新指定上游代理配置。priority 和 weight 为可选字段（指针类型），未提供时保持原值。请求体中 name 非空且与路径中旧名称不同时执行改名，并同步更新路由规则中对旧名称的引用。',
+          '更新指定上游代理配置。priority、weight、enabled 为可选字段（指针类型），未提供时保持原值；enabled=false 会立即暂停该上游的流量调度与健康检查。请求体中 name 非空且与路径中旧名称不同时执行改名，并同步更新路由规则中对旧名称的引用。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [
@@ -333,7 +369,7 @@ yigate_connections_total 12345
   "name": "my-upstream-new"
 }`,
         example: {
-          request: `curl -X PUT http://127.0.0.1:8081/api/v1/config/upstreams/my-upstream \\
+          request: `curl -X PUT http://127.0.0.1:8890/api/v1/config/upstreams/my-upstream \\
   -H "Content-Type: application/json" \\
   -d '{
     "name": "my-upstream-new",
@@ -379,7 +415,7 @@ yigate_connections_total 12345
   }
 }`,
         example: {
-          request: 'curl -X POST http://127.0.0.1:8081/api/v1/config/upstreams/my-upstream/check',
+          request: 'curl -X POST http://127.0.0.1:8890/api/v1/config/upstreams/my-upstream/check',
           response: `{
   "result": {
     "name": "my-upstream",
@@ -414,7 +450,7 @@ yigate_connections_total 12345
   ]
 }`,
         example: {
-          request: 'curl -X POST http://127.0.0.1:8081/api/v1/config/upstreams/check',
+          request: 'curl -X POST http://127.0.0.1:8890/api/v1/config/upstreams/check',
           response: `{
   "results": [
     {
@@ -452,7 +488,7 @@ yigate_connections_total 12345
   "name": "my-upstream"
 }`,
         example: {
-          request: 'curl -X DELETE http://127.0.0.1:8081/api/v1/config/upstreams/my-upstream',
+          request: 'curl -X DELETE http://127.0.0.1:8890/api/v1/config/upstreams/my-upstream',
           response: `{
   "status": "ok",
   "name": "my-upstream"
@@ -492,7 +528,7 @@ yigate_connections_total 12345
   ]
 }`,
         example: {
-          request: 'curl http://127.0.0.1:8081/api/v1/config/rules',
+          request: 'curl http://127.0.0.1:8890/api/v1/config/rules',
           response: `{
   "rules": [
     {
@@ -530,7 +566,7 @@ yigate_connections_total 12345
   "status": "ok"
 }`,
         example: {
-          request: `curl -X POST http://127.0.0.1:8081/api/v1/config/rules \\
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/rules \\
   -H "Content-Type: application/json" \\
   -d '{
     "type": "domain",
@@ -569,7 +605,7 @@ yigate_connections_total 12345
   "index": "0"
 }`,
         example: {
-          request: 'curl -X DELETE http://127.0.0.1:8081/api/v1/config/rules/0',
+          request: 'curl -X DELETE http://127.0.0.1:8890/api/v1/config/rules/0',
           response: `{
   "status": "ok",
   "index": "0"
@@ -577,6 +613,89 @@ yigate_connections_total 12345
         },
         statusCodes: [
           { code: 200, description: '删除成功' },
+          { code: 404, description: '索引超出范围' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'rules-update',
+        method: 'PUT',
+        path: '/api/v1/config/rules/{index}',
+        summary: '更新路由规则',
+        description:
+          '按索引替换一条路由规则。写入前会校验规则类型、动作、匹配值（正则/CIDR）以及引用的上游是否存在；校验失败时配置文件保持不变。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [
+          {
+            name: 'index',
+            type: 'integer (path)',
+            required: true,
+            description: '规则索引，从 0 开始',
+          },
+        ],
+        requestBody: `{
+  "type": "domain_suffix",
+  "values": ["example.com"],
+  "action": "proxy",
+  "upstreams": ["us-east-1"]
+}`,
+        responseBody: `{
+  "status": "ok"
+}`,
+        example: {
+          request: `curl -X PUT http://127.0.0.1:8890/api/v1/config/rules/0 \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "type": "domain_suffix",
+    "values": ["example.com"],
+    "action": "proxy",
+    "upstreams": ["us-east-1"]
+  }'`,
+          response: `{
+  "status": "ok"
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '更新成功' },
+          { code: 400, description: '规则校验失败' },
+          { code: 404, description: '索引超出范围' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'rules-move',
+        method: 'POST',
+        path: '/api/v1/config/rules/{index}/move',
+        summary: '调整规则顺序',
+        description: '将指定规则上移或下移一位。规则按顺序匹配，顺序会影响最终路由结果。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [
+          {
+            name: 'index',
+            type: 'integer (path)',
+            required: true,
+            description: '规则索引，从 0 开始',
+          },
+        ],
+        requestBody: `{
+  "direction": "up"
+}`,
+        responseBody: `{
+  "status": "ok"
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/rules/1/move \\
+  -H "Content-Type: application/json" \\
+  -d '{"direction": "up"}'`,
+          response: `{
+  "status": "ok"
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '调整成功' },
+          { code: 400, description: 'direction 非法或已到边界' },
           { code: 404, description: '索引超出范围' },
           { code: 401, description: '未认证' },
         ],
@@ -608,7 +727,7 @@ yigate_connections_total 12345
   ]
 }`,
         example: {
-          request: 'curl http://127.0.0.1:8081/api/v1/config/users',
+          request: 'curl http://127.0.0.1:8890/api/v1/config/users',
           response: `{
   "users": [
     { "username": "alice" },
@@ -639,7 +758,7 @@ yigate_connections_total 12345
   "username": "alice"
 }`,
         example: {
-          request: `curl -X POST http://127.0.0.1:8081/api/v1/config/users \\
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/users \\
   -H "Content-Type: application/json" \\
   -d '{
     "username": "alice",
@@ -653,7 +772,7 @@ yigate_connections_total 12345
         statusCodes: [
           { code: 201, description: '添加成功' },
           { code: 400, description: '请求体格式错误' },
-          { code: 409, description: '用户名已存在' },
+          { code: 400, description: '用户名已存在' },
           { code: 401, description: '未认证' },
         ],
       },
@@ -678,7 +797,7 @@ yigate_connections_total 12345
   "username": "alice"
 }`,
         example: {
-          request: 'curl -X DELETE http://127.0.0.1:8081/api/v1/config/users/alice',
+          request: 'curl -X DELETE http://127.0.0.1:8890/api/v1/config/users/alice',
           response: `{
   "status": "ok",
   "username": "alice"
@@ -687,6 +806,120 @@ yigate_connections_total 12345
         statusCodes: [
           { code: 200, description: '删除成功' },
           { code: 404, description: '用户不存在' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'users-update',
+        method: 'PUT',
+        path: '/api/v1/config/users/{username}',
+        summary: '修改用户密码',
+        description: '修改指定用户的代理认证密码，新连接立即使用新密码。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [
+          {
+            name: 'username',
+            type: 'string (path)',
+            required: true,
+            description: '用户名，URL 路径参数',
+          },
+        ],
+        requestBody: `{
+  "password": "new-secret"
+}`,
+        responseBody: `{
+  "status": "ok",
+  "username": "alice"
+}`,
+        example: {
+          request: `curl -X PUT http://127.0.0.1:8890/api/v1/config/users/alice \\
+  -H "Content-Type: application/json" \\
+  -d '{"password": "new-secret"}'`,
+          response: `{
+  "status": "ok",
+  "username": "alice"
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '修改成功' },
+          { code: 400, description: '密码为空' },
+          { code: 404, description: '用户不存在' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'settings',
+    title: '全局设置',
+    description: '读取与修改全局运行设置。时间字段统一以秒为单位；修改会持久化并热加载。',
+    endpoints: [
+      {
+        id: 'settings-get',
+        method: 'GET',
+        path: '/api/v1/config/settings',
+        summary: '读取全局设置',
+        description:
+          '返回路由、DNS、超时、目标策略、访问控制、流量审计、日志级别等全局设置。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        responseBody: `{
+  "routing_final": "auto",
+  "auto_mode": "direct_first",
+  "dns_type": "system",
+  "dial_timeout_seconds": 10,
+  "traffic_audit_enabled": true,
+  "log_level": "info"
+}`,
+        example: {
+          request: 'curl http://127.0.0.1:8890/api/v1/config/settings',
+          response: `{
+  "routing_final": "auto",
+  "auto_mode": "direct_first",
+  "dns_type": "system",
+  "dial_timeout_seconds": 10,
+  "traffic_audit_enabled": true,
+  "log_level": "info"
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '返回设置视图' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'settings-update',
+        method: 'PUT',
+        path: '/api/v1/config/settings',
+        summary: '修改全局设置',
+        description:
+          '部分更新全局设置，仅提交需要修改的字段。校验失败时不会写入配置文件，运行时保持原配置。监听地址等启动参数需重启生效。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        requestBody: `{
+  "routing_final": "proxy",
+  "dns_type": "doh",
+  "doh_url": "https://dns.example/dns-query",
+  "traffic_audit_enabled": true,
+  "log_level": "debug"
+}`,
+        responseBody: `{
+  "status": "ok"
+}`,
+        example: {
+          request: `curl -X PUT http://127.0.0.1:8890/api/v1/config/settings \\
+  -H "Content-Type: application/json" \\
+  -d '{"log_level": "debug"}'`,
+          response: `{
+  "status": "ok"
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '修改成功并已热加载' },
+          { code: 400, description: '校验失败或热加载失败（已回滚）' },
           { code: 401, description: '未认证' },
         ],
       },
@@ -709,7 +942,7 @@ yigate_connections_total 12345
         params: [],
         responseBody: `text/html — pprof 索引页面`,
         example: {
-          request: 'curl http://127.0.0.1:8081/debug/pprof/',
+          request: 'curl http://127.0.0.1:8890/debug/pprof/',
           response: `Types of profiles available:
 Count Profile
 ...`,
@@ -739,7 +972,7 @@ Count Profile
         ],
         responseBody: `binary/pprof — CPU profile 数据`,
         example: {
-          request: 'curl -o cpu.prof "http://127.0.0.1:8081/debug/pprof/profile?seconds=30"',
+          request: 'curl -o cpu.prof "http://127.0.0.1:8890/debug/pprof/profile?seconds=30"',
           response: `Binary pprof data (use "go tool pprof cpu.prof" to analyze)`,
         },
         statusCodes: [
@@ -758,7 +991,7 @@ Count Profile
         params: [],
         responseBody: `binary/pprof — heap profile 数据`,
         example: {
-          request: 'curl -o heap.prof http://127.0.0.1:8081/debug/pprof/heap',
+          request: 'curl -o heap.prof http://127.0.0.1:8890/debug/pprof/heap',
           response: `Binary pprof data (use "go tool pprof heap.prof" to analyze)`,
         },
         statusCodes: [
@@ -777,7 +1010,7 @@ Count Profile
         params: [],
         responseBody: `binary/pprof — goroutine profile 数据`,
         example: {
-          request: 'curl -o goroutine.prof http://127.0.0.1:8081/debug/pprof/goroutine',
+          request: 'curl -o goroutine.prof http://127.0.0.1:8890/debug/pprof/goroutine',
           response: `Binary pprof data`,
         },
         statusCodes: [
@@ -804,7 +1037,7 @@ Count Profile
         ],
         responseBody: `取决于具体 profile 类型`,
         example: {
-          request: 'curl http://127.0.0.1:8081/debug/pprof/trace?seconds=5',
+          request: 'curl http://127.0.0.1:8890/debug/pprof/trace?seconds=5',
           response: `Binary trace data`,
         },
         statusCodes: [
