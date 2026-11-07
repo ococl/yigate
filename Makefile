@@ -2,6 +2,8 @@
 
 GO ?= go
 GOPROXY ?= https://goproxy.cn,direct
+CGO_ENABLED ?= 0
+GO_BUILD_FLAGS ?= -trimpath -buildvcs=false
 SRC_DIR := ./src
 WEB_DIR := ./web
 BUILD_DIR := ./build
@@ -19,7 +21,7 @@ LDFLAGS := -s -w \
 all: build
 
 build: web-embed
-	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BUILD_DIR)/yigate .
+	cd $(SRC_DIR) && CGO_ENABLED=$(CGO_ENABLED) GOPROXY=$(GOPROXY) $(GO) build $(GO_BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o ../$(BUILD_DIR)/yigate .
 
 test:
 	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) test ./...
@@ -31,8 +33,8 @@ cross: web-embed
 		for platform in $$(all_platforms); do \
 			name="$$(output_name "$(VERSION)" "$$platform")"; \
 			echo "Building $$name..."; \
-			( cd $(SRC_DIR) && env $$(build_env "$$platform") CGO_ENABLED=0 \
-				GOPROXY=$(GOPROXY) $(GO) build -trimpath -ldflags "$(LDFLAGS)" \
+			( cd $(SRC_DIR) && env $$(build_env "$$platform") CGO_ENABLED=$(CGO_ENABLED) \
+				GOPROXY=$(GOPROXY) $(GO) build $(GO_BUILD_FLAGS) -ldflags "$(LDFLAGS)" \
 				-o ../$(BUILD_DIR)/$$name . ); \
 		done'
 
@@ -55,11 +57,7 @@ web-install:
 	cd $(WEB_DIR) && npm ci
 
 web-embed: web-build
-	rm -rf $(SRC_DIR)/proxy/webui_dist
-	mkdir -p $(SRC_DIR)/proxy/webui_dist
-	cp -r $(WEB_DIR)/dist/. $(SRC_DIR)/proxy/webui_dist/
-	@find $(SRC_DIR)/proxy/webui_dist/assets -maxdepth 1 -type f -name '*.js' -print -quit | grep -q . || \
-		{ echo "WebUI build assets are missing" >&2; exit 1; }
+	node $(WEB_DIR)/scripts/embed-dist.mjs $(WEB_DIR)/dist $(SRC_DIR)/proxy/webui_dist
 
 web-dev:
 	cd $(WEB_DIR) && npm run dev
@@ -75,7 +73,7 @@ web-e2e-install:
 
 web-e2e: web-embed
 	@mkdir -p $(BUILD_DIR)
-	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) go build -o ../$(BUILD_DIR)/yigate-e2e .
+	cd $(SRC_DIR) && CGO_ENABLED=$(CGO_ENABLED) GOPROXY=$(GOPROXY) go build $(GO_BUILD_FLAGS) -o ../$(BUILD_DIR)/yigate-e2e .
 	cd $(WEB_DIR) && npm run test:e2e
 
 web: web-build

@@ -44,6 +44,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		"FROM alpine:3.20",
 		"go mod download",
 		"CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct",
+		"embed-dist.mjs",
 		"adduser -D -u 1000 yigate",
 		"COPY --from=builder /build/yigate /usr/local/bin/yigate",
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
@@ -99,7 +100,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"set -euo pipefail", "npm ci", "npm run build", "WebUI 构建产物缺少 JS assets", "\"${SCRIPTS_DIR}/ci-build.sh\"", "YIGATE_REQUIRE_SBOM=1", "git -C"} {
+	for _, want := range []string{"set -euo pipefail", "npm ci", "npm run build", "embed-dist.mjs", "WebUI 构建产物缺少 JS assets", "\"${SCRIPTS_DIR}/ci-build.sh\"", "YIGATE_REQUIRE_SBOM=1", "git -C"} {
 		if !bytes.Contains(release, []byte(want)) {
 			t.Fatalf("release.sh missing %q", want)
 		}
@@ -112,9 +113,19 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"source", "platforms.sh", "YIGATE_VERSION", "YIGATE_COMMIT", "YIGATE_BUILD_TIME", "YIGATE_REQUIRE_SBOM", "go mod verify", "-mod=readonly"} {
+	for _, want := range []string{"source", "platforms.sh", "YIGATE_VERSION", "YIGATE_COMMIT", "YIGATE_BUILD_TIME", "YIGATE_REQUIRE_SBOM", "go mod verify", "-mod=readonly", "*.js.gz"} {
 		if !bytes.Contains(ciBuild, []byte(want)) {
 			t.Fatalf("ci-build.sh missing %q", want)
+		}
+	}
+
+	embedScript, err := os.ReadFile(filepath.Join(repoRoot, "web", "scripts", "embed-dist.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"gzipSync", "index.html", ".js.gz"} {
+		if !bytes.Contains(embedScript, []byte(want)) {
+			t.Fatalf("embed-dist.mjs missing %q", want)
 		}
 	}
 

@@ -133,7 +133,8 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 cd web
 npm ci            # 按锁文件安装依赖
 npm run dev       # 开发服务器
-npm run build     # 生产构建（输出到 web/dist/，需拷贝到 src/proxy/webui_dist/ 后重新编译 Go 以嵌入）
+npm run build     # 生产构建（输出到 web/dist/）
+node scripts/embed-dist.mjs dist ../src/proxy/webui_dist  # 压缩资源并准备嵌入
 npm run preview   # 预览构建产物
 ```
 

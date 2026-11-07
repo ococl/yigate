@@ -79,12 +79,11 @@
       </p>
 
       <p>构建带前端的二进制：</p>
-      <pre><code>make build          # 构建前端 → 拷贝到 src/proxy/webui_dist → 编译 Go 二进制</code></pre>
+      <pre><code>make build          # 构建前端 → 压缩嵌入 src/proxy/webui_dist → 编译 Go 二进制</code></pre>
 
       <p style="margin-top: 16px;">或者仅构建前端后重新编译：</p>
       <pre><code>cd web &amp;&amp; npm ci &amp;&amp; npm run build
-rm -rf src/proxy/webui_dist &amp;&amp; mkdir -p src/proxy/webui_dist
-cp -r web/dist/* src/proxy/webui_dist/
+cd .. &amp;&amp; node web/scripts/embed-dist.mjs web/dist src/proxy/webui_dist
 cd src &amp;&amp; go build -o ../build/yigate .</code></pre>
 
       <hr />

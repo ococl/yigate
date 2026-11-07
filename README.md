@@ -158,7 +158,7 @@ cd src && GOPROXY=https://goproxy.cn,direct go build -o yigate .
 
 # 前端（独立项目，Node ^22.18 或 >=24.11，见 .nvmrc）
 cd web && npm ci && npm run build
-# 构建后需将 web/dist 内容拷贝到 src/proxy/webui_dist 并重新编译 Go 以嵌入 WebUI
+# 构建后通过 embed-dist.mjs 压缩并嵌入 WebUI，再重新编译 Go
 # （直接 make build 会自动完成这两步）
 
 # 全量构建 / 发布

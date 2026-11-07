@@ -57,10 +57,8 @@ echo "Building yigate ${TAG} (commit ${COMMIT:0:12}, built ${BUILD_TIME})"
   npm ci
   npm run build
 )
-rm -rf "${WEBUI_DIST}"
-mkdir -p "${WEBUI_DIST}"
-cp -r "${WEB_DIR}/dist/." "${WEBUI_DIST}/"
-if ! find "${WEBUI_DIST}/assets" -maxdepth 1 -type f -name '*.js' -print -quit | grep -q .; then
+node "${WEB_DIR}/scripts/embed-dist.mjs" "${WEB_DIR}/dist" "${WEBUI_DIST}"
+if ! find "${WEBUI_DIST}/assets" -maxdepth 1 -type f \( -name '*.js' -o -name '*.js.gz' \) -print -quit | grep -q .; then
   echo "error: WebUI 构建产物缺少 JS assets，拒绝发布" >&2
   exit 1
 fi

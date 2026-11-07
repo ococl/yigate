@@ -43,10 +43,9 @@ dev:
         - name: webui-build
           image: node:22.18-alpine
           script: |
-            cd web && npm ci && npm run build
+            cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
         - name: build
           script: |
-            rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
             mkdir -p build
             (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
@@ -133,10 +132,9 @@ main:
         - name: webui-build
           image: node:22.18-alpine
           script: |
-            cd web && npm ci && npm run build
+            cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
         - name: build
           script: |
-            rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
             mkdir -p build
             (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
@@ -240,10 +238,9 @@ main:
         - name: webui-build
           image: node:22.18-alpine
           script: |
-            cd web && npm ci && npm run build
+            cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
         - name: build
           script: |
-            rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
             mkdir -p build
             (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"

@@ -70,11 +70,9 @@ try {
 finally {
     Pop-Location
 }
-Remove-Item $WebUIDist -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path $WebUIDist -Force | Out-Null
-Copy-Item (Join-Path $WebDir "dist/*") $WebUIDist -Recurse -Force
-if (-not (Get-ChildItem (Join-Path $WebUIDist "assets") -Filter "*.js" -File -ErrorAction SilentlyContinue)) {
-    throw "WebUI build assets are missing"
+node (Join-Path $WebDir "scripts/embed-dist.mjs") (Join-Path $WebDir "dist") $WebUIDist
+if ($LASTEXITCODE -ne 0) {
+    throw "WebUI embed failed"
 }
 
 foreach ($Platform in $Platforms) {

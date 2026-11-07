@@ -23,7 +23,7 @@ SCRIPTS_DIR="${REPO_ROOT}/scripts"
 
 source "${SCRIPTS_DIR}/platforms.sh"
 
-if ! find "${SRC_DIR}/proxy/webui_dist/assets" -maxdepth 1 -type f -name '*.js' -print -quit 2>/dev/null | grep -q .; then
+if ! find "${SRC_DIR}/proxy/webui_dist/assets" -maxdepth 1 -type f \( -name '*.js' -o -name '*.js.gz' \) -print -quit 2>/dev/null | grep -q .; then
   echo "error: src/proxy/webui_dist 缺少 WebUI JS assets，请先构建并嵌入前端" >&2
   exit 1
 fi
@@ -41,7 +41,7 @@ if [[ ! -d "${SRC_DIR}/proxy/webui_dist/assets" ]]; then
         echo "warning: webui_dist/assets 缺失，将使用占位页构建（WebUI 不可用）。"
     else
         echo "error: webui_dist/assets 不存在，未集成前端产物。" >&2
-        echo "       请先执行: cd web && npm install && npm run build && cp -r web/dist/* src/proxy/webui_dist/" >&2
+        echo "       请先执行: make web-embed（或 node web/scripts/embed-dist.mjs web/dist src/proxy/webui_dist）" >&2
         echo "       或设置 ALLOW_EMBED_FALLBACK=1 允许降级构建。" >&2
         exit 1
     fi

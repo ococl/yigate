@@ -1,12 +1,18 @@
 package proxy
 
 import (
+	"bytes"
+	"compress/gzip"
 	"embed"
+	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 //go:embed all:webui_dist
@@ -74,7 +80,6 @@ func WebUIHandler() (http.Handler, error) {
 		return nil, err
 	}
 	hasAssets := hasWebUIAssets(sub)
-	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := path.Clean(r.URL.Path)
 		// 不拦截 API 与管理端点、pprof 等敏感路径（已由 mux 优先注册）
@@ -97,20 +102,90 @@ func WebUIHandler() (http.Handler, error) {
 			serveIndex(sub, w, r)
 			return
 		}
-		f, err := sub.Open(strings.TrimPrefix(clean, "/"))
-		if err != nil {
-			// 静态资源缺失时返回真正的 404，避免浏览器把 HTML 当 JS/CSS 解析；
-			// 仅无扩展名的前端路由回退到 index.html。
-			if path.Ext(clean) != "" {
-				http.NotFound(w, r)
+		if _, err := sub.Open(strings.TrimPrefix(clean, "/")); err != nil {
+			if _, gzErr := sub.Open(strings.TrimPrefix(clean, "/") + ".gz"); gzErr != nil {
+				// 静态资源缺失时返回真正的 404，避免浏览器把 HTML 当 JS/CSS 解析；
+				// 仅无扩展名的前端路由回退到 index.html。
+				if path.Ext(clean) != "" {
+					http.NotFound(w, r)
+					return
+				}
+				serveIndex(sub, w, r)
 				return
 			}
-			serveIndex(sub, w, r)
+		}
+		serveWebUIFile(sub, clean, w, r)
+	}), nil
+}
+
+// serveWebUIFile 提供静态资源；构建时压缩的资源以 .gz 形式嵌入。
+// 支持 gzip 的客户端直接接收压缩内容，其他客户端由服务端解压，保证兼容性。
+func serveWebUIFile(sub fs.FS, name string, w http.ResponseWriter, r *http.Request) {
+	name = strings.TrimPrefix(path.Clean("/"+name), "/")
+	if name == "" || strings.HasSuffix(name, ".gz") {
+		http.NotFound(w, r)
+		return
+	}
+
+	if compressed, err := fs.ReadFile(sub, name+".gz"); err == nil {
+		w.Header().Set("Vary", "Accept-Encoding")
+		setWebUIContentType(w, name)
+		if acceptsGzip(r) {
+			w.Header().Set("Content-Encoding", "gzip")
+			http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(compressed))
 			return
 		}
-		_ = f.Close()
-		fileServer.ServeHTTP(w, r)
-	}), nil
+		zr, err := gzip.NewReader(bytes.NewReader(compressed))
+		if err != nil {
+			http.Error(w, "webui asset unavailable", http.StatusInternalServerError)
+			return
+		}
+		raw, readErr := io.ReadAll(zr)
+		closeErr := zr.Close()
+		if readErr != nil || closeErr != nil {
+			http.Error(w, "webui asset unavailable", http.StatusInternalServerError)
+			return
+		}
+		http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(raw))
+		return
+	}
+
+	data, err := fs.ReadFile(sub, name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	setWebUIContentType(w, name)
+	http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(data))
+}
+
+func setWebUIContentType(w http.ResponseWriter, name string) {
+	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+}
+
+func acceptsGzip(r *http.Request) bool {
+	for _, encoding := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		parts := strings.Split(strings.TrimSpace(encoding), ";")
+		if !strings.EqualFold(strings.TrimSpace(parts[0]), "gzip") {
+			continue
+		}
+		quality := 1.0
+		for _, parameter := range parts[1:] {
+			parameter = strings.TrimSpace(parameter)
+			if !strings.HasPrefix(parameter, "q=") {
+				continue
+			}
+			if value, err := strconv.ParseFloat(strings.TrimPrefix(parameter, "q="), 64); err == nil {
+				quality = value
+			}
+		}
+		if quality > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // hasWebUIAssets 判断嵌入的前端产物是否包含可用的 JS 资源。
@@ -121,7 +196,11 @@ func hasWebUIAssets(sub fs.FS) bool {
 		return false
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".js") {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".js.gz") {
 			return true
 		}
 	}

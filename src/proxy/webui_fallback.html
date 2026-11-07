@@ -62,9 +62,8 @@
         <code class="inline-code">src/proxy/webui_dist</code>。
       </p>
       <p>请先构建前端，再重新编译 Go 程序：</p>
-      <code>cd web &amp;&amp; npm install &amp;&amp; npm run build
-cd .. &amp;&amp; rm -rf src/proxy/webui_dist &amp;&amp; mkdir -p src/proxy/webui_dist
-cp -r web/dist/* src/proxy/webui_dist/
+      <code>cd web &amp;&amp; npm ci &amp;&amp; npm run build
+cd .. &amp;&amp; node web/scripts/embed-dist.mjs web/dist src/proxy/webui_dist
 cd src &amp;&amp; go build -o yigate .</code>
       <p>
         或者直接使用 <code class="inline-code">make build</code> / Docker 构建，二者会自动完成前端集成。

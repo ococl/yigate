@@ -2,7 +2,7 @@
 FROM node:22.18-alpine AS webui
 WORKDIR /webui
 COPY web/ ./web/
-RUN cd web && npm ci && npm run build
+RUN cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist /webui/webui_dist
 
 # 构建阶段
 FROM golang:1.21-alpine AS builder
@@ -17,9 +17,9 @@ RUN cd src && GOPROXY=https://goproxy.cn,direct go mod download
 
 COPY src/ ./src/
 
-# 将前端构建产物拷贝到 Go embed 目录（webui_dist 已被 .gitignore，仅构建期存在）。
+# 将压缩后的前端产物拷贝到 Go embed 目录（webui_dist 已被 .gitignore，仅构建期存在）。
 # 注意：必须在 COPY src/ 之后执行，否则 src 中占位的 index.html 会覆盖真实前端入口。
-COPY --from=webui /webui/web/dist ./src/proxy/webui_dist
+COPY --from=webui /webui/webui_dist ./src/proxy/webui_dist
 
 COPY deploy/docker/entrypoint.sh ./entrypoint.sh
 RUN cd src && CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct \
