@@ -32,7 +32,8 @@ main:
         - name: test
           script: cd src && go test -timeout 120s ./...
         - name: race
-          script: cd src && go test -race -timeout 180s ./...
+          # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
+          script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
         - name: webui-test
           image: node:26.13.0-alpine
           script: |
@@ -99,7 +100,8 @@ main:
         - name: test
           script: cd src && go test -timeout 120s ./...
         - name: race
-          script: cd src && go test -race -timeout 180s ./...
+          # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
+          script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
         - name: webui-test
           image: node:26.13.0-alpine
           script: |
@@ -135,7 +137,8 @@ main:
         - name: test
           script: cd src && go test -timeout 120s ./...
         - name: race
-          script: cd src && go test -race -timeout 180s ./...
+          # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
+          script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
         - name: vulnerability-scan
           script: |
             cd src

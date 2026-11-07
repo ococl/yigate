@@ -167,6 +167,16 @@ func TestReleaseSecurityContracts(t *testing.T) {
 			t.Fatalf(".cnb.yml missing %q", want)
 		}
 	}
+	// 流水线级 env 设有 CGO_ENABLED=0，而 `go test -race` 依赖 cgo，
+	// 未在 race 阶段显式覆盖会让流水线在 race 阶段直接失败。
+	for i, line := range strings.Split(string(cnb), "\n") {
+		if !strings.Contains(line, "go test -race") {
+			continue
+		}
+		if !strings.Contains(line, "CGO_ENABLED=1") {
+			t.Fatalf(".cnb.yml:%d race stage must set CGO_ENABLED=1: %s", i+1, strings.TrimSpace(line))
+		}
+	}
 	formalStart := bytes.Index(cnb, []byte("\"v*\":\n  tag_push:"))
 	if formalStart < 0 {
 		t.Fatal(".cnb.yml missing formal release pipeline")
