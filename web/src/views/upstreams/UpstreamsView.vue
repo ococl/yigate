@@ -377,28 +377,31 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page-header">
-    <div>
-      <a-typography-title :level="4" style="margin: 0;">上游管理</a-typography-title>
-      <a-typography-text type="secondary">
-        配置上游代理、负载策略与健康检查；修改会立即生效。
-      </a-typography-text>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <a-typography-title :level="4" style="margin: 0;">上游管理</a-typography-title>
+        <a-typography-text type="secondary">
+          配置上游代理、负载策略与健康检查；修改会立即生效。
+        </a-typography-text>
+      </div>
+      <a-space>
+        <a-button @click="fetchData" :loading="loading">刷新</a-button>
+        <a-button @click="handleCheckAll" :loading="checkingAll">一键巡检</a-button>
+        <a-button type="primary" @click="showAddModal">新增上游</a-button>
+      </a-space>
     </div>
-    <a-space>
-      <a-button @click="fetchData" :loading="loading">刷新</a-button>
-      <a-button @click="handleCheckAll" :loading="checkingAll">一键巡检</a-button>
-      <a-button type="primary" @click="showAddModal">新增上游</a-button>
-    </a-space>
-  </div>
 
-  <a-table
-    :data-source="dataSource"
-    :columns="columns"
-    :loading="loading"
-    row-key="name"
-    :pagination="{ pageSize: 10, hideOnSinglePage: true }"
-    :scroll="{ x: 1280 }"
-  >
+    <a-card class="fill-card">
+      <div class="fill-table">
+        <a-table
+          :data-source="dataSource"
+          :columns="columns"
+          :loading="loading"
+          row-key="name"
+          :pagination="{ pageSize: 10, hideOnSinglePage: true }"
+          :scroll="{ x: 1280, y: 1 }"
+        >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'enabled'">
         <a-tooltip :title="record.enabled === false ? '已禁用：不参与流量调度与健康检查' : '启用中：点击可临时禁用'">
@@ -450,10 +453,13 @@ onUnmounted(() => {
         </a-space>
       </template>
     </template>
-    <template #emptyText>
-      <a-empty description="暂无上游，请先新增一个上游代理" />
-    </template>
-  </a-table>
+        <template #emptyText>
+          <a-empty description="暂无上游，请先新增一个上游代理" />
+        </template>
+        </a-table>
+      </div>
+    </a-card>
+  </div>
 
   <!-- 新增/编辑弹窗 -->
   <a-modal

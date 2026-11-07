@@ -167,26 +167,30 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <div class="page-header">
-    <div>
-      <a-typography-title :level="4" style="margin: 0;">路由规则</a-typography-title>
-      <a-typography-text type="secondary">
-        规则自上而下匹配，命中即停止；顺序会影响最终路由结果。
-      </a-typography-text>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <a-typography-title :level="4" style="margin: 0;">路由规则</a-typography-title>
+        <a-typography-text type="secondary">
+          规则自上而下匹配，命中即停止；顺序会影响最终路由结果。
+        </a-typography-text>
+      </div>
+      <a-space>
+        <a-button @click="fetchData" :loading="loading">刷新</a-button>
+        <a-button type="primary" @click="openAddModal">新增规则</a-button>
+      </a-space>
     </div>
-    <a-space>
-      <a-button @click="fetchData" :loading="loading">刷新</a-button>
-      <a-button type="primary" @click="openAddModal">新增规则</a-button>
-    </a-space>
-  </div>
 
-  <a-table
-    :data-source="dataSource"
-    :columns="columns"
-    :loading="loading"
-    row-key="index"
-    :pagination="{ pageSize: 20, hideOnSinglePage: true }"
-  >
+    <a-card class="fill-card">
+      <div class="fill-table">
+        <a-table
+          :data-source="dataSource"
+          :columns="columns"
+          :loading="loading"
+          row-key="index"
+          :pagination="{ pageSize: 20, hideOnSinglePage: true }"
+          :scroll="{ y: 1 }"
+        >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'index'">
         {{ record.index + 1 }}
@@ -233,10 +237,13 @@ onMounted(fetchData)
         </a-space>
       </template>
     </template>
-    <template #emptyText>
-      <a-empty description="暂无路由规则，所有请求将按全局 default_action 处理" />
-    </template>
-  </a-table>
+        <template #emptyText>
+          <a-empty description="暂无路由规则，所有请求将按全局 default_action 处理" />
+        </template>
+        </a-table>
+      </div>
+    </a-card>
+  </div>
 
   <a-modal
     v-model:open="modalVisible"

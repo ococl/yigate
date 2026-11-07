@@ -79,63 +79,68 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page-header">
-    <div>
-      <a-typography-title :level="4" style="margin: 0;">流量审计</a-typography-title>
-      <a-typography-text type="secondary">
-        按用户 / 上游 / 目标聚合的流量统计，每 15 秒自动刷新。
-      </a-typography-text>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <a-typography-title :level="4" style="margin: 0;">流量审计</a-typography-title>
+        <a-typography-text type="secondary">
+          按用户 / 上游 / 目标聚合的流量统计，每 15 秒自动刷新。
+        </a-typography-text>
+      </div>
+      <a-space>
+        <a-input-search v-model:value="keyword" placeholder="搜索用户、上游或目标" allow-clear style="width: 240px;" />
+        <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
+      </a-space>
     </div>
-    <a-space>
-      <a-input-search v-model:value="keyword" placeholder="搜索用户、上游或目标" allow-clear style="width: 240px;" />
-      <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
-    </a-space>
-  </div>
 
-  <a-alert
-    v-if="!enabled"
-    type="warning"
-    show-icon
-    style="margin-bottom: 16px;"
-    message="流量审计未启用"
-  >
-    <template #description>
-      未开启时不会统计任何流量，页面将始终为空。请前往
-      <RouterLink to="/settings" class="link">系统设置</RouterLink>
-      开启「流量审计」。
-    </template>
-  </a-alert>
+    <a-card class="fill-card">
+      <a-alert
+        v-if="!enabled"
+        class="fill-card-toolbar"
+        type="warning"
+        show-icon
+        style="margin-bottom: 16px;"
+        message="流量审计未启用"
+      >
+        <template #description>
+          未开启时不会统计任何流量，页面将始终为空。请前往
+          <RouterLink to="/settings" class="link">系统设置</RouterLink>
+          开启「流量审计」。
+        </template>
+      </a-alert>
 
-  <a-row :gutter="16" style="margin-bottom: 16px;">
-    <a-col :xs="24" :sm="12" :lg="6">
-      <a-card size="small">
-        <a-statistic title="总流量" :value="formatBytes(summary.total)" />
-      </a-card>
-    </a-col>
-    <a-col :xs="24" :sm="12" :lg="6">
-      <a-card size="small">
-        <a-statistic title="统计条目" :value="summary.entries" :suffix="`条 / ${summary.userCount} 个用户`" />
-      </a-card>
-    </a-col>
-    <a-col :xs="24" :sm="12" :lg="6">
-      <a-card size="small">
-        <a-statistic title="流量最大用户" :value="summary.topUser" :value-style="{ fontSize: '16px' }" />
-      </a-card>
-    </a-col>
-    <a-col :xs="24" :sm="12" :lg="6">
-      <a-card size="small">
-        <a-statistic title="流量最大上游" :value="summary.topUpstream" :value-style="{ fontSize: '16px' }" />
-      </a-card>
-    </a-col>
-  </a-row>
+      <a-row class="fill-card-toolbar" :gutter="16" style="margin-bottom: 16px;">
+        <a-col :xs="24" :sm="12" :lg="6">
+          <a-card size="small">
+            <a-statistic title="总流量" :value="formatBytes(summary.total)" />
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :sm="12" :lg="6">
+          <a-card size="small">
+            <a-statistic title="统计条目" :value="summary.entries" :suffix="`条 / ${summary.userCount} 个用户`" />
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :sm="12" :lg="6">
+          <a-card size="small">
+            <a-statistic title="流量最大用户" :value="summary.topUser" :value-style="{ fontSize: '16px' }" />
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :sm="12" :lg="6">
+          <a-card size="small">
+            <a-statistic title="流量最大上游" :value="summary.topUpstream" :value-style="{ fontSize: '16px' }" />
+          </a-card>
+        </a-col>
+      </a-row>
 
-  <a-table
-    :data-source="filtered"
-    :columns="columns"
-    :loading="loading"
-    :row-key="(r: TrafficEntrySnapshot) => `${r.user}|${r.upstream}|${r.target}`"
-    :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
-  >
+      <div class="fill-table">
+        <a-table
+          :data-source="filtered"
+          :columns="columns"
+          :loading="loading"
+          :row-key="(r: TrafficEntrySnapshot) => `${r.user}|${r.upstream}|${r.target}`"
+          :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+          :scroll="{ y: 1 }"
+        >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'user'">
         <a-tag v-if="record.user">{{ record.user }}</a-tag>
@@ -154,8 +159,11 @@ onUnmounted(() => {
         <a-typography-text strong>{{ formatBytes(record.total) }}</a-typography-text>
       </template>
     </template>
-    <template #emptyText>
-      <a-empty :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
-    </template>
-  </a-table>
+        <template #emptyText>
+          <a-empty :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
+        </template>
+        </a-table>
+      </div>
+    </a-card>
+  </div>
 </template>

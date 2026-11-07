@@ -100,34 +100,39 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <div class="page-header">
-    <div>
-      <a-typography-title :level="4" style="margin: 0;">用户管理</a-typography-title>
-      <a-typography-text type="secondary">
-        代理认证用户；修改密码后，新连接立即使用新凭证。
-      </a-typography-text>
+  <div class="page-shell">
+    <div class="page-header">
+      <div>
+        <a-typography-title :level="4" style="margin: 0;">用户管理</a-typography-title>
+        <a-typography-text type="secondary">
+          代理认证用户；修改密码后，新连接立即使用新凭证。
+        </a-typography-text>
+      </div>
+      <a-space>
+        <a-button @click="fetchData" :loading="loading">刷新</a-button>
+        <a-button type="primary" @click="showAddModal">新增用户</a-button>
+      </a-space>
     </div>
-    <a-space>
-      <a-button @click="fetchData" :loading="loading">刷新</a-button>
-      <a-button type="primary" @click="showAddModal">新增用户</a-button>
-    </a-space>
-  </div>
 
-  <a-alert
-    type="info"
-    show-icon
-    style="margin-bottom: 16px;"
-    message="未配置用户时不启用代理认证；新增任意用户后，所有代理连接都必须提供用户名密码。"
-    description="多监听器模式下，新增/删除用户会同步到所有监听器。"
-  />
+    <a-card class="fill-card">
+      <a-alert
+        class="fill-card-toolbar"
+        type="info"
+        show-icon
+        style="margin-bottom: 16px;"
+        message="未配置用户时不启用代理认证；新增任意用户后，所有代理连接都必须提供用户名密码。"
+        description="多监听器模式下，新增/删除用户会同步到所有监听器。"
+      />
 
-  <a-table
-    :data-source="dataSource"
-    :columns="columns"
-    :loading="loading"
-    row-key="username"
-    :pagination="{ pageSize: 20, hideOnSinglePage: true }"
-  >
+      <div class="fill-table">
+        <a-table
+          :data-source="dataSource"
+          :columns="columns"
+          :loading="loading"
+          row-key="username"
+          :pagination="{ pageSize: 20, hideOnSinglePage: true }"
+          :scroll="{ y: 1 }"
+        >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'action'">
         <a-space>
@@ -143,10 +148,13 @@ onMounted(fetchData)
         </a-space>
       </template>
     </template>
-    <template #emptyText>
-      <a-empty description="暂无用户，未配置用户时表示不启用代理认证" />
-    </template>
-  </a-table>
+        <template #emptyText>
+          <a-empty description="暂无用户，未配置用户时表示不启用代理认证" />
+        </template>
+        </a-table>
+      </div>
+    </a-card>
+  </div>
 
   <a-modal
     v-model:open="modalVisible"

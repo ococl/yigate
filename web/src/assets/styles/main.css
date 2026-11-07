@@ -92,6 +92,97 @@ html:has(body.app-dark) {
   padding-bottom: 16px;
 }
 
+/* 满高列表页：卡片撑满剩余高度，卡片内部不滚动，仅表格主体滚动 */
+.page-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.page-shell > .page-header {
+  flex: 0 0 auto;
+}
+
+.fill-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fill-card > .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.fill-card-toolbar {
+  flex: 0 0 auto;
+}
+
+.fill-table {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fill-table .ant-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.fill-table .ant-spin-nested-loading,
+.fill-table .ant-spin {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fill-table .ant-spin-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fill-table .ant-table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fill-table .ant-table-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.fill-table .ant-table-header {
+  flex: 0 0 auto;
+}
+
+.fill-table .ant-table-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
+  overflow-y: auto !important;
+}
+
+.fill-table .ant-pagination {
+  flex: 0 0 auto;
+  margin: 12px 0 0;
+}
+
 .muted {
   color: rgba(128, 128, 128, 0.85);
 }
