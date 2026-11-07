@@ -37,7 +37,7 @@ dev:
           exports:
             version: BUILD_VERSION
         - name: webui-build
-          image: node:20-alpine
+          image: node:22.18-alpine
           script: |
             cd web && npm ci && npm run build
         - name: build
@@ -116,7 +116,7 @@ main:
           exports:
             version: BUILD_VERSION
         - name: webui-build
-          image: node:20-alpine
+          image: node:22.18-alpine
           script: |
             cd web && npm ci && npm run build
         - name: build
@@ -208,7 +208,7 @@ main:
           exports:
             version: BUILD_VERSION
         - name: webui-build
-          image: node:20-alpine
+          image: node:22.18-alpine
           script: |
             cd web && npm ci && npm run build
         - name: build

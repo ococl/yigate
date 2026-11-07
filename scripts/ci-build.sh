@@ -17,6 +17,11 @@ SCRIPTS_DIR="${REPO_ROOT}/scripts"
 
 source "${SCRIPTS_DIR}/platforms.sh"
 
+if ! find "${SRC_DIR}/proxy/webui_dist/assets" -maxdepth 1 -type f -name '*.js' -print -quit 2>/dev/null | grep -q .; then
+  echo "error: src/proxy/webui_dist 缺少 WebUI JS assets，请先构建并嵌入前端" >&2
+  exit 1
+fi
+
 # 确定版本号
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then

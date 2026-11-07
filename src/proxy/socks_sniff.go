@@ -26,7 +26,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 		if !writeSOCKS5ConnectReply(client, 0x00) {
 			return
 		}
-		Tunnel(client, nil, remote, newTrafficKey(user, remote, target), globalTrafficAccounter)
+		Tunnel(client, nil, remote, newTrafficKey(user, remote, target), getGlobalTrafficAccounter())
 		return
 	}
 
@@ -53,7 +53,7 @@ func handleSOCKS5ConnectWithSniff(client net.Conn, target string, mgr *UpstreamM
 			return
 		}
 	}
-	Tunnel(client, nil, remote, newTrafficKey(user, remote, rewritten), globalTrafficAccounter)
+	Tunnel(client, nil, remote, newTrafficKey(user, remote, rewritten), getGlobalTrafficAccounter())
 }
 
 func dialSOCKS5RecoveredTarget(rewritten string, original string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {

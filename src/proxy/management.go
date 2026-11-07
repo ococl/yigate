@@ -574,8 +574,8 @@ func (m *ManagementServer) handleTraffic(w http.ResponseWriter, r *http.Request)
 	}
 	MetricInc("yigate_management_requests_total", "path=/api/v1/traffic")
 	snapshot := TrafficSnapshot{}
-	if globalTrafficAccounter != nil {
-		snapshot = globalTrafficAccounter.Snapshot()
+	if accounter := getGlobalTrafficAccounter(); accounter != nil {
+		snapshot = accounter.Snapshot()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

@@ -12,7 +12,9 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $SrcDir = Join-Path $RepoRoot "src"
-$BuildDir = Join-Path $RepoRoot (Resolve-Path -Relative $OutputDir).TrimStart('.\')
+$WebDir = Join-Path $RepoRoot "web"
+$WebUIDist = Join-Path $SrcDir "proxy/webui_dist"
+$BuildDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $OutputDir))
 
 $Commit = (git -C $RepoRoot rev-parse --short HEAD 2>$null) | Out-String
 if (-not $Commit) { $Commit = "unknown" }
@@ -27,11 +29,15 @@ $Platforms = @(
     "linux/arm64",
     "linux/386",
     "linux/arm/v7",
+    "linux/arm/v6",
     "linux/riscv64",
     "linux/ppc64le",
     "linux/s390x",
     "linux/mips64",
     "linux/mips64le",
+    "linux/mips",
+    "linux/mipsle",
+    "linux/loong64",
     "darwin/amd64",
     "darwin/arm64",
     "windows/amd64",
@@ -40,9 +46,11 @@ $Platforms = @(
     "freebsd/amd64",
     "freebsd/386",
     "freebsd/arm64",
+    "freebsd/arm/v7",
     "openbsd/amd64",
     "openbsd/arm64",
-    "netbsd/amd64"
+    "netbsd/amd64",
+    "netbsd/arm64"
 )
 
 if (-not (Test-Path $BuildDir)) {
@@ -51,6 +59,23 @@ if (-not (Test-Path $BuildDir)) {
 
 $Env:GOPROXY = "https://goproxy.cn,direct"
 $Env:CGO_ENABLED = "0"
+
+Push-Location $WebDir
+try {
+    npm ci
+    if ($LASTEXITCODE -ne 0) { throw "Frontend dependency installation failed" }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+}
+finally {
+    Pop-Location
+}
+Remove-Item $WebUIDist -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $WebUIDist -Force | Out-Null
+Copy-Item (Join-Path $WebDir "dist/*") $WebUIDist -Recurse -Force
+if (-not (Get-ChildItem (Join-Path $WebUIDist "assets") -Filter "*.js" -File -ErrorAction SilentlyContinue)) {
+    throw "WebUI build assets are missing"
+}
 
 foreach ($Platform in $Platforms) {
     $Parts = $Platform -split '/'

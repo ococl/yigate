@@ -102,7 +102,8 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 // recordHTTPTraffic 记录普通 HTTP 请求的流量。
 // 上游名称来自上游连接上的标记，直连请求为空。
 func recordHTTPTraffic(user string, req *http.Request, resp *http.Response, reqBytes int64) {
-	if globalTrafficAccounter == nil {
+	accounter := getGlobalTrafficAccounter()
+	if accounter == nil {
 		return
 	}
 	var bytesOut int64
@@ -115,7 +116,7 @@ func recordHTTPTraffic(user string, req *http.Request, resp *http.Response, reqB
 		reqBytes = 0
 	}
 	key := TrafficKey{User: user, Upstream: upstream, Target: targetHost(req)}
-	if err := globalTrafficAccounter.Record(key, reqBytes, bytesOut); err != nil {
+	if err := accounter.Record(key, reqBytes, bytesOut); err != nil {
 		Logger().Warnw("traffic quota exceeded", "user", user, "upstream", upstream, "target", key.Target, "error", err)
 	}
 }

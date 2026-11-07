@@ -4,18 +4,18 @@ benchmark.py — yigate 压力与基准测试脚本。
 
 用法示例：
     # 直接测试目标站点
-    python3 pyscripts/benchmark.py --url http://127.0.0.1:8080/ --requests 1000 --concurrency 50
+    python3 test/e2e/benchmark.py --url http://127.0.0.1:8080/ --requests 1000 --concurrency 50
 
     # 通过 yigate HTTP 代理
-    python3 pyscripts/benchmark.py --url http://127.0.0.1:8080/ \
+    python3 test/e2e/benchmark.py --url http://127.0.0.1:8080/ \
         --proxy http://127.0.0.1:4479 --requests 1000 --concurrency 50
 
     # 通过 yigate SOCKS5 代理
-    python3 pyscripts/benchmark.py --url http://127.0.0.1:8080/ \
+    python3 test/e2e/benchmark.py --url http://127.0.0.1:8080/ \
         --proxy socks5://127.0.0.1:4479 --requests 1000 --concurrency 50
 
     # 只测试 CONNECT 隧道（HTTPS 目标）
-    python3 pyscripts/benchmark.py --url https://127.0.0.1:8443/ \
+    python3 test/e2e/benchmark.py --url https://127.0.0.1:8443/ \
         --proxy http://127.0.0.1:4479 --requests 500 --concurrency 20
 """
 

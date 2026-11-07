@@ -144,8 +144,8 @@ func TestGeoSiteUpdaterMissingFileRecoveryByDownload(t *testing.T) {
 	path := filepath.Join(dir, "geosite.dat")
 	updater := NewGeoSiteUpdater(GeoSiteConfig{
 		Path:       path,
-		UpdateURL:   server.URL,
-		AutoUpdate:  true,
+		UpdateURL:  server.URL,
+		AutoUpdate: true,
 	}, nil)
 
 	called := make(chan struct{}, 1)
@@ -170,7 +170,7 @@ func TestGeoSiteUpdaterMissingFileRecoveryByUserFile(t *testing.T) {
 	path := filepath.Join(dir, "geosite.dat")
 	updater := NewGeoSiteUpdater(GeoSiteConfig{
 		Path:       path,
-		AutoUpdate:  false, // no auto-download, only detect user-provided file
+		AutoUpdate: false, // no auto-download, only detect user-provided file
 	}, nil)
 
 	if updater.IsFileAvailable() {

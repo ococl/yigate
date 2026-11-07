@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1022,3 +1023,81 @@ destination_policy:
 	}
 }
 
+func TestWriteDefaultConfigIfMissing(t *testing.T) {
+	t.Setenv("YIGATE_DEFAULT_LISTEN", "")
+	t.Setenv("YIGATE_DEFAULT_MANAGEMENT", "")
+	path := filepath.Join(t.TempDir(), "data", "config.yml")
+
+	written, token, err := WriteDefaultConfigIfMissing(path)
+	if err != nil {
+		t.Fatalf("WriteDefaultConfigIfMissing: %v", err)
+	}
+	if !written {
+		t.Fatal("expected default config to be written")
+	}
+	if len(token) != 64 {
+		t.Fatalf("generated token length = %d, want 64", len(token))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("config mode = %o, want 600", got)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Listen != "127.0.0.1:8891" {
+		t.Fatalf("listen = %q, want local proxy address", cfg.Listen)
+	}
+	if cfg.Management != "127.0.0.1:8890" {
+		t.Fatalf("management = %q, want local management address", cfg.Management)
+	}
+	if cfg.ManagementAuthToken != token {
+		t.Fatal("returned token does not match generated config")
+	}
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, token, err = WriteDefaultConfigIfMissing(path)
+	if err != nil {
+		t.Fatalf("second WriteDefaultConfigIfMissing: %v", err)
+	}
+	if written || token != "" {
+		t.Fatalf("existing config overwritten: written=%v tokenReturned=%v", written, token != "")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("existing config content changed")
+	}
+}
+
+func TestDefaultConfigYAMLListenOverrides(t *testing.T) {
+	t.Setenv("YIGATE_DEFAULT_LISTEN", "0.0.0.0:8891")
+	t.Setenv("YIGATE_DEFAULT_MANAGEMENT", "0.0.0.0:8890")
+	content, err := DefaultConfigYAML(true)
+	if err != nil {
+		t.Fatalf("DefaultConfigYAML: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yml")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Listen != "0.0.0.0:8891" || cfg.Management != "0.0.0.0:8890" {
+		t.Fatalf("listen overrides not applied: listen=%q management=%q", cfg.Listen, cfg.Management)
+	}
+	if cfg.ManagementAuthToken == "" {
+		t.Fatal("public generated management listener must have an auth token")
+	}
+}

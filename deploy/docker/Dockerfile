@@ -1,5 +1,5 @@
 # 前端构建阶段
-FROM node:20-alpine AS webui
+FROM node:22.18-alpine AS webui
 WORKDIR /webui
 COPY web/ ./web/
 RUN cd web && npm ci && npm run build

@@ -84,5 +84,5 @@ func handleSOCKS5Connect(client net.Conn, clientReader *bufio.Reader, target str
 	}
 
 	socks5Reply(client, 0x00)
-	Tunnel(client, clientReader, targetConn, newTrafficKey(user, targetConn, target), globalTrafficAccounter)
+	Tunnel(client, clientReader, targetConn, newTrafficKey(user, targetConn, target), getGlobalTrafficAccounter())
 }

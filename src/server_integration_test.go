@@ -903,7 +903,7 @@ func TestIntegrationConcurrentRequests(t *testing.T) {
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
+			Proxy:               http.ProxyURL(proxyURL),
 			MaxIdleConnsPerHost: 20,
 		},
 		Timeout: 10 * time.Second,

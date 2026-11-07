@@ -3,6 +3,10 @@ services:
     image: ${YIGATE_IMAGE:-docker.cnb.cool/yi.team/yigate:main}
     container_name: yigate
     command: ["-config", "/var/lib/yigate/data/config.yml", "run"]
+    environment:
+      # 仅用于首次生成配置；容器内须监听所有接口，宿主机管理端口仍只绑定回环。
+      YIGATE_DEFAULT_LISTEN: "0.0.0.0:8891"
+      YIGATE_DEFAULT_MANAGEMENT: "0.0.0.0:8890"
     ports:
       - "8891:8891"   # 代理端口（HTTP/HTTPS/SOCKS5 共用）
       - "127.0.0.1:8890:8890"  # 管理端口（WebUI + API，建议仅暴露到回环）
@@ -17,11 +21,18 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      - SETGID   # su 降权到 yigate 需要 setgroups
-      - SETUID   # su 降权到 yigate 需要 setuid
+      - CHOWN    # 首次启动修正绑定挂载目录属主
+      - SETGID   # setpriv 降权到 yigate 需要 setgid
+      - SETUID   # setpriv 降权到 yigate 需要 setuid
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8890/health"]
+      test:
+        - CMD-SHELL
+        - >-
+          setpriv --reuid=1000 --regid=1000 --clear-groups sh -c
+          'token=$$(grep "^management_auth_token:" /var/lib/yigate/data/config.yml | head -n 1 | cut -d" " -f2- | cut -d\" -f2);
+          wget -q -O /dev/null --header="Authorization: Bearer $$token"
+          http://127.0.0.1:8890/health'
       interval: 30s
       timeout: 5s
       retries: 3

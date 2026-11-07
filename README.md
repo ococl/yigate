@@ -23,7 +23,7 @@
 - **可观测性**：`/health`、`/metrics`（Prometheus，`yigate_` 前缀）、`/api/v1/status`、运行时配置 API。
 - **内嵌 Web 管理界面**：Vue 3 + antdv-next，随二进制启动，无需额外部署。
 - **多形态部署**：原生二进制、Docker、systemd 服务；运行目录布局在二进制与 Docker 间一致。
-- **跨平台**：28 个目标平台构建（Linux / macOS / Windows / FreeBSD / OpenBSD / NetBSD，含 arm/mips/riscv/loong64 等）。
+- **跨平台**：26 个目标平台构建（Linux / macOS / Windows / FreeBSD / OpenBSD / NetBSD，含 arm/mips/riscv/loong64 等）。
 
 ---
 
@@ -156,7 +156,7 @@ sudo systemctl enable --now yigate
 # Go 后端
 cd src && GOPROXY=https://goproxy.cn,direct go build -o yigate .
 
-# 前端（独立项目，Node ^20.19 或 >=22.12，见 .nvmrc）
+# 前端（独立项目，Node ^22.18 或 >=24.11，见 .nvmrc）
 cd web && npm ci && npm run build
 # 构建后需将 web/dist 内容拷贝到 src/proxy/webui_dist 并重新编译 Go 以嵌入 WebUI
 # （直接 make build 会自动完成这两步）

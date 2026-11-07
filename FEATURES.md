@@ -97,7 +97,7 @@
 - **原生二进制**：`data/config.yml` + `logs/`，便于与容器共享目录布局。
 - **Docker**：`docker-compose.yml` 一键部署，挂载 `./data` 与 `./logs`。
 - **systemd**：`deploy/systemd/` 提供 unit 与安装脚本。
-- **跨平台构建**：`scripts/platforms.sh` 定义 28 个目标（Linux / macOS / Windows / FreeBSD / OpenBSD / NetBSD，含 arm / mips / riscv / loong64 等）。
+- **跨平台构建**：`scripts/platforms.sh` 定义 26 个目标（Linux / macOS / Windows / FreeBSD / OpenBSD / NetBSD，含 arm / mips / riscv / loong64 等）。
 
 ## 12. 明确不支持
 

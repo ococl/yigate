@@ -8,6 +8,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/src"
+WEB_DIR="${REPO_ROOT}/web"
+WEBUI_DIST="${SRC_DIR}/proxy/webui_dist"
 RELEASE_DIR="${REPO_ROOT}/release"
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
 
@@ -53,6 +55,20 @@ BUILD_TIME="$(git -C "${REPO_ROOT}" log -1 --format=%cI "${TAG}")"
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
 
 echo "Building yigate ${TAG} (commit ${COMMIT:0:12}, built ${BUILD_TIME})"
+
+# 前端必须先构建并嵌入，禁止发布占位 WebUI。
+(
+  cd "${WEB_DIR}"
+  npm ci
+  npm run build
+)
+rm -rf "${WEBUI_DIST}"
+mkdir -p "${WEBUI_DIST}"
+cp -r "${WEB_DIR}/dist/." "${WEBUI_DIST}/"
+if ! find "${WEBUI_DIST}/assets" -maxdepth 1 -type f -name '*.js' -print -quit | grep -q .; then
+  echo "error: WebUI 构建产物缺少 JS assets，拒绝发布" >&2
+  exit 1
+fi
 
 # 清空并重建 release staging
 rm -rf "${RELEASE_DIR}"

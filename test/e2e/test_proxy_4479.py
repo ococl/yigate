@@ -13,8 +13,8 @@ yigate 代理服务器全能力测试脚本（自包含版）
 - 管理接口（/health、/metrics、/api/v1/status）
 - SSRF 防护冒烟（元数据地址不可达）
 
-运行前请确保 yigate 已监听 127.0.0.1:4479（见同目录 config_4479.yml），
-且 /etc/hosts 中存在 `127.0.0.1 foreign.test`（脚本会自动尝试写入）。
+运行前请确保 yigate 已监听 127.0.0.1:4479（见同目录 config_4479.yml）。
+测试域名 foreign.test 由本地上游映射到回环地址，无需修改系统 hosts。
 """
 
 import argparse
@@ -46,6 +46,18 @@ FIXTURES = {}
 DOMESTIC_SITES = []
 FOREIGN_SITES = []
 TEST_SITES = []
+
+_REAL_GETADDRINFO = socket.getaddrinfo
+
+
+def install_test_dns():
+    """仅在当前测试进程内解析 foreign.test，覆盖 socks5:// 的客户端本地 DNS。"""
+    def resolve(host, port, *args, **kwargs):
+        if host == "foreign.test":
+            host = "127.0.0.1"
+        return _REAL_GETADDRINFO(host, port, *args, **kwargs)
+
+    socket.getaddrinfo = resolve
 
 
 class Colors:
@@ -266,6 +278,11 @@ class LocalHTTPUpstream:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
 
+    @staticmethod
+    def _connect_target(host, port):
+        connect_host = "127.0.0.1" if host == "foreign.test" else host
+        return socket.create_connection((connect_host, port), timeout=15)
+
     def start(self):
         self._thread.start()
 
@@ -329,7 +346,7 @@ class LocalHTTPUpstream:
 
     def _do_connect(self, conn, host, port):
         try:
-            remote = socket.create_connection((host, port), timeout=15)
+            remote = self._connect_target(host, port)
         except Exception:
             conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
             return
@@ -350,7 +367,7 @@ class LocalHTTPUpstream:
                     cl = 0
         new_head = (f"{method} {path} {version}\r\n" + "\r\n".join(lines[1:]) + "\r\n\r\n").encode("latin1")
         body = data[header_end + 4:]
-        remote = socket.create_connection((parsed.hostname, parsed.port or 80), timeout=15)
+        remote = self._connect_target(parsed.hostname, parsed.port or 80)
         remote.sendall(new_head)
         if body:
             remote.sendall(body)
@@ -1371,20 +1388,6 @@ def test_sites_with_proxy(proxy_label, proxy_url, scheme="http"):
 # 测试夹具（本地服务器 + 本地上游代理）
 # ---------------------------------------------------------------------------
 
-def ensure_hosts_entry():
-    """确保 /etc/hosts 中存在 foreign.test 解析，便于 proxy 路径按域名路由。"""
-    entry = f"{UPSTREAM_HOST} foreign.test" if False else "127.0.0.1 foreign.test"
-    try:
-        with open("/etc/hosts", "r") as f:
-            content = f.read()
-        if "foreign.test" in content:
-            return
-        with open("/etc/hosts", "a") as f:
-            f.write(f"\n{entry}\n")
-    except Exception as e:
-        print(f"{Colors.WARN}无法写入 /etc/hosts（foreign.test 解析可能失败）: {e}{Colors.RESET}")
-
-
 def start_fixtures():
     domestic, daddr = start_local_http_server(body=b'{"origin": "DOMESTIC-DIRECT-OK", "status": "ok"}')
     foreign, faddr = start_local_http_server(body=b'{"origin": "FOREIGN-PROXY-OK", "status": "ok"}')
@@ -1674,7 +1677,7 @@ def main():
     PROXY_PORT = args.port
 
     print(f"{Colors.INFO}yigate 代理服务器全能力测试: {PROXY_HOST}:{PROXY_PORT}{Colors.RESET}")
-    ensure_hosts_entry()
+    install_test_dns()
     start_fixtures()
     print(f"{Colors.INFO}等待代理与本地上游就绪...{Colors.RESET}")
     if wait_for_proxy_ready():

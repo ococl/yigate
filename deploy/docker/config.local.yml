@@ -1,0 +1,31 @@
+# yigate 本地 Docker 匿名代理模板
+# 容器内监听所有接口，Compose 仅将代理和管理端口映射到宿主机回环地址。
+# 管理令牌仅用于本机快速验收；其他环境请使用根目录 Compose 生成随机令牌。
+
+listen: "0.0.0.0:8891"
+users: {}
+management: "0.0.0.0:8890"
+management_auth_token: "local-admin-token"
+upstreams: []
+routing:
+  final: direct
+  geosite:
+    path: "geosite.dat"
+    auto_update: false
+destination_policy:
+  protect_private: true
+  default_action: allow
+socks5:
+  allow_bind: false
+  allow_udp_associate: false
+timeouts:
+  dial: 10s
+  handshake: 10s
+  http_exchange: 60s
+  tunnel_idle: 5m
+log:
+  level: info
+  format: json
+  output: stdout
+check_interval: 30
+max_connections: 1024

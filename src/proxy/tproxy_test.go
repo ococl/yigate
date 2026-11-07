@@ -145,7 +145,7 @@ func TestHandleTProxyTProxyModeDialFail(t *testing.T) {
 	// TunnelIdle 控制隧道空闲超时。
 	t.Cleanup(resetTimeouts)
 	SetTimeouts(TimeoutConfig{
-		Dial:      Duration(2 * time.Second),
+		Dial:       Duration(2 * time.Second),
 		TunnelIdle: Duration(2 * time.Second),
 	})
 

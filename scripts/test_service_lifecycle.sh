@@ -2,7 +2,7 @@
 # 服务管理生命周期真机（本机 systemd）测试脚本
 #
 # 在 root + systemd 环境中，真实演练 yigate 的服务管理生命周期：
-#   install -> (自动启动) -> status(running) -> health -> stop -> status(stopped)
+#   install -> status(stopped) -> start -> status(running) -> health -> stop -> status(stopped)
 #   -> start -> status(running) -> restart -> status(running) -> uninstall
 #
 # 每一步均使用三方交叉验证：

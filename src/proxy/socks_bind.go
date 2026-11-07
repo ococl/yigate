@@ -60,7 +60,7 @@ func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string, user string) er
 		return fmt.Errorf("set upstream deadline: %w", err)
 	}
 
-	Tunnel(client, nil, upConn, TrafficKey{User: user, Upstream: upstreamNameOf(upConn)}, globalTrafficAccounter)
+	Tunnel(client, nil, upConn, TrafficKey{User: user, Upstream: upstreamNameOf(upConn)}, getGlobalTrafficAccounter())
 	return nil
 }
 
@@ -121,7 +121,7 @@ func localSOCKS5Bind(client net.Conn, target string, policy *DestinationPolicy, 
 		return
 	}
 
-	Tunnel(client, nil, incoming, newTrafficKey(user, incoming, target), globalTrafficAccounter)
+	Tunnel(client, nil, incoming, newTrafficKey(user, incoming, target), getGlobalTrafficAccounter())
 }
 
 // handleSOCKS5UDPAssociate 实现 SOCKS5 UDP ASSOCIATE 命令。

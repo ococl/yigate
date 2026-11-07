@@ -165,7 +165,7 @@ func handleConnect(client net.Conn, clientReader *bufio.Reader, target string, u
 		return
 	}
 	writeResponse(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	Tunnel(client, clientReader, targetConn, newTrafficKey(user, targetConn, target), globalTrafficAccounter)
+	Tunnel(client, clientReader, targetConn, newTrafficKey(user, targetConn, target), getGlobalTrafficAccounter())
 }
 
 func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router, sourceIP ...string) (net.Conn, error) {

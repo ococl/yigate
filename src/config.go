@@ -690,8 +690,17 @@ func isSupportedUpstreamScheme(scheme string) bool {
 // DefaultConfigYAML 返回带有注释的默认配置 YAML 字符串。
 // 若 generateToken 为真，则为 management_auth_token 生成一个高强度随机令牌，
 // 用于首次启动即开启 WebUI 认证（无需用户手动预设密码）。
+// YIGATE_DEFAULT_LISTEN 和 YIGATE_DEFAULT_MANAGEMENT 仅覆盖首次生成配置的监听地址，
+// 便于容器显式监听所有接口，不影响已有配置，也不改变原生运行的安全默认值。
 func DefaultConfigYAML(generateToken bool) (string, error) {
 	cfg := defaultConfig()
+	cfg.Management = "127.0.0.1:8890"
+	if listen := strings.TrimSpace(os.Getenv("YIGATE_DEFAULT_LISTEN")); listen != "" {
+		cfg.Listen = listen
+	}
+	if management := strings.TrimSpace(os.Getenv("YIGATE_DEFAULT_MANAGEMENT")); management != "" {
+		cfg.Management = management
+	}
 	if generateToken {
 		token, err := generateManagementToken()
 		if err != nil {
@@ -731,7 +740,7 @@ func WriteDefaultConfigIfMissing(path string) (bool, string, error) {
 			return false, "", mkErr
 		}
 	}
-	if wErr := os.WriteFile(path, []byte(content), 0644); wErr != nil {
+	if wErr := os.WriteFile(path, []byte(content), 0600); wErr != nil {
 		return false, "", fmt.Errorf("write default config to %s failed: %w (check that the directory is mounted writable)", path, wErr)
 	}
 	// 从落盘内容中解析出刚生成的令牌（用户预置场景不会走到这里）。

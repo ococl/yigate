@@ -288,11 +288,16 @@ func (a *TrafficAccounter) UpstreamUsage(upstream string) int64 {
 var ErrQuotaExceeded = fmt.Errorf("traffic quota exceeded")
 
 // globalTrafficAccounter 是全局流量统计器，由 server.go 通过 SetGlobalTrafficAccounter 设置。
-var globalTrafficAccounter *TrafficAccounter
+// 热加载会与请求协程并发替换和读取，必须使用原子指针避免数据竞争。
+var globalTrafficAccounter atomic.Pointer[TrafficAccounter]
 
 // SetGlobalTrafficAccounter 设置全局流量统计器。
 func SetGlobalTrafficAccounter(a *TrafficAccounter) {
-	globalTrafficAccounter = a
+	globalTrafficAccounter.Store(a)
+}
+
+func getGlobalTrafficAccounter() *TrafficAccounter {
+	return globalTrafficAccounter.Load()
 }
 
 // targetHostFromAddr 从 host:port 地址中提取域名部分用于流量统计。

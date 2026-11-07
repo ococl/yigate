@@ -1,4 +1,4 @@
-.PHONY: all build test cross clean release lint web web-build web-dev web-install
+.PHONY: all build test cross clean release lint web web-build web-embed web-dev web-install
 
 GO ?= go
 GOPROXY ?= https://goproxy.cn,direct
@@ -18,14 +18,13 @@ LDFLAGS := -s -w \
 
 all: build
 
-build: web-build
-	rm -rf $(SRC_DIR)/proxy/webui_dist && mkdir -p $(SRC_DIR)/proxy/webui_dist && cp -r $(WEB_DIR)/dist/* $(SRC_DIR)/proxy/webui_dist/
+build: web-embed
 	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BUILD_DIR)/yigate .
 
 test:
 	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) $(GO) test ./...
 
-cross:
+cross: web-embed
 	@mkdir -p $(BUILD_DIR)
 	@bash -c '\
 		source $(SCRIPTS_DIR)/platforms.sh; \
@@ -54,6 +53,13 @@ lint:
 
 web-install:
 	cd $(WEB_DIR) && npm ci
+
+web-embed: web-build
+	rm -rf $(SRC_DIR)/proxy/webui_dist
+	mkdir -p $(SRC_DIR)/proxy/webui_dist
+	cp -r $(WEB_DIR)/dist/. $(SRC_DIR)/proxy/webui_dist/
+	@find $(SRC_DIR)/proxy/webui_dist/assets -maxdepth 1 -type f -name '*.js' -print -quit | grep -q . || \
+		{ echo "WebUI build assets are missing" >&2; exit 1; }
 
 web-dev:
 	cd $(WEB_DIR) && npm run dev

@@ -461,13 +461,13 @@ func TestIPv6SOCKS5ReplyUnspecified(t *testing.T) {
 // TestIPv6ProtectedRanges 测试受保护的 IPv6 地址段。
 func TestIPv6ProtectedRanges(t *testing.T) {
 	protected := []string{
-		"::1",      // loopback
-		"::",       // unspecified
-		"fc00::1",  // ULA
-		"fd00::1",  // ULA
-		"fe80::1",  // link-local
-		"ff00::1",  // multicast
-		"ff02::1",  // multicast
+		"::1",     // loopback
+		"::",      // unspecified
+		"fc00::1", // ULA
+		"fd00::1", // ULA
+		"fe80::1", // link-local
+		"ff00::1", // multicast
+		"ff02::1", // multicast
 	}
 	for _, ip := range protected {
 		if !isProtectedIP(net.ParseIP(ip)) {
@@ -476,7 +476,7 @@ func TestIPv6ProtectedRanges(t *testing.T) {
 	}
 
 	notProtected := []string{
-		"2606:4700::1",   // public
+		"2606:4700::1",         // public
 		"2001:4860:4860::8888", // Google DNS
 	}
 	for _, ip := range notProtected {

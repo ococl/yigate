@@ -270,5 +270,5 @@ npm run build       # 构建即验证
 - 前端代码位于 `web/`，独立于 Go 应用，有自己的 `package.json` 和构建流程，非 monorepo。
 - 前端使用 antdv-next 组件库，通过 `unplugin-vue-components` + `@antdv-next/auto-import-resolver` 实现按需自动导入。
 - 前端开发服务器默认代理 `/api` 请求到 `http://127.0.0.1:8890`（Go 管理端口）。
-- 跨平台构建目标清单见 `scripts/platforms.sh`（当前 28 个平台），CI 使用 CNB（`.cnb.yml`）。
+- 跨平台构建目标清单见 `scripts/platforms.sh`（当前 26 个平台），CI 使用 CNB（`.cnb.yml`）。
 - 监听使用 `SO_REUSEADDR`/`SO_REUSEPORT`（Linux），由 `reuseAddrListen` 实现（build tag 拆分到 `server_unix.go`/`server_windows.go`）。

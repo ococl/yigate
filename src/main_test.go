@@ -66,10 +66,20 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"services:", "yigate:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "restart: unless-stopped", "healthcheck:"} {
+		for _, want := range []string{"services:", "yigate:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "cap_drop:", "cap_add:", "CHOWN", "SETGID", "SETUID", "restart: unless-stopped", "healthcheck:", "setpriv --reuid=1000", "Authorization: Bearer"} {
 			if !bytes.Contains(compose, []byte(want)) {
 				t.Fatalf("%s missing %q", composeFile, want)
 			}
+		}
+	}
+
+	rootCompose, err := os.ReadFile(filepath.Join(repoRoot, "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"YIGATE_DEFAULT_LISTEN", "YIGATE_DEFAULT_MANAGEMENT", "CHOWN", "SETGID", "SETUID", "setpriv --reuid=1000", "Authorization: Bearer"} {
+		if !bytes.Contains(rootCompose, []byte(want)) {
+			t.Fatalf("docker-compose.yml missing %q", want)
 		}
 	}
 
@@ -89,7 +99,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"set -euo pipefail", "source", "platforms.sh", "go build -trimpath", "-X main.version", "-X main.commit", "-X main.buildTime", "git -C"} {
+	for _, want := range []string{"set -euo pipefail", "source", "platforms.sh", "npm ci", "npm run build", "WebUI 构建产物缺少 JS assets", "go build -trimpath", "-X main.version", "-X main.commit", "-X main.buildTime", "git -C"} {
 		if !bytes.Contains(release, []byte(want)) {
 			t.Fatalf("release.sh missing %q", want)
 		}

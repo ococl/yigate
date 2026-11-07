@@ -35,11 +35,13 @@ yigate 8891 端口（生产实例）全能力验收测试脚本。
 用法：
     python3 test_proxy_8891.py
     python3 test_proxy_8891.py --strict        # 站点关键词缺失也视为失败
-    python3 test_proxy_8891.py --proxy-port 8891 --mgmt-port 8890
+    python3 test_proxy_8891.py --proxy-host 127.0.0.1 --proxy-port 8891 --mgmt-port 8890
+    YIGATE_MANAGEMENT_TOKEN=<token> python3 test_proxy_8891.py
 """
 
 import argparse
 import concurrent.futures
+import os
 import socket
 import struct
 import sys
@@ -54,6 +56,7 @@ PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 8891
 MGMT_HOST = "127.0.0.1"
 MGMT_PORT = 8890
+MGMT_SESSION = requests.Session()
 
 REQUEST_TIMEOUT = 20
 MAX_RETRY = 3
@@ -398,7 +401,7 @@ def test_concurrent_requests():
 
 def _mgmt_get(path):
     try:
-        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}{path}", timeout=8)
+        r = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}{path}", timeout=8)
         return r.status_code, r.text
     except Exception as e:  # noqa: BLE001
         return None, str(e)
@@ -424,7 +427,7 @@ def test_management_status():
 
 def test_management_reload():
     try:
-        r = requests.post(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/reload", timeout=8)
+        r = MGMT_SESSION.post(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/reload", timeout=8)
         ok = r.status_code == 200
         return TestResult("管理接口 /api/v1/reload", ok, f"HTTP {r.status_code}")
     except Exception as e:  # noqa: BLE001
@@ -565,7 +568,7 @@ def test_socks5_udp_associate_rejected():
 def test_config_api_upstreams():
     """运行时配置 API：GET /api/v1/config/upstreams 应返回上游列表。"""
     try:
-        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/upstreams", timeout=8)
+        r = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/upstreams", timeout=8)
         ok = r.status_code == 200
         if ok:
             data = r.json()
@@ -581,7 +584,7 @@ def test_config_api_upstreams():
 def test_traffic_api():
     """流量查询 API：GET /api/v1/traffic 应返回流量快照。"""
     try:
-        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/traffic", timeout=8)
+        r = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/traffic", timeout=8)
         ok = r.status_code == 200
         if ok:
             data = r.json()
@@ -685,7 +688,7 @@ def test_dns_failure():
 def test_config_api_rules():
     """Config API: GET /api/v1/config/rules 应返回路由规则列表。"""
     try:
-        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/rules", timeout=8)
+        r = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/rules", timeout=8)
         ok = r.status_code == 200
         if ok:
             data = r.json()
@@ -701,7 +704,7 @@ def test_config_api_rules():
 def test_config_api_users():
     """Config API: GET /api/v1/config/users 应返回用户列表。"""
     try:
-        r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/users", timeout=8)
+        r = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}/api/v1/config/users", timeout=8)
         ok = r.status_code == 200
         if ok:
             data = r.json()
@@ -717,7 +720,7 @@ def test_config_api_users():
 def test_metrics_delta():
     """Metrics 计数器验证：发起请求前后计数器应递增。"""
     try:
-        r1 = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
+        r1 = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
         if r1.status_code != 200:
             return TestResult("Metrics 计数器递增", False, f"初始 metrics HTTP {r1.status_code}")
 
@@ -752,7 +755,7 @@ def test_metrics_delta():
             except Exception:
                 pass
 
-        r2 = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
+        r2 = MGMT_SESSION.get(f"http://{MGMT_HOST}:{MGMT_PORT}/metrics", timeout=8)
         if r2.status_code != 200:
             return TestResult("Metrics 计数器递增", False, f"更新后 metrics HTTP {r2.status_code}")
 
@@ -895,15 +898,24 @@ def summarize(all_results, strict):
 
 
 def main():
-    global PROXY_PORT, MGMT_PORT
+    global PROXY_HOST, PROXY_PORT, MGMT_HOST, MGMT_PORT
     parser = argparse.ArgumentParser(description="yigate 8891 dist 实例全能力验收测试")
     parser.add_argument("--strict", action="store_true", help="站点关键词缺失也视为失败")
-    parser.add_argument("--proxy-port", type=int, default=8891, help="代理端口，默认 8891")
-    parser.add_argument("--mgmt-port", type=int, default=8890, help="管理端口，默认 8890")
     parser.add_argument("--proxy-host", default="127.0.0.1", help="代理主机，默认 127.0.0.1")
+    parser.add_argument("--proxy-port", type=int, default=8891, help="代理端口，默认 8891")
+    parser.add_argument("--mgmt-host", default="127.0.0.1", help="管理主机，默认 127.0.0.1")
+    parser.add_argument("--mgmt-port", type=int, default=8890, help="管理端口，默认 8890")
+    parser.add_argument("--mgmt-token", default=os.environ.get("YIGATE_MANAGEMENT_TOKEN", ""),
+                        help="管理 Bearer Token，默认读取 YIGATE_MANAGEMENT_TOKEN")
     args = parser.parse_args()
+    PROXY_HOST = args.proxy_host
     PROXY_PORT = args.proxy_port
+    MGMT_HOST = args.mgmt_host
     MGMT_PORT = args.mgmt_port
+    if args.mgmt_token:
+        MGMT_SESSION.headers["Authorization"] = f"Bearer {args.mgmt_token}"
+    else:
+        MGMT_SESSION.headers.pop("Authorization", None)
 
     print(f"{Colors.INFO}yigate dist 实例全能力测试: {PROXY_HOST}:{PROXY_PORT} "
           f"(管理 {MGMT_HOST}:{MGMT_PORT}){Colors.RESET}")

@@ -54,7 +54,7 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 
 - 每次发布生成 `SHA256SUMS`，列出全部归档哈希。
 - `scripts/check-release-files.sh` 在正式版构建时校验产物完整性与命名规范。
-- 跨平台目标清单见 `scripts/platforms.sh`（当前 28 个平台）。
+- 跨平台目标清单见 `scripts/platforms.sh`（当前 26 个平台）。
 
 ## 回滚
 
