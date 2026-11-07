@@ -194,6 +194,9 @@ export interface SettingsView {
   geosite_auto_update: boolean
   geosite_update_url: string
   geosite_update_interval_hours: number
+  geosite_update_token_set: boolean
+  geosite_sync_enabled: boolean
+  geosite_sync_token_set: boolean
   socks5h_redirect_enabled: boolean
 
   dns_type: string
@@ -235,6 +238,8 @@ export interface SettingsView {
 // management_auth_token 仅用于设置新令牌（留空表示不修改），因此单独声明。
 export interface SettingsPatch extends Partial<Omit<SettingsView, 'listen' | 'management' | 'management_token_set'>> {
   management_auth_token?: string
+  geosite_update_token?: string
+  geosite_sync_token?: string
 }
 
 export interface ApiResult {
@@ -243,4 +248,30 @@ export interface ApiResult {
   username?: string
   index?: string
   error?: string
+}
+
+// GeoSiteInfo 描述 GeoSite 数据文件的版本与更新/同步配置。
+export interface GeoSiteInfo {
+  path: string
+  download_path: string
+  exists: boolean
+  size: number
+  version: string
+  sha256: string
+  updated_at?: string
+  source_url?: string
+  last_checked_at?: string
+  last_error?: string
+  auto_update: boolean
+  update_url: string
+  update_interval_seconds: number
+  update_token_set: boolean
+  sync_enabled: boolean
+  sync_token_set: boolean
+}
+
+export interface GeoSiteUpdateResult {
+  status: string
+  changed: boolean
+  info: GeoSiteInfo
 }

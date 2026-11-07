@@ -34,8 +34,8 @@ const sections: SettingsSection[] = [
   },
   {
     key: 'routing',
-    title: '路由与 GeoSite',
-    description: '兜底路由、自动探测策略与 GeoSite 数据更新',
+    title: '路由策略',
+    description: '兜底路由与自动探测策略',
   },
   {
     key: 'dns',
@@ -174,6 +174,9 @@ function defaultSettings(): SettingsView {
     geosite_auto_update: false,
     geosite_update_url: '',
     geosite_update_interval_hours: 24,
+    geosite_update_token_set: false,
+    geosite_sync_enabled: false,
+    geosite_sync_token_set: false,
     socks5h_redirect_enabled: false,
     dns_type: 'system',
     doh_url: '',
@@ -394,10 +397,6 @@ async function handleSave() {
     auto_mode: f.auto_mode,
     auto_direct_timeout_seconds: f.auto_direct_timeout_seconds,
     auto_cache_ttl_seconds: f.auto_cache_ttl_seconds,
-    geosite_path: f.geosite_path,
-    geosite_auto_update: f.geosite_auto_update,
-    geosite_update_url: f.geosite_update_url,
-    geosite_update_interval_hours: f.geosite_update_interval_hours,
     socks5h_redirect_enabled: f.socks5h_redirect_enabled,
     dns_type: f.dns_type,
     doh_url: f.doh_url,
@@ -674,28 +673,12 @@ onMounted(fetchAll)
                 </a-card>
 
                 <a-card size="small" title="GeoSite 数据">
-                  <a-row :gutter="16">
-                    <a-col :xs="24" :md="10">
-                      <a-form-item label="GeoSite 数据路径">
-                        <a-input v-model:value="form.geosite_path" placeholder="../data/geosite.dat" />
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="8">
-                      <a-form-item label="GeoSite 更新地址">
-                        <a-input v-model:value="form.geosite_update_url" placeholder="https://..." />
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="3">
-                      <a-form-item label="自动更新">
-                        <a-switch v-model:checked="form.geosite_auto_update" />
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="3">
-                      <a-form-item label="更新间隔（小时）">
-                        <a-input-number v-model:value="form.geosite_update_interval_hours" :min="1" style="width: 100%;" />
-                      </a-form-item>
-                    </a-col>
-                  </a-row>
+                  <a-typography-text type="secondary">
+                    GeoSite 域名库的版本回显、更新来源与下游节点同步已迁移至独立页面。
+                  </a-typography-text>
+                  <div style="margin-top: 8px;">
+                    <RouterLink to="/geosite">前往 GeoSite 数据</RouterLink>
+                  </div>
                 </a-card>
               </div>
 

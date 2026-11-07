@@ -255,6 +255,23 @@ func expandConfigEnv(cfg *Config) error {
 		}
 		cfg.Upstreams[i].URL = strings.TrimSpace(expanded)
 	}
+	// GeoSite 同步令牌支持 ${ENV} 注入，避免在配置文件中保存明文。
+	for _, item := range []struct {
+		name  string
+		value *string
+	}{
+		{"routing.geosite.update_token", &cfg.Routing.GeoSite.UpdateToken},
+		{"routing.geosite.sync_token", &cfg.Routing.GeoSite.SyncToken},
+	} {
+		if strings.TrimSpace(*item.value) == "" {
+			continue
+		}
+		expanded, err := expandEnvStrict(item.name, *item.value)
+		if err != nil {
+			return err
+		}
+		*item.value = strings.TrimSpace(expanded)
+	}
 	if err := expandTLSConfigEnv(&cfg.TLS); err != nil {
 		return err
 	}
@@ -635,6 +652,16 @@ func validateRoutingConfig(cfg proxy.RoutingConfig) error {
 			if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
 				return fmt.Errorf("routing.geosite.update_url must be an HTTP(S) URL, got %q", cfg.GeoSite.UpdateURL)
 			}
+		}
+	}
+	// 对外提供 GeoSite 同步时必须配置只读令牌，避免数据端点变成匿名可读。
+	if cfg.GeoSite.SyncEnabled {
+		token := strings.TrimSpace(cfg.GeoSite.SyncToken)
+		if token == "" {
+			return fmt.Errorf("routing.geosite.sync_token must not be empty when sync_enabled is true")
+		}
+		if len(token) < 8 {
+			return fmt.Errorf("routing.geosite.sync_token must be at least 8 characters")
 		}
 	}
 	return nil

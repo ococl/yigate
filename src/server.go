@@ -435,6 +435,7 @@ func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
 	mgmt.SetStatusSnapshotGetter(s.statusSnapshot)
 	mgmt.SetReload(s.reloadConfig)
 	mgmt.SetConfigEditor(newConfigEditor(s.cfgPath, s.reloadConfig))
+	mgmt.SetGeoSiteAccess(geoSiteAccess{s: s})
 	mgmt.SetUpstreamChecker(
 		func(name string) (proxy.UpstreamCheckResult, error) {
 			mgr := s.Manager()

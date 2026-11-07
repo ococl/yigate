@@ -86,6 +86,12 @@ type GeoSiteConfig struct {
 	AutoUpdate     bool     `yaml:"auto_update"`
 	UpdateURL      string   `yaml:"update_url"`
 	UpdateInterval Duration `yaml:"update_interval"`
+	// UpdateToken 非空时以 Bearer 令牌向下游/上游请求 GeoSite 数据，
+	// 用于从启用了只读同步的 YiGate 节点拉取数据。
+	UpdateToken string `yaml:"update_token"`
+	// SyncEnabled 为 true 时，其他节点可使用 SyncToken 从本节点只读同步 GeoSite 数据。
+	SyncEnabled bool   `yaml:"sync_enabled"`
+	SyncToken   string `yaml:"sync_token"`
 }
 
 type Socks5HConfig struct {

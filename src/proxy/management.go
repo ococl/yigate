@@ -83,6 +83,7 @@ type ManagementServer struct {
 	enablePprof       bool
 	authToken         string
 	configEditor      ConfigEditor
+	geoSiteAccess     GeoSiteAccess
 	mu                sync.Mutex
 	ln                net.Listener
 	srv               *http.Server
@@ -155,6 +156,8 @@ func (m *ManagementServer) buildMux(enablePprof bool) http.Handler {
 	mux.HandleFunc("/api/v1/reload", m.handleReload)
 	mux.HandleFunc("/api/v1/config/", m.handleConfigAPI)
 	mux.HandleFunc("/api/v1/traffic", m.handleTraffic)
+	mux.HandleFunc(geoSiteAPIPrefix, m.handleGeoSiteAPI)
+	mux.HandleFunc(geoSiteAPIPrefix+"/", m.handleGeoSiteAPI)
 
 	// 内置 WebUI：非 API 路径回退到 SPA 应用，由配置开关控制（默认启用）。
 	if WebUIEnabled() {

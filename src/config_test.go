@@ -408,6 +408,53 @@ upstreams:
 	}
 }
 
+func TestValidateConfigGeoSiteSyncRequiresToken(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Routing.GeoSite.SyncEnabled = true
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("expected error when sync_enabled is true without sync_token")
+	}
+	cfg.Routing.GeoSite.SyncToken = "short"
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("expected error for too short sync_token")
+	}
+	cfg.Routing.GeoSite.SyncToken = "readonly-token-123"
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadConfigExpandsGeoSiteTokens(t *testing.T) {
+	t.Setenv("GEOSITE_UPDATE_TOKEN", "upstream-token")
+	t.Setenv("GEOSITE_SYNC_TOKEN", "readonly-token")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
+routing:
+  geosite:
+    path: "data/geosite.dat"
+    auto_update: true
+    update_url: "http://node-a:8892/api/v1/geosite/dat"
+    update_token: "${GEOSITE_UPDATE_TOKEN}"
+    sync_enabled: true
+    sync_token: "${GEOSITE_SYNC_TOKEN}"
+`), 0644)
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Routing.GeoSite.UpdateToken != "upstream-token" {
+		t.Fatalf("update_token = %q", cfg.Routing.GeoSite.UpdateToken)
+	}
+	if cfg.Routing.GeoSite.SyncToken != "readonly-token" {
+		t.Fatalf("sync_token = %q", cfg.Routing.GeoSite.SyncToken)
+	}
+	if !cfg.Routing.GeoSite.SyncEnabled {
+		t.Fatal("sync_enabled should stay true")
+	}
+}
+
 func TestLoadConfigRejectsMissingSensitiveEnv(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")

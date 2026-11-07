@@ -24,6 +24,9 @@ type SettingsView struct {
 	GeoSiteAutoUpdate      bool    `json:"geosite_auto_update"`
 	GeoSiteUpdateURL       string  `json:"geosite_update_url"`
 	GeoSiteUpdateIntervalH float64 `json:"geosite_update_interval_hours"`
+	GeoSiteUpdateTokenSet  bool    `json:"geosite_update_token_set"`
+	GeoSiteSyncEnabled     bool    `json:"geosite_sync_enabled"`
+	GeoSiteSyncTokenSet    bool    `json:"geosite_sync_token_set"`
 	Socks5HRedirectEnabled bool    `json:"socks5h_redirect_enabled"`
 
 	DNSType       string  `json:"dns_type"`
@@ -80,6 +83,9 @@ type SettingsPatch struct {
 	GeoSiteAutoUpdate      *bool    `json:"geosite_auto_update"`
 	GeoSiteUpdateURL       *string  `json:"geosite_update_url"`
 	GeoSiteUpdateIntervalH *float64 `json:"geosite_update_interval_hours"`
+	GeoSiteUpdateToken     *string  `json:"geosite_update_token"`
+	GeoSiteSyncEnabled     *bool    `json:"geosite_sync_enabled"`
+	GeoSiteSyncToken       *string  `json:"geosite_sync_token"`
 	Socks5HRedirectEnabled *bool    `json:"socks5h_redirect_enabled"`
 
 	DNSType       *string  `json:"dns_type"`

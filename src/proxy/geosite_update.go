@@ -2,12 +2,15 @@ package proxy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +32,17 @@ type GeoSiteUpdater struct {
 	downloadMu    sync.Mutex
 	downloadCount int
 	downloadDate  string
+
+	// syncMu 串行化自动更新与手动更新，避免并发写同一文件。
+	syncMu sync.Mutex
+	// hashMu 保护内容摘要缓存，避免每次查询版本都重新读取整个数据文件。
+	hashMu   sync.Mutex
+	hashSum  string
+	hashSize int64
+	hashMod  time.Time
+	// errMu 保护最近一次更新错误，用于界面回显。
+	errMu   sync.RWMutex
+	lastErr string
 }
 
 func NormalizeGeoSiteConfig(cfg *GeoSiteConfig) {
@@ -82,8 +96,13 @@ func (u *GeoSiteUpdater) loop(onUpdated func()) {
 }
 
 func (u *GeoSiteUpdater) update(onUpdated func()) {
-	if err := u.UpdateOnce(); err != nil {
+	changed, err := u.Sync(context.Background())
+	if err != nil {
 		Logger().Warnw("update geosite dat failed", "error", err)
+		return
+	}
+	if !changed {
+		Logger().Debugw("geosite dat is already up to date", "path", u.cfg.Path)
 		return
 	}
 	Logger().Infow("geosite dat updated", "path", u.cfg.Path)
@@ -92,32 +111,101 @@ func (u *GeoSiteUpdater) update(onUpdated func()) {
 	}
 }
 
+// UpdateOnce 立即下载一次 GeoSite 数据，忽略内容是否发生变化。
 func (u *GeoSiteUpdater) UpdateOnce() error {
+	_, err := u.Sync(context.Background())
+	return err
+}
+
+// Sync 从 update_url 拉取 GeoSite 数据，返回内容是否发生变化。
+// 支持 If-None-Match 条件请求与 Bearer 令牌，便于下游从其他节点只读同步；
+// 内容未变化时返回 304 且不重写文件，避免触发不必要的路由重载。
+func (u *GeoSiteUpdater) Sync(ctx context.Context) (bool, error) {
 	if u == nil {
-		return nil
+		return false, nil
 	}
-	if u.cfg.Path == "" {
-		return fmt.Errorf("routing.geosite.path is required for auto update")
+	if strings.TrimSpace(u.cfg.Path) == "" {
+		return false, fmt.Errorf("routing.geosite.path is required for update")
 	}
-	url := u.cfg.UpdateURL
-	if url == "" {
-		url = defaultGeoSiteUpdateURL
+	u.syncMu.Lock()
+	defer u.syncMu.Unlock()
+
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	url := u.UpdateURLOrDefault()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		u.setLastError(err)
+		return false, err
 	}
-	req.Header.Set("User-Agent", "yigate-geosite-updater/1.0")
+	req.Header.Set("User-Agent", "yigate-geosite-updater/1.1")
+	if token := strings.TrimSpace(u.cfg.UpdateToken); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	meta, hasMeta := loadGeoSiteMeta(u.cfg.Path)
+	// 仅在同一下载源下沿用条件请求头，避免切换数据源后错误复用旧 ETag。
+	if hasMeta && meta.SourceURL == url {
+		if meta.ETag != "" {
+			req.Header.Set("If-None-Match", meta.ETag)
+		} else if meta.SHA256 != "" {
+			req.Header.Set("If-None-Match", `"`+meta.SHA256+`"`)
+		}
+	}
 
 	resp, err := u.doRequest(req)
 	if err != nil {
-		return err
+		u.setLastError(err)
+		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("download %s returned %s", url, resp.Status)
+
+	now := time.Now().UTC()
+	if resp.StatusCode == http.StatusNotModified {
+		meta.LastCheckedAt = now
+		meta.SourceURL = url
+		_ = saveGeoSiteMeta(u.cfg.Path, meta)
+		u.setLastError(nil)
+		return false, nil
 	}
-	return writeGeoSiteAtomically(u.cfg.Path, resp.Body)
+	if resp.StatusCode/100 != 2 {
+		err := fmt.Errorf("download %s returned %s", url, resp.Status)
+		u.setLastError(err)
+		return false, err
+	}
+
+	previous := ""
+	if hasMeta {
+		previous = meta.SHA256
+	}
+	if previous == "" {
+		if sum, _, _, err := u.fileSHA256(); err == nil {
+			previous = sum
+		}
+	}
+
+	sum, written, err := writeGeoSiteAtomicallyHashed(u.cfg.Path, resp.Body)
+	if err != nil {
+		u.setLastError(err)
+		return false, err
+	}
+	if stat, statErr := os.Stat(u.cfg.Path); statErr == nil {
+		u.primeHashCache(sum, written, stat.ModTime())
+	}
+	newMeta := geoSiteMeta{
+		SHA256:        sum,
+		Size:          written,
+		UpdatedAt:     now,
+		SourceURL:     url,
+		ETag:          strings.TrimSpace(resp.Header.Get("ETag")),
+		LastModified:  strings.TrimSpace(resp.Header.Get("Last-Modified")),
+		LastCheckedAt: now,
+	}
+	if err := saveGeoSiteMeta(u.cfg.Path, newMeta); err != nil {
+		Logger().Warnw("save geosite meta failed", "error", err)
+	}
+	u.setLastError(nil)
+	return sum != previous, nil
 }
 
 func (u *GeoSiteUpdater) doRequest(req *http.Request) (*http.Response, error) {
@@ -165,34 +253,40 @@ func requestViaUpstreamClient(req *http.Request, up *Upstream) (*http.Response, 
 	return client.Do(req)
 }
 
-func writeGeoSiteAtomically(path string, body io.Reader) error {
+// writeGeoSiteAtomicallyHashed 以原子方式写入数据文件，同时返回内容的 SHA-256 与字节数。
+func writeGeoSiteAtomicallyHashed(path string, body io.Reader) (string, int64, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
+		return "", 0, err
 	}
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
-		return err
+		return "", 0, err
 	}
-	written, copyErr := io.Copy(f, io.LimitReader(body, maxGeoSiteDatSize+1))
+	hasher := sha256.New()
+	written, copyErr := io.Copy(io.MultiWriter(f, hasher), io.LimitReader(body, maxGeoSiteDatSize+1))
 	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(tmp)
-		return copyErr
+		return "", 0, copyErr
 	}
 	if written > maxGeoSiteDatSize {
 		os.Remove(tmp)
-		return fmt.Errorf("downloaded geosite dat exceeds maximum size: %d bytes", maxGeoSiteDatSize)
+		return "", 0, fmt.Errorf("downloaded geosite dat exceeds maximum size: %d bytes", maxGeoSiteDatSize)
 	}
 	if closeErr != nil {
 		os.Remove(tmp)
-		return closeErr
+		return "", 0, closeErr
 	}
 	if written < minGeoSiteDatSize {
 		os.Remove(tmp)
-		return fmt.Errorf("downloaded geosite dat is too small: %d bytes", written)
+		return "", 0, fmt.Errorf("downloaded geosite dat is too small: %d bytes", written)
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return "", 0, err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), written, nil
 }
 
 // IsFileAvailable returns true if the geosite dat file exists and has a valid size.

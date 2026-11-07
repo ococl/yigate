@@ -1144,3 +1144,165 @@ func TestIntegrationDestinationPolicy(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegrationGeoSiteManualUpdateAndSync 覆盖完整的 GeoSite 流程：
+// 手动更新下载 → 版本元数据落盘 → 下游用只读令牌条件下载。
+func TestIntegrationGeoSiteManualUpdateAndSync(t *testing.T) {
+	payload := make([]byte, 8192)
+	for i := range payload {
+		payload[i] = byte(i % 211)
+	}
+	originAddr := startOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"origin-v1"`)
+		w.Write(payload)
+	})
+	originURL := "http://" + originAddr
+
+	proxyAddr := findFreePort(t)
+	mgmtAddr := findFreePort(t)
+	dir := t.TempDir()
+	datPath := filepath.Join(dir, "geosite.dat")
+	cfgPath := filepath.Join(dir, "config.yml")
+
+	content := fmt.Sprintf(`listen: %q
+management: %q
+management_auth_token: "test-token"
+webui:
+  enabled: false
+users: {}
+routing:
+  final: direct
+  geosite:
+    path: %q
+    auto_update: false
+    update_url: %q
+    update_interval: 24h
+    sync_enabled: true
+    sync_token: "readonly-token-123"
+log:
+  level: warn
+  output: stdout
+`, proxyAddr, mgmtAddr, datPath, originURL)
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	s, err := NewServer(cfgPath, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+	for i := 0; i < 100; i++ {
+		if s.mgmt.Addr() != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	base := "http://" + s.mgmt.Addr()
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	getInfo := func() proxy.GeoSiteInfo {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, base+"/api/v1/geosite", nil)
+		req.Header.Set("Authorization", "Bearer readonly-token-123")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("get info: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("get info status = %d", resp.StatusCode)
+		}
+		var info proxy.GeoSiteInfo
+		if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+			t.Fatalf("decode info: %v", err)
+		}
+		return info
+	}
+
+	if info := getInfo(); info.Exists {
+		t.Fatal("geosite data should not exist before update")
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, base+"/api/v1/geosite/update", nil)
+	req.Header.Set("Authorization", "Bearer readonly-token-123")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("sync token update: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("sync token must not trigger update, status = %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodPost, base+"/api/v1/geosite/update", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("manual update: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("manual update status = %d, body = %s", resp.StatusCode, string(errBody))
+	}
+	var result proxy.GeoSiteUpdateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode update result: %v", err)
+	}
+	if !result.Changed || result.Info.Version == "" {
+		t.Fatalf("unexpected update result: %+v", result)
+	}
+
+	info := getInfo()
+	if !info.Exists || info.Size != int64(len(payload)) {
+		t.Fatalf("info after update = %+v", info)
+	}
+	if info.SourceURL != originURL {
+		t.Fatalf("source_url = %q, want %q", info.SourceURL, originURL)
+	}
+	if _, err := os.Stat(datPath + ".meta.json"); err != nil {
+		t.Fatalf("meta file not written: %v", err)
+	}
+
+	// 下游使用只读令牌下载数据，并按 ETag 做条件请求。
+	req, _ = http.NewRequest(http.MethodGet, base+"/api/v1/geosite/dat", nil)
+	req.Header.Set("Authorization", "Bearer readonly-token-123")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("download dat: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("download status = %d", resp.StatusCode)
+	}
+	if string(body) != string(payload) {
+		t.Fatalf("downloaded %d bytes, want %d", len(body), len(payload))
+	}
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("missing ETag header")
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/api/v1/geosite/dat", nil)
+	req.Header.Set("Authorization", "Bearer readonly-token-123")
+	req.Header.Set("If-None-Match", etag)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("conditional download: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotModified {
+		t.Fatalf("conditional download status = %d, want 304", resp.StatusCode)
+	}
+}

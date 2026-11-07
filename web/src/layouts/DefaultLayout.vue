@@ -71,6 +71,9 @@ function handleLogout() {
             <a-menu-item key="rules">
               <RouterLink to="/rules">路由规则</RouterLink>
             </a-menu-item>
+            <a-menu-item key="geosite">
+              <RouterLink to="/geosite">GeoSite 数据</RouterLink>
+            </a-menu-item>
             <a-menu-item key="users">
               <RouterLink to="/users">用户管理</RouterLink>
             </a-menu-item>

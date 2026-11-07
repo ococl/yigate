@@ -23,8 +23,12 @@
   - `domain_keyword`：关键字包含
   - `domain_regex`：正则匹配
   - `ip_cidr`：IPv4 / IPv6 CIDR
-  - `geosite`：GeoSite 数据匹配
+  - `geosite`：GeoSite 数据匹配（数据版本、手动更新与多节点同步见下）
   - `match`：通用匹配表达式
+- **GeoSite 数据管理**：
+  - 独立的「GeoSite 数据」页面：版本（内容 SHA-256）、大小、更新时间、来源地址与上次检查时间回显。
+  - 手动更新：按条件请求（`ETag`/`If-None-Match`）拉取，内容未变化返回 304 且不触发重载；变化后原子替换并热重载。
+  - 下游同步：`GET /api/v1/geosite/dat` 提供只读下载，`sync_token` 仅授予读权限；下游把 `update_url` 指向该地址、`update_token` 填同步令牌即可自动跟随。
 - **动作**：
   - `direct`：直连
   - `proxy`：走上游

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,6 +28,108 @@ func TestGeoSiteUpdaterUpdateOnce(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("geosite.dat not written")
+	}
+}
+
+func TestGeoSiteUpdaterSyncRecordsVersionAndUsesConditionalRequest(t *testing.T) {
+	data := make([]byte, 4096)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	var ifNoneMatch []string
+	etag := `"v1"`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ifNoneMatch = append(ifNoneMatch, r.Header.Get("If-None-Match"))
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT")
+		w.Write(data)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
+	updater := NewGeoSiteUpdater(GeoSiteConfig{Path: path, AutoUpdate: true, UpdateURL: server.URL}, nil)
+
+	changed, err := updater.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	if !changed {
+		t.Fatal("first Sync should report changed")
+	}
+	if _, ok := loadGeoSiteMeta(path); !ok {
+		t.Fatal("meta file was not written")
+	}
+	info := updater.Info()
+	if !info.Exists || info.Size != int64(len(data)) {
+		t.Fatalf("info = %+v, want exists and size %d", info, len(data))
+	}
+	if len(info.SHA256) != 64 || len(info.Version) != geoSiteVersionDisplayLen {
+		t.Fatalf("unexpected version info: sha=%q version=%q", info.SHA256, info.Version)
+	}
+	if info.SourceURL != server.URL {
+		t.Fatalf("source_url = %q, want %q", info.SourceURL, server.URL)
+	}
+	if info.UpdatedAt == nil || info.LastCheckedAt == nil {
+		t.Fatal("updated_at/last_checked_at should be present")
+	}
+
+	changed, err = updater.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if changed {
+		t.Fatal("second Sync should be a no-op")
+	}
+	if len(ifNoneMatch) != 2 || ifNoneMatch[1] != etag {
+		t.Fatalf("If-None-Match headers = %v, want second request to send %q", ifNoneMatch, etag)
+	}
+}
+
+func TestGeoSiteUpdaterSyncSendsBearerToken(t *testing.T) {
+	data := make([]byte, 2048)
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Write(data)
+	}))
+	defer server.Close()
+
+	updater := NewGeoSiteUpdater(GeoSiteConfig{
+		Path:        filepath.Join(t.TempDir(), "geosite.dat"),
+		UpdateURL:   server.URL,
+		UpdateToken: "sync-token-123",
+	}, nil)
+	if _, err := updater.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if gotAuth != "Bearer sync-token-123" {
+		t.Fatalf("Authorization = %q, want bearer token", gotAuth)
+	}
+}
+
+func TestGeoSiteUpdaterInfoWithoutFile(t *testing.T) {
+	updater := NewGeoSiteUpdater(GeoSiteConfig{
+		Path:        filepath.Join(t.TempDir(), "missing.dat"),
+		SyncEnabled: true,
+		SyncToken:   "readonly-token",
+		UpdateToken: "upstream-token",
+		UpdateURL:   "https://example.com/dlc.dat",
+		AutoUpdate:  true,
+	}, nil)
+	info := updater.Info()
+	if info.Exists {
+		t.Fatal("info.Exists = true for missing file")
+	}
+	if !info.UpdateTokenSet || !info.SyncEnabled || !info.SyncTokenSet {
+		t.Fatalf("token flags not reflected: %+v", info)
+	}
+	if info.DownloadPath != GeoSiteDatDownloadPath {
+		t.Fatalf("download path = %q", info.DownloadPath)
 	}
 }
 

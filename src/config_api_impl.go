@@ -749,6 +749,15 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	if patch.GeoSiteUpdateIntervalH != nil {
 		cfg.Routing.GeoSite.UpdateInterval = durationFromSeconds(*patch.GeoSiteUpdateIntervalH * 3600)
 	}
+	if patch.GeoSiteUpdateToken != nil {
+		cfg.Routing.GeoSite.UpdateToken = strings.TrimSpace(*patch.GeoSiteUpdateToken)
+	}
+	if patch.GeoSiteSyncEnabled != nil {
+		cfg.Routing.GeoSite.SyncEnabled = *patch.GeoSiteSyncEnabled
+	}
+	if patch.GeoSiteSyncToken != nil {
+		cfg.Routing.GeoSite.SyncToken = strings.TrimSpace(*patch.GeoSiteSyncToken)
+	}
 	if patch.Socks5HRedirectEnabled != nil {
 		cfg.Routing.Socks5HRedirect.Enabled = *patch.Socks5HRedirectEnabled
 	}

@@ -946,6 +946,11 @@ yigate_connections_total 12345
   "doh_url": "https://dns.example/dns-query",
   "traffic_audit_enabled": true,
   "traffic_retention_days": 30,
+  "geosite_auto_update": true,
+  "geosite_update_url": "http://node-a:8892/api/v1/geosite/dat",
+  "geosite_update_token": "<上游同步令牌>",
+  "geosite_sync_enabled": true,
+  "geosite_sync_token": "至少 8 位只读令牌",
   "webui_enabled": false,
   "management_auth_token": "new-strong-token",
   "log_level": "debug"
@@ -965,6 +970,125 @@ yigate_connections_total 12345
           { code: 200, description: '修改成功并已热加载' },
           { code: 400, description: '校验失败或热加载失败（已回滚）' },
           { code: 401, description: '未认证' },
+        ],
+      },
+    ],
+  },
+  {
+    key: 'geosite',
+    title: 'GeoSite 数据',
+    description:
+      'GeoSite 域名库的版本回显、手动更新与下游同步。数据文件为 v2fly dlc.dat（GeoSiteList protobuf）。',
+    endpoints: [
+      {
+        id: 'geosite-info',
+        method: 'GET',
+        path: '/api/v1/geosite',
+        summary: '查看 GeoSite 版本与同步配置',
+        description:
+          '返回数据文件路径、是否存在、大小、SHA-256 与短版本号、数据更新时间、来源地址、上次检查时间、最近一次更新错误，以及自动更新与下游同步配置。令牌只回显是否已设置，不返回明文。',
+        auth: true,
+        authNote: '需要管理令牌；开启 sync_enabled 后也可使用只读同步令牌',
+        params: [],
+        responseBody: `{
+  "path": "/var/lib/yigate/data/geosite.dat",
+  "download_path": "/api/v1/geosite/dat",
+  "exists": true,
+  "size": 4832910,
+  "version": "8f3c1a02b7d9",
+  "sha256": "8f3c1a02b7d9...",
+  "updated_at": "2026-11-07T02:10:11Z",
+  "source_url": "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
+  "last_checked_at": "2026-11-07T02:10:11Z",
+  "auto_update": true,
+  "update_url": "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
+  "update_interval_seconds": 86400,
+  "update_token_set": false,
+  "sync_enabled": true,
+  "sync_token_set": true
+}`,
+        example: {
+          request: `curl http://127.0.0.1:8892/api/v1/geosite \\
+  -H "Authorization: Bearer <token>"`,
+          response: `{
+  "path": "/var/lib/yigate/data/geosite.dat",
+  "exists": true,
+  "version": "8f3c1a02b7d9",
+  "auto_update": true,
+  "sync_enabled": true
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '返回版本与配置' },
+          { code: 401, description: '未认证' },
+          { code: 501, description: 'GeoSite 接口未初始化' },
+        ],
+      },
+      {
+        id: 'geosite-update',
+        method: 'POST',
+        path: '/api/v1/geosite/update',
+        summary: '立即更新 GeoSite 数据',
+        description:
+          '立即从 routing.geosite.update_url 拉取一次数据：携带 Bearer 更新令牌，并带 If-None-Match 条件请求头。内容未变化时返回 changed=false；变化后会原子替换文件并热重载路由，无需重启。该操作不能被只读同步令牌调用。',
+        auth: true,
+        authNote: '始终要求管理令牌',
+        params: [],
+        responseBody: `{
+  "status": "ok",
+  "changed": true,
+  "info": {
+    "path": "/var/lib/yigate/data/geosite.dat",
+    "exists": true,
+    "version": "1a2b3c4d5e6f",
+    "size": 4840221,
+    "updated_at": "2026-11-07T03:20:00Z"
+  }
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8892/api/v1/geosite/update \\
+  -H "Authorization: Bearer <token>"`,
+          response: `{
+  "status": "ok",
+  "changed": true,
+  "info": { "version": "1a2b3c4d5e6f", "exists": true }
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '更新完成（changed 表示内容是否变化）' },
+          { code: 401, description: '未认证' },
+          { code: 500, description: '下载或热重载失败' },
+        ],
+      },
+      {
+        id: 'geosite-dat',
+        method: 'GET',
+        path: '/api/v1/geosite/dat',
+        summary: '下载 GeoSite 数据（下游同步）',
+        description:
+          '返回原始 dlc.dat 文件，供下游节点同步。响应包含 ETag（内容 SHA-256）、X-GeoSite-Version 与 X-GeoSite-SHA256；支持 If-None-Match 条件请求，数据未变化时返回 304。下游把 routing.geosite.update_url 指向该地址，并把只读同步令牌填入 update_token 即可自动同步。',
+        auth: true,
+        authNote: '管理令牌或 sync_token 只读令牌',
+        params: [],
+        responseBody: 'geosite.dat 二进制内容（Content-Type: application/octet-stream）',
+        example: {
+          request: `curl -o geosite.dat http://node-a:8892/api/v1/geosite/dat \\
+  -H "Authorization: Bearer <sync-token>"
+
+# 再次请求会携带 ETag，未变化时返回 304
+curl -i http://node-a:8892/api/v1/geosite/dat \\
+  -H "Authorization: Bearer <sync-token>" \\
+  -H 'If-None-Match: "8f3c1a02b7d9..."'`,
+          response: `HTTP/1.1 200 OK
+ETag: "8f3c1a02b7d9..."
+X-GeoSite-Version: 8f3c1a02b7d9
+Content-Length: 4832910`,
+        },
+        statusCodes: [
+          { code: 200, description: '返回数据文件' },
+          { code: 304, description: '内容未变化（If-None-Match 命中）' },
+          { code: 401, description: '未认证或同步未开启' },
+          { code: 404, description: '数据文件不存在' },
         ],
       },
     ],

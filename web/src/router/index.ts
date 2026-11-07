@@ -38,6 +38,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/rules/RulesView.vue'),
       },
       {
+        path: 'geosite',
+        name: 'geosite',
+        component: () => import('@/views/geosite/GeoSiteView.vue'),
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('@/views/users/UsersView.vue'),

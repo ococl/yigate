@@ -68,7 +68,8 @@
 ├── data/
 │   ├── config.yml        # 运行配置（默认 -config 路径，首次启动自动生成）
 │   ├── traffic.json      # 流量审计持久化数据（自动生成，默认保留 30 天）
-│   └── geosite.dat       # GeoSite 数据
+│   ├── geosite.dat       # GeoSite 数据
+│   └── geosite.dat.meta.json  # GeoSite 版本元数据（自动生成：SHA-256、来源、检查时间）
 └── logs/
     └── yigate.log        # 滚动日志
 ```
@@ -127,6 +128,7 @@ sudo systemctl start yigate
 | `routing.rules` / `routing.final` | 规则列表（首个命中生效）与兜底动作 `direct`/`proxy`/`auto`/`deny` |
 | `routing.auto.mode` | `direct_first`（默认）或 `proxy_first`；非法值会在加载时报错 |
 | `routing.socks5h_redirect` | 目标域名交由上游解析（远端 DNS），可用 `upstreams` 限定范围 |
+| `routing.geosite` | 数据路径、自动更新地址/间隔、`update_token`（从上游拉取），以及 `sync_enabled`/`sync_token`（供下游只读同步） |
 | `dns` | `system` / `doh` / `dot`，`ip_precedence` 控制 IPv4/IPv6 优先；`fallback` 默认 true |
 | `destination_policy` | `protect_private`（默认 true）、`default_action` 及域名/端口/CIDR 白黑名单 |
 | `timeouts` | `dial` / `handshake` / `http_exchange` / `tunnel_idle`，0 表示使用内置默认值 |
@@ -164,8 +166,40 @@ sudo systemctl start yigate
 | `PUT /api/v1/config/users/{username}` | 修改用户密码 |
 | `DELETE /api/v1/config/users/{username}` | 删除用户 |
 | `GET/PUT /api/v1/config/settings` | 读取 / 部分更新全局设置（持久化 + 热加载） |
+| `GET /api/v1/geosite` | GeoSite 版本、大小、来源与同步配置 |
+| `POST /api/v1/geosite/update` | 立即更新 GeoSite 数据（仅管理令牌） |
+| `GET /api/v1/geosite/dat` | 下载 GeoSite 数据（支持 ETag/304，可用只读同步令牌） |
 
 配置写入前会做校验，写入后若热加载失败会自动回滚配置文件，避免残留无法启动的配置。
+
+### GeoSite 更新与下游同步
+
+WebUI 的「GeoSite 数据」页面可查看版本（SHA-256 前 12 位）、文件大小、数据更新时间、来源地址与上次检查时间，并支持手动更新。
+
+多节点部署时可由一个节点统一更新，其余节点只读同步：
+
+```yaml
+# 上游节点：对外提供只读同步
+routing:
+  geosite:
+    path: "../data/geosite.dat"
+    auto_update: true
+    update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+    update_interval: 24h
+    sync_enabled: true
+    sync_token: "${GEOSITE_SYNC_TOKEN}"   # 至少 8 位，仅可读取 GeoSite
+
+# 下游节点：从上游节点同步
+routing:
+  geosite:
+    path: "../data/geosite.dat"
+    auto_update: true
+    update_url: "http://node-a:8892/api/v1/geosite/dat"
+    update_interval: 24h
+    update_token: "${GEOSITE_SYNC_TOKEN}"
+```
+
+同步流程带条件请求：本节点响应 `ETag`（内容 SHA-256）与 `X-GeoSite-Version`，下游携带 `If-None-Match`，数据未变化时返回 `304` 且不重写文件、不触发重载。内容变化时原子替换 `geosite.dat` 并写入 `geosite.dat.meta.json`，随后热重载路由，无需重启。
 
 `/debug/pprof/*` 仅在 `enable_pprof: true` 时启用（敏感入口，勿公网暴露）。
 
