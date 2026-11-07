@@ -193,6 +193,15 @@ func TestReleaseSecurityContracts(t *testing.T) {
 			t.Fatalf("check-release-files.sh missing %q", want)
 		}
 	}
+	// syft 1.x 移除了 `syft dir <path>` 子命令，只接受 `syft scan <source>` 或
+	// `dir:<path>` 源表达式；用错形式会让正式发布的 SBOM 生成失败。
+	buildScript := read("scripts", "ci-build.sh")
+	if !bytes.Contains(buildScript, []byte(`syft "dir:${SRC_DIR}"`)) {
+		t.Fatal(`ci-build.sh must invoke syft with the dir:<path> source form`)
+	}
+	if bytes.Contains(buildScript, []byte(`syft dir "`)) {
+		t.Fatal("ci-build.sh still uses the removed `syft dir <path>` form")
+	}
 	for _, cfg := range [][]string{{"deploy", "config", "config.lan.yml"}, {"deploy", "docker", "config.lan.yml"}} {
 		data := read(cfg...)
 		if !bytes.Contains(data, []byte("__REPLACE_PROXY_PASSWORD__")) || !bytes.Contains(data, []byte("__REPLACE_MANAGEMENT_TOKEN__")) {

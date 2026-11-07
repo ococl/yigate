@@ -101,7 +101,8 @@ done
 generate_sbom() {
     local output="$1"
     if command -v syft >/dev/null 2>&1; then
-        if syft dir "${SRC_DIR}" -o spdx-json > "${output}"; then
+        # syft >= 1.x 收敛为 `syft scan <source>`，目录需写成 dir:<path> 形式。
+        if syft "dir:${SRC_DIR}" -o spdx-json > "${output}"; then
             return 0
         fi
         rm -f "${output}"
