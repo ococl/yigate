@@ -8,7 +8,7 @@ YiGate 是 **合规、轻量、可运维** 的统一代理网关。我们 **明�
 
 ## 开发环境
 
-- Go 1.21+（CI 使用 1.27.3；依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
+- Go 1.26+（CI 使用 1.27.3；依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
 - Node 26.13（仅前端 `web/`，见 `.nvmrc`；`engines` 仍允许 ^22.18 或 >=24.11）
 - 推荐在 Linux 下进行透明代理（TPROXY）相关开发
 
