@@ -17,7 +17,8 @@ func TestTProxyConfigNormalizedMode(t *testing.T) {
 		{"redirect", "redirect"},
 		{"tproxy", "tproxy"},
 		{"REDIRECT", "redirect"},
-		{"TPROXY", "redirect"}, // 大小写敏感，非 "tproxy" 一律视为 redirect
+		{"TPROXY", "tproxy"}, // 大小写不敏感，避免误写成大写后退化为 redirect
+		{"  tproxy  ", "tproxy"},
 		{"unknown", "redirect"},
 	}
 	for _, tt := range tests {

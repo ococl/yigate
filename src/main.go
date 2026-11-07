@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/kardianos/service"
@@ -103,7 +104,7 @@ func runForeground(cfgPath string) {
 		}
 	}()
 
-	proxy.Logger().Infow("yigate proxy started", "listen", cfg.Listen)
+	proxy.Logger().Infow("yigate proxy started", "listen", listenSummary(cfg))
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -112,6 +113,21 @@ func runForeground(cfgPath string) {
 	srv.Stop()
 	proxy.Logger().Infow("yigate proxy stopped")
 	proxy.CloseLogger()
+}
+
+// listenSummary 返回实际生效的代理监听地址，兼容单 listen 与多 listeners 两种配置。
+func listenSummary(cfg *Config) string {
+	if cfg == nil {
+		return ""
+	}
+	if len(cfg.Listeners) == 0 {
+		return cfg.Listen
+	}
+	addrs := make([]string, 0, len(cfg.Listeners))
+	for _, lc := range cfg.Listeners {
+		addrs = append(addrs, lc.Listen)
+	}
+	return strings.Join(addrs, ",")
 }
 
 func runService(cfgPath string) {

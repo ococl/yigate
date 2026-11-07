@@ -181,24 +181,32 @@ npm run build       # 构建即验证
 
 - 示例配置：`src/config.sample.yml`。
 - `listen` 是旧版单端口代理监听地址（与 `listeners` 二选一）。
-- `listeners` 是多监听端口列表，每个端口独立配置 TLS、用户、访问控制等。
-- `management` 是独立管理端口。
-- `management_auth_token` 非空时所有管理接口都要求 Bearer Token。
+- `listeners` 是多监听端口列表，每个端口独立配置 TLS、用户、访问控制等；顶层 `users`/`access_control` 仅被未显式配置的 listener 继承（`users: {}` 表示显式匿名），顶层 `max_connections` 作为兜底值。
+- `management` 是独立管理端口，须为合法 `host:port`。
+- `management_auth_token` 非空时所有管理接口都要求 Bearer Token；支持热加载（同一端口原地重建路由，无需重启）。
 - 管理端口绑定非回环地址时必须配置 `management_auth_token`。
+- `webui.enabled` 控制内置前端（默认 true），支持热加载。
+- `enable_pprof` 控制 `/debug/pprof/*`（默认 false），支持热加载。
 - `users` 为空时允许匿名代理访问。
 - `tls` 配置 TLS 服务端终止（`cert_file`/`key_file`/`client_ca_file`）。
 - `upstreams[].types` 支持 `http`、`https`、`socks5`、`socks5h`。
 - `upstreams[].strategy` 支持 `weighted_round_robin`、`least_connections`、`consistent_hash`、`source_ip_hash`。
-- `upstreams[].health_check` 支持 `tcp`/`http`/`https`/`tls` 四种检查类型。
+- `upstreams[].health_check` 支持 `tcp`/`http`/`https`/`tls`/`socks5`/`socks5h`；留空时 socks5 上游默认按协议握手探测，其余按 TCP 探测。
 - `routing.rules` 按顺序匹配，首个命中规则生效。
-- `routing.final` 支持 `direct`、`proxy`、`auto`。
-- `dns.type` 支持 `system`（默认）、`doh`、`dot`。
+- `routing.final` 支持 `direct`、`proxy`、`auto`、`deny`。
+- `routing.auto.mode` 支持 `direct_first`（默认）、`proxy_first`，非法值加载时报错。
+- `routing.socks5h_redirect` 控制目标域名是否交由上游解析。
+- `dns.type` 支持 `system`（默认）、`doh`、`dot`；`dns.fallback` 默认 true。
 - `dns.ip_precedence` 支持 `ipv4_first`（默认）、`ipv6_first`、`system`。
-- `destination_policy.protect_private` 默认 true，拒绝回环/私网/链路本地等敏感地址。
+- `destination_policy` 支持 `protect_private`（默认 true）、`default_action`、`allow/deny_cidrs`、`allow/deny_domains`、`allow/deny_ports`。
+- `timeouts` 中 0 表示使用内置默认值（热加载时会把旧值重置为默认）。
+- `check_interval` 为 0 表示停止周期性健康检查。
+- `log` 支持级别、格式、输出与轮转参数（`log.file` 相对启动工作目录）。
 - `traffic_audit.enabled` 启用流量审计与配额。
-- `tproxy.enabled` 启用透明代理（仅 Linux），支持 `redirect`/`tproxy` 两种模式。
+- `tproxy.enabled` 启用透明代理（仅 Linux），支持 `redirect`/`tproxy` 两种模式（大小写不敏感）。
 - `geosite.dat` 相对路径按配置文件所在目录解析。
 - 配置中的 `${ENV_NAME}` 会被严格展开，缺失或空值会导致启动失败。
+- 加载阶段统一校验监听地址、TLS 文件、上游 URL/策略/健康检查、访问控制数值、路由枚举与目标策略端口，非法配置直接启动失败。
 
 ## 路由规则
 
@@ -235,7 +243,7 @@ npm run build       # 构建即验证
 - `GET/POST /api/v1/config/users`：列出/添加用户。
 - `PUT /api/v1/config/users/{username}`：修改用户密码。
 - `DELETE /api/v1/config/users/{username}`：删除用户。
-- `GET/PUT /api/v1/config/settings`：读取/部分更新全局设置。
+- `GET/PUT /api/v1/config/settings`：读取/部分更新全局设置（含 `webui_enabled`；多 listener 模式下 socks5/访问控制/并发上限的修改会同步到各 listener）。
 - 配置写入前校验，热加载失败时自动回滚配置文件。
 - `/debug/pprof/*`：仅在 `enable_pprof: true` 时启用。
 

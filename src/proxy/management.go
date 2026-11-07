@@ -74,7 +74,8 @@ type ManagementServer struct {
 	mu                sync.Mutex
 	ln                net.Listener
 	srv               *http.Server
-	pprofHandlers     map[string]http.Handler
+	handlerMu         sync.RWMutex
+	handler           http.Handler
 
 	// authFailures 跟踪每 IP 的认证失败次数，用于暴力破解防护。
 	authFailures    map[string]*authFailState
@@ -111,6 +112,29 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 		authFailures:    make(map[string]*authFailState),
 		authCleanupStop: make(chan struct{}),
 	}
+	m.handler = m.buildMux(enablePprof)
+	m.srv = &http.Server{
+		// 通过间接层读取路由表，使 Reconfigure 可以在不重建监听的情况下热替换。
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			m.handlerMu.RLock()
+			h := m.handler
+			m.handlerMu.RUnlock()
+			if h == nil {
+				http.NotFound(w, r)
+				return
+			}
+			h.ServeHTTP(w, r)
+		}),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	return m
+}
+
+// buildMux 根据当前配置构建路由表。pprof 是否注册由参数决定，
+// WebUI 是否注册读取全局开关（applyConfig 会先更新该开关再调用本方法）。
+func (m *ManagementServer) buildMux(enablePprof bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", m.handleHealth)
 	mux.HandleFunc("/metrics", m.handleMetrics)
@@ -129,7 +153,7 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 		}
 	}
 	if enablePprof {
-		m.pprofHandlers = map[string]http.Handler{
+		handlers := map[string]http.Handler{
 			"/debug/pprof/":             http.HandlerFunc(pprof.Index),
 			"/debug/pprof/cmdline":      http.HandlerFunc(pprof.Cmdline),
 			"/debug/pprof/profile":      http.HandlerFunc(pprof.Profile),
@@ -142,17 +166,27 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 			"/debug/pprof/mutex":        pprof.Handler("mutex"),
 			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
 		}
-		for path, h := range m.pprofHandlers {
+		for path, h := range handlers {
 			mux.Handle(path, m.authenticatedHandler(h))
 		}
 	}
-	m.srv = &http.Server{
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-	return m
+	return mux
+}
+
+// Reconfigure 在保持监听端口不变的前提下重建路由表，
+// 用于热加载 enable_pprof / management_auth_token / webui.enabled。
+// 直接对同一端口重新 Listen 会因“address already in use”失败，因此必须原地替换。
+func (m *ManagementServer) Reconfigure(enablePprof bool, authToken string) {
+	token := strings.TrimSpace(authToken)
+	m.mu.Lock()
+	m.enablePprof = enablePprof
+	m.authToken = token
+	m.mu.Unlock()
+
+	handler := m.buildMux(enablePprof)
+	m.handlerMu.Lock()
+	m.handler = handler
+	m.handlerMu.Unlock()
 }
 
 func (m *ManagementServer) AuthToken() string {

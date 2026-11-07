@@ -90,6 +90,25 @@ func TestDestinationPolicyRejectsBadConfig(t *testing.T) {
 	if _, err := NewDestinationPolicy(DestinationPolicyConfig{DenyCIDRs: []string{"not-a-cidr"}}); err == nil {
 		t.Fatal("invalid cidr should be rejected")
 	}
+	if _, err := NewDestinationPolicy(DestinationPolicyConfig{DenyPorts: []int{0}}); err == nil {
+		t.Fatal("port 0 should be rejected")
+	}
+	if _, err := NewDestinationPolicy(DestinationPolicyConfig{AllowPorts: []int{70000}}); err == nil {
+		t.Fatal("out-of-range port should be rejected instead of silently dropped")
+	}
+}
+
+func TestDestinationPolicyDefaultActionCaseInsensitive(t *testing.T) {
+	p, err := NewDestinationPolicy(DestinationPolicyConfig{DefaultAction: " Allow "})
+	if err != nil {
+		t.Fatalf("NewDestinationPolicy: %v", err)
+	}
+	if p.defaultAction != ActionAllow {
+		t.Fatalf("default action = %q, want allow", p.defaultAction)
+	}
+	if _, err := NewDestinationPolicy(DestinationPolicyConfig{DefaultAction: "DENY"}); err != nil {
+		t.Fatalf("uppercase deny should be accepted: %v", err)
+	}
 }
 
 func TestRouterDenyRuleBlocksDial(t *testing.T) {

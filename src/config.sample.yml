@@ -1,6 +1,7 @@
 # 多监听端口策略：每个 listener 可独立配置监听地址、TLS、用户认证、访问控制、SOCKS5 命令与最大连接数。
-# 当 listeners 非空时，顶层的 listen/users/access_control/socks5/tls/max_connections 仅作为旧版兼容默认值，
-# 实际代理入口由 listeners 定义。
+# 当 listeners 非空时，实际代理入口由 listeners 定义，顶层的 listen/socks5/tls 被忽略；
+# 顶层 users/access_control 作为默认值被未显式配置的 listener 继承（显式写 users: {} 表示该端口匿名），
+# max_connections 作为未设置时的兜底值。
 listeners:
   - listen: "127.0.0.1:4479"
     # users:  # 留空表示允许匿名代理；需要认证时在 WebUI 或此处添加用户名与密码
@@ -39,11 +40,15 @@ listeners:
 management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
 # management_auth_token: 非空时所有管理端点要求 Authorization: Bearer <token>。
 # 若配置文件由程序首次自动生成，会注入一个随机高强度令牌（请从中读取）；
-# 也可在 WebUI 中修改，或在此处手动设置明文令牌。
+# 需要更换时直接修改此项或调用 PUT /api/v1/config/settings（WebUI 仅显示是否已设置，不回显明文）。
+# 修改后热加载即生效，且无需重启管理端口。
 # 内置 WebUI：二进制已内置前端构建产物（web/dist），默认通过管理端口直接访问。
 # 设为 false 可关闭内置 UI（例如使用独立部署的前端服务）。
 webui:
   enabled: true
+# pprof 调试端点（默认关闭）：开启后管理端口暴露 /debug/pprof/*（需 token 认证），
+# 因涉及堆栈与内存信息，非回环管理地址会强制要求 management_auth_token。
+# enable_pprof: false
 # 运行时配置 API：通过管理端口动态增删 upstream/规则/用户，变更持久化到 YAML 并热加载。
 # 所有端点均要求 management_auth_token 认证。
 #   GET    /api/v1/config/upstreams          列出上游（URL 脱敏）
@@ -85,18 +90,23 @@ upstreams:
       failure_threshold: 3      # 连续失败次数达到阈值后标记 dead
       success_threshold: 1      # dead 节点连续探测成功次数达到阈值后恢复
 routing:
+  # final 为未命中任何规则时的兜底动作：direct / proxy / auto / deny（默认 auto）。
   final: auto
+  # geosite_path 为空时跳过 geosite 规则；auto_update 需要可访问的 update_url。
   geosite:
     path: "../data/geosite.dat"
     auto_update: true
     update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
     update_interval: 24h
   auto:
+    # mode: direct_first（先直连，超时后回退代理）或 proxy_first（先代理，失败后回退直连）
     mode: direct_first
     direct_timeout: 1500ms
     cache_ttl: 1h
+  # SOCKS5h 目标域名交由代理侧解析（远端 DNS）。upstreams 可按名称限制生效范围，留空表示全部上游。
   socks5h_redirect:
     enabled: true
+    # upstreams: ["default"]
   rules:
     - type: geosite
       values: ["CN"]
@@ -140,12 +150,19 @@ dns:
 # 防止 SSRF 与内网横向访问。直连路径会在 DNS 解析后再次校验真实 IP。
 destination_policy:
   protect_private: true   # 默认拒绝 loopback/RFC1918/ULA/link-local/multicast/metadata
-  default_action: allow   # 非受保护地址默认放行；设为 deny 则仅 allow_* 可访问
+  default_action: allow   # 非受保护地址默认放行；设为 deny 则仅 allow_* 可访问（大小写不敏感）
   allow_cidrs:            # 需要让代理访问的内网段（按需开启，回环务必保持拒绝）
     - "10.0.0.0/8"
     - "172.16.0.0/12"
     - "192.168.0.0/16"
     - "100.64.0.0/10"
+  # 域名与端口维度的附加限制（均可选）：
+  # deny_domains / allow_domains 支持精确域名与 *.example.com 通配后缀；
+  # deny_ports / allow_ports 为 1-65535 的端口白/黑名单，越界端口会在加载时报错。
+  # deny_domains: ["*.internal.example", "metadata.google.internal"]
+  # allow_domains: ["*.corp.example"]
+  # deny_ports: [25, 445, 3389]
+  # allow_ports: [80, 443, 8080]
 # SOCKS5 可选命令默认禁用，仅在前述场景确有必要且受信任时开启。
 socks5:
   allow_bind: false
@@ -172,7 +189,10 @@ log:
   max_age: 7
   max_backups: 10
   compress: true
+# 健康检查默认间隔（秒）；设为 0 将完全停止周期性健康检查（含上游自定义 interval），
+# 上游 health_check.interval 非 0 时以该值为准。
 check_interval: 30
+# 未在 listener 上单独设置 max_connections 时使用的兜底并发上限（0 表示不限制）。
 max_connections: 1024
 # 流量审计与配额：按 user/upstream/target 维度统计流量，支持配额限制。
 # 统计数据通过 /api/v1/traffic 端点查询，通过 /metrics 暴露 Prometheus 指标。

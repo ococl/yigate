@@ -97,19 +97,29 @@ sudo systemctl enable --now yigate
 
 | 字段 | 说明 |
 |------|------|
-| `listen` / `listeners` | 代理监听地址；`listeners` 支持每端口独立 TLS / 用户 / 访问控制 |
+| `listen` / `listeners` | 代理监听地址；`listeners` 支持每端口独立 TLS / 用户 / 访问控制，顶层 `users`/`access_control` 作为未显式配置端口的默认值 |
 | `management` | 独立管理端口（WebUI + API） |
 | `management_auth_token` | 非空时所有管理接口要求 Bearer Token；非回环暴露时必填 |
+| `webui.enabled` | 默认 true；热加载生效，关闭后管理端口仅提供 API |
+| `enable_pprof` | 默认 false；开启后管理端口暴露 `/debug/pprof/*`（需认证），可热加载 |
 | `users` | 为空则允许匿名代理 |
 | `tls` | TLS 服务端终止（`cert_file` / `key_file` / `client_ca_file`） |
 | `upstreams` | 上游代理，类型 `http`/`https`/`socks5`/`socks5h`，策略与健康检查 |
-| `routing.rules` / `routing.final` | 规则列表（首个命中生效）与兜底动作 `direct`/`proxy`/`auto` |
-| `dns` | `system` / `doh` / `dot`，`ip_precedence` 控制 IPv4/IPv6 优先 |
-| `destination_policy.protect_private` | 默认 true，SSRF 防护最后一环 |
+| `routing.rules` / `routing.final` | 规则列表（首个命中生效）与兜底动作 `direct`/`proxy`/`auto`/`deny` |
+| `routing.auto.mode` | `direct_first`（默认）或 `proxy_first`；非法值会在加载时报错 |
+| `routing.socks5h_redirect` | 目标域名交由上游解析（远端 DNS），可用 `upstreams` 限定范围 |
+| `dns` | `system` / `doh` / `dot`，`ip_precedence` 控制 IPv4/IPv6 优先；`fallback` 默认 true |
+| `destination_policy` | `protect_private`（默认 true）、`default_action` 及域名/端口/CIDR 白黑名单 |
+| `timeouts` | `dial` / `handshake` / `http_exchange` / `tunnel_idle`，0 表示使用内置默认值 |
+| `log` | 级别、格式（json/console）、输出（stdout/file）与轮转参数 |
+| `check_interval` | 健康检查间隔（秒），0 表示停止周期性检查 |
+| `max_connections` | listener 未单独设置时的并发上限兜底，0 表示不限制 |
 | `traffic_audit.enabled` | 流量审计与配额 |
 | `tproxy.enabled` | 透明代理（仅 Linux） |
 
 配置中 `${ENV_NAME}` 会被严格展开，缺失或空值会导致启动失败。
+加载阶段会校验监听地址、TLS 文件、上游 URL/策略/健康检查、访问控制数值与路由枚举，
+非法配置直接启动失败而不是静默降级。
 
 ---
 

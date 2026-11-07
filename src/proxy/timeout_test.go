@@ -30,6 +30,41 @@ func TestTimeoutGetters(t *testing.T) {
 	}
 }
 
+func TestSetTimeoutsResetsZeroToDefault(t *testing.T) {
+	t.Cleanup(resetTimeouts)
+	SetTimeouts(TimeoutConfig{
+		Dial:         Duration(30 * time.Second),
+		Handshake:    Duration(30 * time.Second),
+		HTTPExchange: Duration(30 * time.Second),
+		TunnelIdle:   Duration(30 * time.Minute),
+	})
+	// 用户把配置改回 0（表示使用内置默认值），应恢复到默认而不是沿用旧值。
+	SetTimeouts(TimeoutConfig{})
+	if ProxyDialTimeout() != defaultProxyDialTimeout {
+		t.Fatalf("dial timeout = %v, want %v", ProxyDialTimeout(), defaultProxyDialTimeout)
+	}
+	if ProxyHandshakeTimeout() != defaultProxyHandshakeTimeout {
+		t.Fatalf("handshake timeout = %v, want %v", ProxyHandshakeTimeout(), defaultProxyHandshakeTimeout)
+	}
+	if HTTPExchangeTimeout() != defaultHTTPExchangeTimeout {
+		t.Fatalf("http timeout = %v, want %v", HTTPExchangeTimeout(), defaultHTTPExchangeTimeout)
+	}
+	if TunnelIdleTimeout() != defaultTunnelIdleTimeout {
+		t.Fatalf("tunnel timeout = %v, want %v", TunnelIdleTimeout(), defaultTunnelIdleTimeout)
+	}
+}
+
+func TestSetTimeoutsPartialKeepsDefaults(t *testing.T) {
+	t.Cleanup(resetTimeouts)
+	SetTimeouts(TimeoutConfig{Dial: Duration(3 * time.Second)})
+	if ProxyDialTimeout() != 3*time.Second {
+		t.Fatalf("dial timeout = %v", ProxyDialTimeout())
+	}
+	if HTTPExchangeTimeout() != defaultHTTPExchangeTimeout {
+		t.Fatalf("http timeout = %v, want default %v", HTTPExchangeTimeout(), defaultHTTPExchangeTimeout)
+	}
+}
+
 func TestSetConnDeadline(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()

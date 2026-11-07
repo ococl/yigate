@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +101,16 @@ func normalizeZeroDefaults(cfg *Config) {
 	if cfg.TrafficAudit.QuotaWindow <= 0 {
 		cfg.TrafficAudit.QuotaWindow = proxy.Duration(time.Hour)
 	}
+	// routing.auto 的 0 值在路由器中表示“使用默认值”，这里补齐以便界面展示实际生效值。
+	if cfg.Routing.Auto.DirectTimeout <= 0 {
+		cfg.Routing.Auto.DirectTimeout = proxy.Duration(1500 * time.Millisecond)
+	}
+	if cfg.Routing.Auto.CacheTTL <= 0 {
+		cfg.Routing.Auto.CacheTTL = proxy.Duration(time.Hour)
+	}
+	if cfg.Routing.GeoSite.UpdateInterval <= 0 {
+		cfg.Routing.GeoSite.UpdateInterval = proxy.Duration(24 * time.Hour)
+	}
 }
 
 // saveAndApply 保存配置到磁盘并触发热加载。
@@ -163,44 +171,10 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 }
 
 // validateUpstream 校验上游配置的基本合法性。
+// 与实际加载配置共用同一套校验逻辑（validateUpstreamConfig），
+// 避免通过管理 API 写入的配置与手写 YAML 采用不同标准。
 func validateUpstream(up proxy.UpstreamConfig) error {
-	if strings.TrimSpace(up.URL) == "" {
-		return errors.New("url must not be empty")
-	}
-	parsed, err := url.Parse(strings.TrimSpace(up.URL))
-	if err != nil {
-		return fmt.Errorf("url is invalid: %w", err)
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "http", "https", "socks5", "socks5h":
-	default:
-		return fmt.Errorf("url scheme must be http, https, socks5, or socks5h, got %q", parsed.Scheme)
-	}
-	if parsed.Host == "" {
-		return errors.New("url must include host:port")
-	}
-	if port := parsed.Port(); port != "" {
-		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("url port must be between 1 and 65535, got %q", port)
-		}
-	}
-	if up.Weight < 0 {
-		return errors.New("weight must be >= 0")
-	}
-	if up.Weight > maxUpstreamWeight {
-		return fmt.Errorf("weight must be <= %d", maxUpstreamWeight)
-	}
-	if err := proxy.ValidateProxyTypes(up.Types); err != nil {
-		return err
-	}
-	if err := proxy.ValidateUpstreamStrategy(up.Strategy); err != nil {
-		return err
-	}
-	if err := proxy.ValidateHealthCheckConfig(up.HealthCheck); err != nil {
-		return err
-	}
-	return nil
+	return validateUpstreamConfig(up)
 }
 
 // allowedRuleTypes 与 proxy.CompileRouter 支持的规则类型保持一致。
@@ -621,19 +595,38 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 	if cfg.WebUI != nil {
 		webuiEnabled = cfg.WebUI.Enabled
 	}
+	// 多 listener 模式下 listen/socks5/access_control/max_connections 的顶层值不再生效，
+	// 这里展示真正生效的值（第一个 listener），避免界面显示与实际运行不一致。
+	listen := cfg.Listen
+	socks5 := cfg.Socks5
+	access := cfg.AccessControl
+	maxConns := cfg.MaxConnections
+	if len(cfg.Listeners) > 0 {
+		addrs := make([]string, 0, len(cfg.Listeners))
+		for _, lc := range cfg.Listeners {
+			addrs = append(addrs, lc.Listen)
+		}
+		listen = strings.Join(addrs, ",")
+		socks5 = cfg.Listeners[0].Socks5
+		access = cfg.Listeners[0].AccessControl
+		maxConns = cfg.Listeners[0].MaxConnections
+		if maxConns <= 0 {
+			maxConns = cfg.MaxConnections
+		}
+	}
 	view := proxy.SettingsView{
-		Listen:              cfg.Listen,
+		Listen:              listen,
 		Management:          cfg.Management,
 		ManagementTokenSet:  strings.TrimSpace(cfg.ManagementAuthToken) != "",
 		WebUIEnabled:        webuiEnabled,
 		CheckIntervalSec:    cfg.CheckInterval,
-		MaxConnections:      cfg.MaxConnections,
+		MaxConnections:      maxConns,
 		EnablePprof:         cfg.EnablePprof,
-		Socks5AllowBind:     cfg.Socks5.AllowBind,
-		Socks5AllowUDPAssoc: cfg.Socks5.AllowUDPAssociate,
+		Socks5AllowBind:     socks5.AllowBind,
+		Socks5AllowUDPAssoc: socks5.AllowUDPAssociate,
 
-		RoutingFinal:           cfg.Routing.Final,
-		AutoMode:               cfg.Routing.Auto.Mode,
+		RoutingFinal:           strings.ToLower(strings.TrimSpace(cfg.Routing.Final)),
+		AutoMode:               strings.ToLower(strings.TrimSpace(cfg.Routing.Auto.Mode)),
 		AutoDirectTimeoutSec:   time.Duration(cfg.Routing.Auto.DirectTimeout).Seconds(),
 		AutoCacheTTLSec:        time.Duration(cfg.Routing.Auto.CacheTTL).Seconds(),
 		GeoSitePath:            cfg.Routing.GeoSite.Path,
@@ -642,12 +635,12 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		GeoSiteUpdateIntervalH: time.Duration(cfg.Routing.GeoSite.UpdateInterval).Hours(),
 		Socks5HRedirectEnabled: cfg.Routing.Socks5HRedirect.Enabled,
 
-		DNSType:       cfg.DNS.Type,
+		DNSType:       strings.ToLower(strings.TrimSpace(cfg.DNS.Type)),
 		DoHURL:        cfg.DNS.DoHURL,
 		DoTAddr:       cfg.DNS.DoTAddr,
 		DNSFallback:   cfg.DNS.Fallback,
 		DNSTimeoutSec: time.Duration(cfg.DNS.Timeout).Seconds(),
-		IPPrecedence:  cfg.DNS.IPPrecedence,
+		IPPrecedence:  strings.ToLower(strings.TrimSpace(cfg.DNS.IPPrecedence)),
 
 		DialTimeoutSec:         time.Duration(cfg.Timeouts.Dial).Seconds(),
 		HandshakeTimeoutSec:    time.Duration(cfg.Timeouts.Handshake).Seconds(),
@@ -655,7 +648,7 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		TunnelIdleTimeoutSec:   time.Duration(cfg.Timeouts.TunnelIdle).Seconds(),
 
 		ProtectPrivate: cfg.DestinationPolicy.ProtectPrivate,
-		DefaultAction:  cfg.DestinationPolicy.DefaultAction,
+		DefaultAction:  strings.ToLower(strings.TrimSpace(cfg.DestinationPolicy.DefaultAction)),
 		DenyCIDRs:      cfg.DestinationPolicy.DenyCIDRs,
 		AllowCIDRs:     cfg.DestinationPolicy.AllowCIDRs,
 		DenyDomains:    cfg.DestinationPolicy.DenyDomains,
@@ -663,10 +656,10 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		DenyPorts:      cfg.DestinationPolicy.DenyPorts,
 		AllowPorts:     cfg.DestinationPolicy.AllowPorts,
 
-		AllowedClients:     cfg.AccessControl.AllowedClients,
-		RateLimitPerSecond: cfg.AccessControl.RateLimit.ConnectionsPerSecond,
-		RateLimitBurst:     cfg.AccessControl.RateLimit.Burst,
-		MaxConnsPerUser:    cfg.AccessControl.MaxConnsPerUser,
+		AllowedClients:     access.AllowedClients,
+		RateLimitPerSecond: access.RateLimit.ConnectionsPerSecond,
+		RateLimitBurst:     access.RateLimit.Burst,
+		MaxConnsPerUser:    access.MaxConnsPerUser,
 
 		TrafficAuditEnabled: cfg.TrafficAudit.Enabled,
 		PerUserQuota:        cfg.TrafficAudit.PerUserQuota,
@@ -693,6 +686,15 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	}
 	if patch.EnablePprof != nil {
 		cfg.EnablePprof = *patch.EnablePprof
+	}
+	if patch.WebUIEnabled != nil {
+		if cfg.WebUI == nil {
+			cfg.WebUI = &WebUIConfig{}
+		}
+		cfg.WebUI.Enabled = *patch.WebUIEnabled
+	}
+	if patch.ManagementAuthToken != nil {
+		cfg.ManagementAuthToken = strings.TrimSpace(*patch.ManagementAuthToken)
 	}
 	if patch.Socks5AllowBind != nil {
 		cfg.Socks5.AllowBind = *patch.Socks5AllowBind
@@ -807,6 +809,36 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	}
 	if patch.LogLevel != nil {
 		cfg.Log.Level = strings.ToLower(strings.TrimSpace(*patch.LogLevel))
+	}
+
+	// 多 listener 模式下顶层 listen/socks5/access_control/max_connections 不参与运行，
+	// 这里把本次显式提交的全局设置同步到每个 listener，否则界面上的修改会静默失效。
+	// 只同步 patch 中出现的字段，避免覆盖各 listener 的独立配置。
+	if len(cfg.Listeners) > 0 {
+		for i := range cfg.Listeners {
+			lc := &cfg.Listeners[i]
+			if patch.MaxConnections != nil {
+				lc.MaxConnections = *patch.MaxConnections
+			}
+			if patch.Socks5AllowBind != nil {
+				lc.Socks5.AllowBind = *patch.Socks5AllowBind
+			}
+			if patch.Socks5AllowUDPAssoc != nil {
+				lc.Socks5.AllowUDPAssociate = *patch.Socks5AllowUDPAssoc
+			}
+			if patch.AllowedClients != nil {
+				lc.AccessControl.AllowedClients = patch.AllowedClients
+			}
+			if patch.RateLimitPerSecond != nil {
+				lc.AccessControl.RateLimit.ConnectionsPerSecond = *patch.RateLimitPerSecond
+			}
+			if patch.RateLimitBurst != nil {
+				lc.AccessControl.RateLimit.Burst = *patch.RateLimitBurst
+			}
+			if patch.MaxConnsPerUser != nil {
+				lc.AccessControl.MaxConnsPerUser = *patch.MaxConnsPerUser
+			}
+		}
 	}
 
 	return e.saveAndApply(cfg)

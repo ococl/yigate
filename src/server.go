@@ -71,13 +71,6 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 		connections: make(map[net.Conn]struct{}),
 		listeners:   make(map[string]net.Listener),
 	}
-	// 应用 WebUI 配置（未设置时默认启用内置前端）
-	if cfg.WebUI != nil {
-		proxy.SetWebUIEnabled(cfg.WebUI.Enabled)
-	} else {
-		proxy.SetWebUIEnabled(true)
-	}
-
 	if err := s.ApplyConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -240,22 +233,36 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		trafficAccounter: trafficAccounter,
 	}
 
+	// WebUI 开关属于热加载项（未设置时默认启用）：先更新全局状态，
+	// 再参与管理端口的重建判断，保证修改 webui.enabled 后无需重启即可生效。
+	webuiEnabled := cfg.WebUI == nil || cfg.WebUI.Enabled
+	webuiChanged := proxy.WebUIEnabled() != webuiEnabled
+	proxy.SetWebUIEnabled(webuiEnabled)
+
 	s.stateMu.RLock()
 	oldMgmt := s.mgmt
 	oldMgmtAddr := s.mgmtAddr
 	s.stateMu.RUnlock()
-	mgmtChanged := oldMgmt == nil || oldMgmtAddr != cfg.Management || oldMgmt.PprofEnabled() != cfg.EnablePprof || oldMgmt.AuthToken() != cfg.ManagementAuthToken
+	mgmtChanged := oldMgmt == nil || oldMgmtAddr != cfg.Management || oldMgmt.PprofEnabled() != cfg.EnablePprof ||
+		oldMgmt.AuthToken() != cfg.ManagementAuthToken || webuiChanged
 	newMgmt := oldMgmt
+	reuseMgmt := false
 	if mgmtChanged {
-		newMgmt = s.newManagementServer(cfg)
-		if cfg.Management != "" {
-			mgmtLn, err := net.Listen("tcp", cfg.Management)
-			if err != nil {
-				return fmt.Errorf("prepare management listener on %s: %w", cfg.Management, err)
-			}
-			if err := newMgmt.StartListener(mgmtLn); err != nil {
-				_ = mgmtLn.Close()
-				return fmt.Errorf("start management server on %s: %w", cfg.Management, err)
+		// 管理地址未变时不能重新 Listen（同一端口仍被旧 server 占用），
+		// 改为原地重建路由表，使 enable_pprof / token / WebUI 开关可热加载。
+		if cfg.Management != "" && oldMgmt != nil && oldMgmtAddr == cfg.Management && oldMgmt.Addr() != "" {
+			reuseMgmt = true
+		} else {
+			newMgmt = s.newManagementServer(cfg)
+			if cfg.Management != "" {
+				mgmtLn, err := net.Listen("tcp", cfg.Management)
+				if err != nil {
+					return fmt.Errorf("prepare management listener on %s: %w", cfg.Management, err)
+				}
+				if err := newMgmt.StartListener(mgmtLn); err != nil {
+					_ = mgmtLn.Close()
+					return fmt.Errorf("start management server on %s: %w", cfg.Management, err)
+				}
 			}
 		}
 	}
@@ -294,7 +301,8 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 				for _, l := range newListeners {
 					_ = l.Close()
 				}
-				if mgmtChanged && newMgmt != nil {
+				// 复用旧管理服务时不能 Stop，它仍在为现有连接服务。
+				if mgmtChanged && !reuseMgmt && newMgmt != nil {
 					newMgmt.Stop()
 				}
 				return fmt.Errorf("prepare listener on %s: %w", lc.Listen, err)
@@ -319,6 +327,10 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		}
 	}
 	if mgmtChanged {
+		if reuseMgmt {
+			// 所有可能失败的步骤都已完成，再原地替换路由表。
+			newMgmt.Reconfigure(cfg.EnablePprof, cfg.ManagementAuthToken)
+		}
 		s.stateMu.Lock()
 		s.mgmt = newMgmt
 		s.mgmtAddr = cfg.Management
@@ -361,7 +373,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 			}
 		}
 	}
-	if mgmtChanged && oldMgmt != nil {
+	if mgmtChanged && oldMgmt != nil && oldMgmt != newMgmt {
 		oldMgmt.Stop()
 	}
 	return nil

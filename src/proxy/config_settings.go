@@ -64,11 +64,13 @@ type SettingsView struct {
 // SettingsPatch 是全局设置的部分更新请求。
 // 指针为 nil 表示不修改；切片为 nil 表示不修改，空数组表示清空。
 type SettingsPatch struct {
-	CheckIntervalSec    *int  `json:"check_interval_seconds"`
-	MaxConnections      *int  `json:"max_connections"`
-	EnablePprof         *bool `json:"enable_pprof"`
-	Socks5AllowBind     *bool `json:"socks5_allow_bind"`
-	Socks5AllowUDPAssoc *bool `json:"socks5_allow_udp_associate"`
+	CheckIntervalSec    *int    `json:"check_interval_seconds"`
+	MaxConnections      *int    `json:"max_connections"`
+	EnablePprof         *bool   `json:"enable_pprof"`
+	WebUIEnabled        *bool   `json:"webui_enabled"`
+	ManagementAuthToken *string `json:"management_auth_token"`
+	Socks5AllowBind     *bool   `json:"socks5_allow_bind"`
+	Socks5AllowUDPAssoc *bool   `json:"socks5_allow_udp_associate"`
 
 	RoutingFinal           *string  `json:"routing_final"`
 	AutoMode               *string  `json:"auto_mode"`

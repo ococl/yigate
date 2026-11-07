@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net"
+	"strings"
 )
 
 // TProxyConfig 透明代理配置。
@@ -18,9 +19,10 @@ func (c TProxyConfig) IsTProxyEnabled() bool {
 	return c.Enabled
 }
 
-// NormalizedMode 返回规范化后的模式字符串。
+// NormalizedMode 返回规范化后的模式字符串（大小写不敏感）。
+// 未配置或无法识别时按 redirect 处理；无法识别的取值会在配置校验阶段被拒绝。
 func (c TProxyConfig) NormalizedMode() string {
-	if c.Mode == "tproxy" {
+	if strings.EqualFold(strings.TrimSpace(c.Mode), "tproxy") {
 		return "tproxy"
 	}
 	return "redirect"

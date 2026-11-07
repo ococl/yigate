@@ -70,9 +70,16 @@ func ValidateTimeoutConfig(cfg TimeoutConfig) error {
 	return nil
 }
 
-// SetTimeouts 根据配置更新超时参数，未设置项保持当前值
+// SetTimeouts 根据配置更新超时参数。
+// 配置中为 0 表示“使用内置默认值”，因此会重置为默认值而不是保留上一次热加载的值，
+// 否则把某项改回 0 后旧值会一直粘住。
 func SetTimeouts(cfg TimeoutConfig) {
-	cur := timeouts.Load().(timeoutConfig)
+	cur := timeoutConfig{
+		dial:      defaultProxyDialTimeout,
+		handshake: defaultProxyHandshakeTimeout,
+		http:      defaultHTTPExchangeTimeout,
+		tunnel:    defaultTunnelIdleTimeout,
+	}
 	if cfg.Dial > 0 {
 		cur.dial = time.Duration(cfg.Dial)
 	}

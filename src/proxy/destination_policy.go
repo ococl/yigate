@@ -71,18 +71,26 @@ func mustCIDR(s string) *net.IPNet {
 
 // NewDestinationPolicy 校验并编译目标访问策略。
 func NewDestinationPolicy(cfg DestinationPolicyConfig) (*DestinationPolicy, error) {
-	if cfg.DefaultAction != "" && cfg.DefaultAction != ActionAllow && cfg.DefaultAction != ActionDeny {
+	defaultAction := strings.ToLower(strings.TrimSpace(cfg.DefaultAction))
+	if defaultAction != "" && defaultAction != ActionAllow && defaultAction != ActionDeny {
 		return nil, fmt.Errorf("destination_policy.default_action must be allow or deny, got %q", cfg.DefaultAction)
 	}
-	defaultAction := cfg.DefaultAction
 	if defaultAction == "" {
 		defaultAction = ActionAllow
+	}
+	denyPorts, err := toPortSet("deny_ports", cfg.DenyPorts)
+	if err != nil {
+		return nil, err
+	}
+	allowPorts, err := toPortSet("allow_ports", cfg.AllowPorts)
+	if err != nil {
+		return nil, err
 	}
 	p := &DestinationPolicy{
 		protectPrivate: cfg.ProtectPrivate,
 		defaultAction:  defaultAction,
-		denyPorts:      toPortSet(cfg.DenyPorts),
-		allowPorts:     toPortSet(cfg.AllowPorts),
+		denyPorts:      denyPorts,
+		allowPorts:     allowPorts,
 		denyDomains:    normalizeDomains(cfg.DenyDomains),
 		allowDomains:   normalizeDomains(cfg.AllowDomains),
 	}
@@ -103,15 +111,17 @@ func NewDestinationPolicy(cfg DestinationPolicyConfig) (*DestinationPolicy, erro
 	return p, nil
 }
 
-func toPortSet(ports []int) map[int]struct{} {
+// toPortSet 将端口列表编译为集合。越界端口会直接报错而不是静默丢弃，
+// 避免用户以为规则已生效但实际未加载。
+func toPortSet(field string, ports []int) (map[int]struct{}, error) {
 	set := make(map[int]struct{}, len(ports))
 	for _, p := range ports {
-		if p < 0 || p > 65535 {
-			continue
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("%s contains invalid port %d (must be 1-65535)", field, p)
 		}
 		set[p] = struct{}{}
 	}
-	return set
+	return set, nil
 }
 
 func normalizeDomains(values []string) []string {

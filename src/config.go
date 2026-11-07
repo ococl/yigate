@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,6 +113,16 @@ func defaultConfig() *Config {
 			ProtectPrivate: true,
 			DefaultAction:  "allow",
 		},
+		// DNS 默认值与文档/示例保持一致：system 解析、失败回退系统 DNS、5s 超时、IPv4 优先。
+		DNS: proxy.DNSConfig{
+			Type:         "system",
+			Fallback:     true,
+			Timeout:      proxy.DefaultDNSTimeout(),
+			IPPrecedence: proxy.IPPrecedenceIPv4First,
+		},
+		TrafficAudit: proxy.TrafficAuditConfig{
+			QuotaWindow: proxy.Duration(time.Hour),
+		},
 		Log:            proxy.DefaultLogConfig(),
 		CheckInterval:  30,
 		MaxConnections: defaultMaxConnections,
@@ -180,12 +192,34 @@ func normalizeListeners(cfg *Config, baseDir string) error {
 	}
 
 	for i := range cfg.Listeners {
+		// 顶层 users/access_control 在多 listener 模式下作为“默认值”：
+		// 仅当该 listener 未显式配置时继承，避免全局用户被静默忽略导致端口变成匿名代理。
+		// 显式写 users: {} 表示该端口匿名，不继承。
 		if cfg.Listeners[i].Users == nil {
-			cfg.Listeners[i].Users = make(map[string]string)
+			if len(cfg.Users) > 0 {
+				users := make(map[string]string, len(cfg.Users))
+				for name, pass := range cfg.Users {
+					users[name] = pass
+				}
+				cfg.Listeners[i].Users = users
+			} else {
+				cfg.Listeners[i].Users = make(map[string]string)
+			}
+		}
+		if isZeroAccessControl(cfg.Listeners[i].AccessControl) {
+			cfg.Listeners[i].AccessControl = cfg.AccessControl
 		}
 		resolveTLSPaths(&cfg.Listeners[i].TLS, baseDir)
 	}
 	return nil
+}
+
+// isZeroAccessControl 判断访问控制是否完全未配置（用于继承顶层默认值）。
+func isZeroAccessControl(cfg proxy.AccessControlConfig) bool {
+	return len(cfg.AllowedClients) == 0 &&
+		cfg.RateLimit.ConnectionsPerSecond == 0 &&
+		cfg.RateLimit.Burst == 0 &&
+		cfg.MaxConnsPerUser == 0
 }
 
 func expandConfigEnv(cfg *Config) error {
@@ -326,14 +360,18 @@ func validateTLSConfig(tlsCfg *TLSConfig) error {
 		return fmt.Errorf("tls.client_ca_file requires tls.cert_file and tls.key_file")
 	}
 	if hasCert {
-		if _, err := os.Stat(tlsCfg.CertFile); err != nil {
-			return fmt.Errorf("cert_file %q: %w", tlsCfg.CertFile, err)
+		if !containsEnvPlaceholder(tlsCfg.CertFile) {
+			if _, err := os.Stat(tlsCfg.CertFile); err != nil {
+				return fmt.Errorf("cert_file %q: %w", tlsCfg.CertFile, err)
+			}
 		}
-		if _, err := os.Stat(tlsCfg.KeyFile); err != nil {
-			return fmt.Errorf("key_file %q: %w", tlsCfg.KeyFile, err)
+		if !containsEnvPlaceholder(tlsCfg.KeyFile) {
+			if _, err := os.Stat(tlsCfg.KeyFile); err != nil {
+				return fmt.Errorf("key_file %q: %w", tlsCfg.KeyFile, err)
+			}
 		}
 	}
-	if hasClientCA {
+	if hasClientCA && !containsEnvPlaceholder(tlsCfg.ClientCAFile) {
 		if _, err := os.Stat(tlsCfg.ClientCAFile); err != nil {
 			return fmt.Errorf("client_ca_file %q: %w", tlsCfg.ClientCAFile, err)
 		}
@@ -350,8 +388,10 @@ func validateConfig(cfg *Config) error {
 		if strings.TrimSpace(cfg.Listen) == "" {
 			return fmt.Errorf("listen must not be empty")
 		}
-		if _, err := net.ResolveTCPAddr("tcp", cfg.Listen); err != nil {
-			return fmt.Errorf("listen %q is not a valid TCP address: %w", cfg.Listen, err)
+		if !containsEnvPlaceholder(cfg.Listen) {
+			if _, err := net.ResolveTCPAddr("tcp", cfg.Listen); err != nil {
+				return fmt.Errorf("listen %q is not a valid TCP address: %w", cfg.Listen, err)
+			}
 		}
 	}
 	seenListeners := make(map[string]struct{}, len(cfg.Listeners))
@@ -359,8 +399,10 @@ func validateConfig(cfg *Config) error {
 		if strings.TrimSpace(lc.Listen) == "" {
 			return fmt.Errorf("listeners[%d].listen must not be empty", i)
 		}
-		if _, err := net.ResolveTCPAddr("tcp", lc.Listen); err != nil {
-			return fmt.Errorf("listeners[%d].listen %q is not a valid TCP address: %w", i, lc.Listen, err)
+		if !containsEnvPlaceholder(lc.Listen) {
+			if _, err := net.ResolveTCPAddr("tcp", lc.Listen); err != nil {
+				return fmt.Errorf("listeners[%d].listen %q is not a valid TCP address: %w", i, lc.Listen, err)
+			}
 		}
 		if _, exists := seenListeners[lc.Listen]; exists {
 			return fmt.Errorf("listeners[%d].listen %q is duplicated", i, lc.Listen)
@@ -373,9 +415,8 @@ func validateConfig(cfg *Config) error {
 			if !proxy.IsTProxySupported() {
 				return fmt.Errorf("listeners[%d].tproxy: transparent proxy is only supported on Linux", i)
 			}
-			mode := lc.TProxy.NormalizedMode()
-			if mode != "redirect" && mode != "tproxy" {
-				return fmt.Errorf("listeners[%d].tproxy.mode: unsupported mode %q, must be \"redirect\" or \"tproxy\"", i, lc.TProxy.Mode)
+			if err := validateTProxyMode(lc.TProxy.Mode); err != nil {
+				return fmt.Errorf("listeners[%d].tproxy.mode: %w", i, err)
 			}
 			if lc.TLS.CertFile != "" || lc.TLS.KeyFile != "" {
 				return fmt.Errorf("listeners[%d].tproxy: TLS is not supported with transparent proxy", i)
@@ -383,6 +424,12 @@ func validateConfig(cfg *Config) error {
 		}
 		if _, err := proxy.NewAccessController(lc.AccessControl); err != nil {
 			return fmt.Errorf("listeners[%d].access_control: %w", i, err)
+		}
+		if err := validateAccessControl(lc.AccessControl); err != nil {
+			return fmt.Errorf("listeners[%d].access_control: %w", i, err)
+		}
+		if lc.MaxConnections < 0 {
+			return fmt.Errorf("listeners[%d].max_connections must be >= 0", i)
 		}
 	}
 
@@ -398,14 +445,13 @@ func validateConfig(cfg *Config) error {
 	if _, err := proxy.NewDestinationPolicy(cfg.DestinationPolicy); err != nil {
 		return fmt.Errorf("destination_policy: %w", err)
 	}
-	if cfg.Routing.Auto.DirectTimeout < 0 {
-		return fmt.Errorf("routing.auto.direct_timeout must be >= 0")
+	if err := validateRoutingConfig(cfg.Routing); err != nil {
+		return err
 	}
-	if cfg.Routing.Auto.CacheTTL < 0 {
-		return fmt.Errorf("routing.auto.cache_ttl must be >= 0")
-	}
-	if cfg.Routing.GeoSite.UpdateInterval <= 0 {
-		return fmt.Errorf("routing.geosite.update_interval must be > 0")
+	if cfg.Management != "" && !containsEnvPlaceholder(cfg.Management) {
+		if _, err := net.ResolveTCPAddr("tcp", cfg.Management); err != nil {
+			return fmt.Errorf("management %q is not a valid TCP address: %w", cfg.Management, err)
+		}
 	}
 	if cfg.Management != "" && !isLoopbackListen(cfg.Management) && cfg.ManagementAuthToken == "" {
 		return fmt.Errorf("management_auth_token is required when management listens on a non-loopback address")
@@ -420,17 +466,8 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("log: %w", err)
 	}
 	for i, up := range cfg.Upstreams {
-		if strings.TrimSpace(up.URL) == "" {
-			return fmt.Errorf("upstreams[%d].url must not be empty", i)
-		}
-		if up.Weight < 0 {
-			return fmt.Errorf("upstreams[%d].weight must be >= 0", i)
-		}
-		if up.Weight > maxUpstreamWeight {
-			return fmt.Errorf("upstreams[%d].weight must be <= %d", i, maxUpstreamWeight)
-		}
-		if err := proxy.ValidateProxyTypes(up.Types); err != nil {
-			return fmt.Errorf("upstreams[%d].types: %w", i, err)
+		if err := validateUpstreamConfig(up); err != nil {
+			return fmt.Errorf("upstreams[%d]: %w", i, err)
 		}
 	}
 
@@ -471,7 +508,21 @@ func validateConfig(cfg *Config) error {
 		}
 	}
 
+	// 规则的类型/动作/正则/CIDR 在加载期一并校验，避免启动后才由路由器报错。
+	// 含 ${ENV} 占位符的规则跳过校验（运行时配置 API 读取的是未展开的原始 YAML）。
+	for i, rule := range cfg.Routing.Rules {
+		if ruleHasEnvPlaceholder(rule) {
+			continue
+		}
+		if err := validateRouteRule(rule, cfg.Upstreams); err != nil {
+			return fmt.Errorf("routing.rules[%d]: %w", i, err)
+		}
+	}
+
 	if _, err := proxy.NewAccessController(cfg.AccessControl); err != nil {
+		return fmt.Errorf("access_control: %w", err)
+	}
+	if err := validateAccessControl(cfg.AccessControl); err != nil {
 		return fmt.Errorf("access_control: %w", err)
 	}
 
@@ -479,19 +530,161 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("dns: %w", err)
 	}
 
-	if cfg.TrafficAudit.Enabled {
-		if cfg.TrafficAudit.PerUserQuota < 0 {
-			return fmt.Errorf("traffic_audit.per_user_quota must be >= 0")
-		}
-		if cfg.TrafficAudit.PerUpstreamQuota < 0 {
-			return fmt.Errorf("traffic_audit.per_upstream_quota must be >= 0")
-		}
-		if cfg.TrafficAudit.QuotaWindow < 0 {
-			return fmt.Errorf("traffic_audit.quota_window must be >= 0")
-		}
+	// 配额即使未启用也校验，避免关闭开关期间写入非法值后无法再次启用。
+	if cfg.TrafficAudit.PerUserQuota < 0 {
+		return fmt.Errorf("traffic_audit.per_user_quota must be >= 0")
+	}
+	if cfg.TrafficAudit.PerUpstreamQuota < 0 {
+		return fmt.Errorf("traffic_audit.per_upstream_quota must be >= 0")
+	}
+	if cfg.TrafficAudit.QuotaWindow < 0 {
+		return fmt.Errorf("traffic_audit.quota_window must be >= 0")
 	}
 
 	return nil
+}
+
+// validateTProxyMode 校验透明代理模式（大小写不敏感）。
+func validateTProxyMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "redirect", "tproxy":
+		return nil
+	default:
+		return fmt.Errorf("unsupported mode %q, must be \"redirect\" or \"tproxy\"", mode)
+	}
+}
+
+// validateAccessControl 校验访问控制的数值边界。负数会被运行时当作“不限制”，
+// 容易让用户误以为已经生效，因此在配置层直接拒绝。
+func validateAccessControl(cfg proxy.AccessControlConfig) error {
+	if cfg.RateLimit.ConnectionsPerSecond < 0 {
+		return fmt.Errorf("rate_limit.connections_per_second must be >= 0")
+	}
+	if cfg.RateLimit.Burst < 0 {
+		return fmt.Errorf("rate_limit.burst must be >= 0")
+	}
+	if cfg.MaxConnsPerUser < 0 {
+		return fmt.Errorf("max_conns_per_user must be >= 0")
+	}
+	return nil
+}
+
+// validateRoutingConfig 校验路由相关枚举与路径配置。
+func validateRoutingConfig(cfg proxy.RoutingConfig) error {
+	switch final := strings.ToLower(strings.TrimSpace(cfg.Final)); final {
+	case "", proxy.ActionDirect, proxy.ActionProxy, proxy.ActionAuto, proxy.ActionDeny:
+	default:
+		return fmt.Errorf("routing.final must be direct, proxy, auto, or deny, got %q", cfg.Final)
+	}
+	switch mode := strings.ToLower(strings.TrimSpace(cfg.Auto.Mode)); mode {
+	case "", "direct_first", "proxy_first":
+	default:
+		return fmt.Errorf("routing.auto.mode must be direct_first or proxy_first, got %q", cfg.Auto.Mode)
+	}
+	if cfg.Auto.DirectTimeout < 0 {
+		return fmt.Errorf("routing.auto.direct_timeout must be >= 0")
+	}
+	if cfg.Auto.CacheTTL < 0 {
+		return fmt.Errorf("routing.auto.cache_ttl must be >= 0")
+	}
+	if cfg.GeoSite.UpdateInterval <= 0 {
+		return fmt.Errorf("routing.geosite.update_interval must be > 0")
+	}
+	if cfg.GeoSite.AutoUpdate {
+		url := strings.TrimSpace(cfg.GeoSite.UpdateURL)
+		if url == "" {
+			return fmt.Errorf("routing.geosite.update_url must not be empty when auto_update is true")
+		}
+		if !containsEnvPlaceholder(url) {
+			lower := strings.ToLower(url)
+			if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
+				return fmt.Errorf("routing.geosite.update_url must be an HTTP(S) URL, got %q", cfg.GeoSite.UpdateURL)
+			}
+		}
+	}
+	return nil
+}
+
+// ruleHasEnvPlaceholder 判断规则中是否仍含未展开的 ${ENV} 占位符。
+func ruleHasEnvPlaceholder(rule proxy.RouteRule) bool {
+	if containsEnvPlaceholder(rule.Type) || containsEnvPlaceholder(rule.Action) {
+		return true
+	}
+	for _, v := range rule.Values {
+		if containsEnvPlaceholder(v) {
+			return true
+		}
+	}
+	for _, v := range rule.Upstreams {
+		if containsEnvPlaceholder(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsEnvPlaceholder 判断字段值中是否仍保留 ${ENV} 占位符。
+// 运行时配置 API 读取的是未展开的原始 YAML，校验时需要跳过这类值的解析。
+func containsEnvPlaceholder(v string) bool {
+	return strings.Contains(v, "${")
+}
+
+// validateUpstreamConfig 校验单个上游配置：URL 结构、权重、类型、负载策略与健康检查。
+func validateUpstreamConfig(up proxy.UpstreamConfig) error {
+	rawURL := strings.TrimSpace(up.URL)
+	if rawURL == "" {
+		return fmt.Errorf("url must not be empty")
+	}
+	if containsEnvPlaceholder(rawURL) {
+		// 占位符未展开时无法完整解析：scheme 若为字面量仍做校验，其余部分留待展开后再校验。
+		if parts := strings.SplitN(rawURL, "://", 2); len(parts) == 2 && !containsEnvPlaceholder(parts[0]) {
+			if !isSupportedUpstreamScheme(parts[0]) {
+				return fmt.Errorf("url scheme must be http, https, socks5, or socks5h, got %q", parts[0])
+			}
+		}
+	} else {
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			return fmt.Errorf("url is invalid: %w", err)
+		}
+		if !isSupportedUpstreamScheme(parsed.Scheme) {
+			return fmt.Errorf("url scheme must be http, https, socks5, or socks5h, got %q", parsed.Scheme)
+		}
+		if parsed.Host == "" {
+			return fmt.Errorf("url must include host:port")
+		}
+		if port := parsed.Port(); port != "" {
+			n, err := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("url port must be between 1 and 65535, got %q", port)
+			}
+		}
+	}
+	if up.Weight < 0 {
+		return fmt.Errorf("weight must be >= 0")
+	}
+	if up.Weight > maxUpstreamWeight {
+		return fmt.Errorf("weight must be <= %d", maxUpstreamWeight)
+	}
+	if err := proxy.ValidateProxyTypes(up.Types); err != nil {
+		return fmt.Errorf("types: %w", err)
+	}
+	if err := proxy.ValidateUpstreamStrategy(up.Strategy); err != nil {
+		return fmt.Errorf("strategy: %w", err)
+	}
+	if err := proxy.ValidateHealthCheckConfig(up.HealthCheck); err != nil {
+		return fmt.Errorf("health_check: %w", err)
+	}
+	return nil
+}
+
+func isSupportedUpstreamScheme(scheme string) bool {
+	switch strings.ToLower(strings.TrimSpace(scheme)) {
+	case proxy.ProxyTypeHTTP, proxy.ProxyTypeHTTPS, proxy.ProxyTypeSocks5, proxy.ProxyTypeSocks5H:
+		return true
+	default:
+		return false
+	}
 }
 
 // DefaultConfigYAML 返回带有注释的默认配置 YAML 字符串。
