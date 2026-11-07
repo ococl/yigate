@@ -586,3 +586,44 @@ func TestManagementAuthSuccessClearsFailures(t *testing.T) {
 		t.Fatalf("correct token after partial failures status = %d, want 200", resp2.StatusCode)
 	}
 }
+
+// TestManagementServerServesSPADeepLinks 确保前端路由在直接访问/刷新时不会被 404：
+// /geosite、/pprof 等无扩展名的路径必须回退到 index.html。
+func TestManagementServerServesSPADeepLinks(t *testing.T) {
+	SetWebUIEnabled(true)
+	t.Cleanup(func() { SetWebUIEnabled(true) })
+
+	m := NewManagementServer(func() HealthStatus {
+		return HealthStatus{Status: "up"}
+	}, false)
+	if err := m.Start("127.0.0.1:0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+	addr := m.ln.Addr().String()
+
+	for _, path := range []string{
+		"/",
+		"/dashboard",
+		"/geosite",
+		"/geosite/",
+		"/pprof",
+		"/settings?section=routing",
+	} {
+		resp, err := http.Get("http://" + addr + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Fatalf("%s content-type = %q, want text/html", path, ct)
+		}
+		if len(body) == 0 {
+			t.Fatalf("%s returned an empty body", path)
+		}
+	}
+}

@@ -1367,13 +1367,6 @@ func TestIntegrationTrafficSurvivesConfigReload(t *testing.T) {
 		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
 		Timeout:   5 * time.Second,
 	}
-	resp, err := client.Get("http://" + originAddr + "/")
-	if err != nil {
-		t.Fatalf("proxy GET: %v", err)
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-
 	total := func() int64 {
 		var sum int64
 		for _, entry := range s.currentRuntime().trafficAccounter.Snapshot().Entries {
@@ -1381,7 +1374,21 @@ func TestIntegrationTrafficSurvivesConfigReload(t *testing.T) {
 		}
 		return sum
 	}
-	before := total()
+
+	// 监听建立与运行时装配是异步的，允许重试几次，避免偶发的「还没开始记账」误判。
+	var before int64
+	for attempt := 0; attempt < 5 && before <= 0; attempt++ {
+		resp, err := client.Get("http://" + originAddr + "/")
+		if err != nil {
+			t.Fatalf("proxy GET: %v", err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		before = total()
+		if before <= 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	if before <= 0 {
 		t.Fatal("no traffic recorded before reload")
 	}

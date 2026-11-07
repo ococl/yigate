@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { message } from 'antdv-next'
+import axios from 'axios'
 import { getGeoSiteInfo, updateGeoSite } from '@/api/geosite'
 import { updateSettings } from '@/api/settings'
 import { formatDateTime } from '@/utils/datetime'
 import type { GeoSiteInfo, SettingsPatch } from '@/types/api'
 
 const info = ref<GeoSiteInfo | null>(null)
+// unsupported 标记当前后端没有 GeoSite 管理接口（通常是服务端版本较旧）。
+const unsupported = ref(false)
 const loading = ref(false)
 const updating = ref(false)
 const savingSource = ref(false)
@@ -58,10 +61,29 @@ function applyInfo(data: GeoSiteInfo) {
   }
 }
 
+function errorStatus(error: unknown): number | undefined {
+  return axios.isAxiosError(error) ? error.response?.status : undefined
+}
+
 async function fetchInfo() {
   loading.value = true
   try {
-    applyInfo(await getGeoSiteInfo())
+    applyInfo(await getGeoSiteInfo({ silent: true }))
+    unsupported.value = false
+  } catch (error) {
+    // 404 说明后端尚未注册 /api/v1/geosite（版本较旧），直接给出可操作的提示，
+    // 而不是弹一个含义不明的「请求错误 (404)」。
+    if (errorStatus(error) === 404) {
+      unsupported.value = true
+      info.value = null
+      return
+    }
+    const status = errorStatus(error)
+    if (status === 401) {
+      // 认证失效由请求拦截器统一跳转登录页
+      return
+    }
+    message.error(status ? `加载 GeoSite 状态失败（${status}）` : '加载 GeoSite 状态失败，请检查后端服务')
   } finally {
     loading.value = false
   }
@@ -188,12 +210,21 @@ onMounted(fetchInfo)
           cancel-text="取消"
           @confirm="handleUpdate"
         >
-          <a-button type="primary" :loading="updating">立即更新</a-button>
+          <a-button type="primary" :loading="updating" :disabled="unsupported">立即更新</a-button>
         </a-popconfirm>
       </a-space>
     </div>
 
-    <div class="geosite-body">
+    <a-alert
+      v-if="unsupported"
+      type="error"
+      show-icon
+      class="geosite-alert"
+      message="当前后端未提供 GeoSite 管理接口"
+      description="请求 /api/v1/geosite 返回 404，说明所连接服务端的版本较旧。请重新构建并重启后端服务（make build），或把开发服务器代理的 VITE_API_TARGET 指向已升级的实例。"
+    />
+
+    <div v-if="!unsupported" class="geosite-body">
       <!-- 版本概要：横向铺开，避免占用左右分栏空间 -->
       <a-card size="small" class="summary-card">
         <a-descriptions :column="{ xs: 1, sm: 2, lg: 4 }" size="small" :colon="false">

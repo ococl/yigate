@@ -38,6 +38,8 @@ test('logs in and renders every management page', async ({ page }) => {
     ['/users', '用户管理'],
     ['/traffic', '流量审计'],
     ['/settings', '系统设置'],
+    ['/geosite', 'GeoSite 数据'],
+    ['/pprof', 'pprof 性能分析'],
     ['/docs/auth', '认证机制'],
     ['/docs/api', 'API 文档'],
     ['/about', '关于'],
