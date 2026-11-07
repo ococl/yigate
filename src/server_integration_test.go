@@ -562,6 +562,7 @@ log:
 	}
 
 	// 添加 upstream
+	accounterBefore := s.currentRuntime().trafficAccounter
 	addBody := strings.NewReader(`{"name":"test-up","url":"socks5://127.0.0.1:1080","types":["socks5"],"priority":1,"weight":1}`)
 	req = mgmtRequest("POST", mgmt, "/api/v1/config/upstreams", addBody)
 	req.Header.Set("Content-Type", "application/json")
@@ -572,6 +573,9 @@ log:
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		t.Fatalf("add status = %d", resp.StatusCode)
+	}
+	if after := s.currentRuntime().trafficAccounter; after != accounterBefore {
+		t.Fatal("traffic accounter was replaced after upstream change")
 	}
 
 	// 验证已添加

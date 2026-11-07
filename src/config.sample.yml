@@ -201,6 +201,7 @@ max_connections: 1024
 #   per_user_quota: 0             # 每用户流量配额（字节），0 表示不限制
 #   per_upstream_quota: 0         # 每上游流量配额（字节），0 表示不限制
 #   quota_window: 1h              # 配额统计窗口，默认 1 小时
+#   retention_days: 30            # 流量明细保留天数，默认 30 天
 # 透明代理 / TPROXY：Linux 下支持透明代理模式，配合 iptables/nftables 使用。
 # 支持两种模式：
 #   redirect: 使用 iptables REDIRECT + SO_ORIGINAL_DST 获取原始目标（简单，不保留源 IP）

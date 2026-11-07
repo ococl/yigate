@@ -5,6 +5,7 @@ import type { TrafficEntrySnapshot } from '@/types/api'
 
 const dataSource = ref<TrafficEntrySnapshot[]>([])
 const enabled = ref(false)
+const retentionDays = ref(30)
 const loading = ref(false)
 const keyword = ref('')
 let timer: number | undefined
@@ -62,6 +63,7 @@ async function fetchData(showLoading = true) {
   try {
     const res = await getTraffic()
     enabled.value = !!res.enabled
+    retentionDays.value = res.retention_days || 30
     dataSource.value = res.entries || []
   } finally {
     loading.value = false
@@ -84,7 +86,7 @@ onUnmounted(() => {
       <div>
         <a-typography-title :level="4" style="margin: 0;">流量审计</a-typography-title>
         <a-typography-text type="secondary">
-          按用户 / 上游 / 目标聚合的流量统计，每 15 秒自动刷新。
+          按用户 / 上游 / 目标聚合最近 {{ retentionDays }} 天的流量，每 15 秒自动刷新。
         </a-typography-text>
       </div>
       <a-space>
@@ -103,7 +105,7 @@ onUnmounted(() => {
         message="流量审计未启用"
       >
         <template #description>
-          未开启时不会统计任何流量，页面将始终为空。请前往
+          未开启时不再记录新流量，已有历史数据仍会保留。请前往
           <RouterLink to="/settings" class="link">系统设置</RouterLink>
           开启「流量审计」。
         </template>

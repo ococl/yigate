@@ -121,7 +121,8 @@ func defaultConfig() *Config {
 			IPPrecedence: proxy.IPPrecedenceIPv4First,
 		},
 		TrafficAudit: proxy.TrafficAuditConfig{
-			QuotaWindow: proxy.Duration(time.Hour),
+			QuotaWindow:   proxy.Duration(time.Hour),
+			RetentionDays: proxy.DefaultTrafficRetentionDays,
 		},
 		Log:            proxy.DefaultLogConfig(),
 		CheckInterval:  30,
@@ -567,6 +568,12 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.TrafficAudit.QuotaWindow < 0 {
 		return fmt.Errorf("traffic_audit.quota_window must be >= 0")
+	}
+	if cfg.TrafficAudit.RetentionDays < 0 {
+		return fmt.Errorf("traffic_audit.retention_days must be >= 0")
+	}
+	if cfg.TrafficAudit.RetentionDays > 3650 {
+		return fmt.Errorf("traffic_audit.retention_days must be <= 3650")
 	}
 
 	return nil

@@ -19,7 +19,7 @@
 - **配置热加载**：文件变更自动重载，监听地址 / TLS / 上游 / 规则可热更新，先关旧 listener 再建新。
 - **访问控制**：CIDR 白名单、单 IP 限速、用户并发限制、匿名开关。
 - **SSRF 防护**：`destination_policy` 默认拒绝回环 / 私网 / 链路本地 / 云元数据等敏感目标。
-- **流量审计与配额**：按 user / upstream / target 三维统计，支持配额限制。
+- **流量审计与配额**：按 user / upstream / target 三维统计，支持配额限制；流量按自然日持久化，默认保留 30 天并自动清理。
 - **可观测性**：`/health`、`/metrics`（Prometheus，`yigate_` 前缀）、`/api/v1/status`、运行时配置 API。
 - **内嵌 Web 管理界面**：Vue 3 + antdv-next，随二进制启动，无需额外部署。
 - **多形态部署**：原生二进制、Docker、systemd 服务；运行目录布局在二进制与 Docker 间一致。
@@ -67,6 +67,7 @@
 .
 ├── data/
 │   ├── config.yml        # 运行配置（默认 -config 路径，首次启动自动生成）
+│   ├── traffic.json      # 流量审计持久化数据（自动生成，默认保留 30 天）
 │   └── geosite.dat       # GeoSite 数据
 └── logs/
     └── yigate.log        # 滚动日志
@@ -132,8 +133,10 @@ sudo systemctl start yigate
 | `log` | 级别、格式（json/console）、输出（stdout/file）与轮转参数 |
 | `check_interval` | 健康检查间隔（秒），0 表示停止周期性检查 |
 | `max_connections` | listener 未单独设置时的并发上限兜底，0 表示不限制 |
-| `traffic_audit.enabled` | 流量审计与配额 |
+| `traffic_audit.enabled` | 流量审计与配额；`retention_days` 控制明细保留天数（默认 30） |
 | `tproxy.enabled` | 透明代理（仅 Linux） |
+
+流量明细保存在配置文件同目录的 `traffic.json`（权限 0600），包含用户名与目标域名，请按敏感数据保护。
 
 配置中 `${ENV_NAME}` 会被严格展开，缺失或空值会导致启动失败。
 加载阶段会校验监听地址、TLS 文件、上游 URL/策略/健康检查、访问控制数值与路由枚举，

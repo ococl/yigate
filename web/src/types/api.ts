@@ -75,6 +75,7 @@ export interface TrafficEntrySnapshot {
 
 export interface TrafficSnapshot {
   enabled: boolean
+  retention_days: number
   entries: TrafficEntrySnapshot[]
 }
 
@@ -225,6 +226,7 @@ export interface SettingsView {
   per_user_quota: number
   per_upstream_quota: number
   quota_window_seconds: number
+  traffic_retention_days: number
 
   log_level: string
 }

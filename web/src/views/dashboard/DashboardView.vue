@@ -79,7 +79,9 @@ function formatPercent(value: number): string {
 
 const topUpstreams = computed(() => {
   const grouped = new Map<string, number>()
-  // 先纳入所有已配置上游，即使当前没有流量也占一个位置
+  // 直连始终参与 Top 5 比较，即使当前没有直连流量
+  grouped.set('直连', 0)
+  // 纳入所有已配置上游，即使当前没有流量也占一个位置
   for (const upstream of status.value?.upstreams || []) {
     grouped.set(upstream.name, 0)
   }
@@ -92,9 +94,15 @@ const topUpstreams = computed(() => {
   const list = [...grouped.entries()]
     .map(([name, total]) => ({ name, total }))
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
-    .slice(0, 5)
-  const max = list[0]?.total || 0
-  return list.map((item) => ({
+
+  // 始终保留一个“直连”名额：其余上游只取前 4 名参与比较。
+  const direct = list.find((item) => item.name === '直连') || { name: '直连', total: 0 }
+  const selected = list.filter((item) => item.name !== '直连').slice(0, 4)
+  selected.push(direct)
+  selected.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+
+  const max = selected[0]?.total || 0
+  return selected.map((item) => ({
     ...item,
     ratio: totalBytes.value ? (item.total / totalBytes.value) * 100 : 0,
     width: max ? (item.total / max) * 100 : 0,
@@ -495,7 +503,7 @@ onUnmounted(() => {
                 </div>
 
                 <div class="traffic-bars">
-                  <div class="chart-caption">上游流量 Top 5</div>
+                  <div class="chart-caption">流量 Top 5（含直连）</div>
                   <div class="bar-list">
                     <div
                       v-for="(item, index) in chartRows"

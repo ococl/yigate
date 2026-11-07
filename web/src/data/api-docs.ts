@@ -205,16 +205,18 @@ yigate_connections_total 12345
         path: '/api/v1/traffic',
         summary: '流量审计快照',
         description:
-          '返回流量审计快照，按 user/upstream/target 三维统计字节数。需启用 traffic_audit 配置。',
+          '返回最近保留周期内的流量审计快照，按 user/upstream/target 三维聚合字节数。流量按自然日持久化，默认保留 30 天；热加载配置与重启不会清空历史。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
         responseBody: `{
+  "enabled": true,
+  "retention_days": 30,
   "entries": [
     {
       "user": "alice",
       "upstream": "us-east-1",
-      "target": "example.com:443",
+      "target": "example.com",
       "bytes_in": 1024,
       "bytes_out": 2048,
       "total": 3072
@@ -224,11 +226,13 @@ yigate_connections_total 12345
         example: {
           request: 'curl http://127.0.0.1:8890/api/v1/traffic',
           response: `{
+  "enabled": true,
+  "retention_days": 30,
   "entries": [
     {
       "user": "alice",
       "upstream": "us-east-1",
-      "target": "example.com:443",
+      "target": "example.com",
       "bytes_in": 1024,
       "bytes_out": 2048,
       "total": 3072
@@ -941,6 +945,7 @@ yigate_connections_total 12345
   "dns_type": "doh",
   "doh_url": "https://dns.example/dns-query",
   "traffic_audit_enabled": true,
+  "traffic_retention_days": 30,
   "webui_enabled": false,
   "management_auth_token": "new-strong-token",
   "log_level": "debug"

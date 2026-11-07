@@ -201,6 +201,7 @@ function defaultSettings(): SettingsView {
     per_user_quota: 0,
     per_upstream_quota: 0,
     quota_window_seconds: 3600,
+    traffic_retention_days: 30,
     log_level: 'info',
   }
 }
@@ -424,6 +425,7 @@ async function handleSave() {
     per_user_quota: Math.round(f.per_user_quota),
     per_upstream_quota: Math.round(f.per_upstream_quota),
     quota_window_seconds: f.quota_window_seconds,
+    traffic_retention_days: Math.max(1, Math.round(f.traffic_retention_days || 30)),
     log_level: f.log_level,
   }
 
@@ -866,24 +868,34 @@ onMounted(fetchAll)
               <div v-show="activeSection === 'quota'">
                 <a-card size="small" title="流量审计与配额">
                   <a-row :gutter="16">
-                    <a-col :xs="24" :md="6">
+                    <a-col :xs="24" :md="4">
                       <a-form-item label="启用流量审计">
                         <a-switch v-model:checked="form.traffic_audit_enabled" checked-children="启用" un-checked-children="关闭" />
                       </a-form-item>
                     </a-col>
-                    <a-col :xs="24" :md="6">
+                    <a-col :xs="24" :md="5">
                       <a-form-item label="单用户配额（字节）" tooltip="0 表示不限制">
                         <a-input-number v-model:value="form.per_user_quota" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
-                    <a-col :xs="24" :md="6">
+                    <a-col :xs="24" :md="5">
                       <a-form-item label="单上游配额（字节）" tooltip="0 表示不限制">
                         <a-input-number v-model:value="form.per_upstream_quota" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
-                    <a-col :xs="24" :md="6">
+                    <a-col :xs="24" :md="5">
                       <a-form-item label="配额窗口（秒）" tooltip="0 表示使用默认 1 小时">
                         <a-input-number v-model:value="form.quota_window_seconds" :min="0" style="width: 100%;" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :xs="24" :md="5">
+                      <a-form-item label="流量保留天数" tooltip="默认保留 30 天，0 表示使用默认值">
+                        <a-input-number
+                          v-model:value="form.traffic_retention_days"
+                          :min="0"
+                          :max="3650"
+                          style="width: 100%;"
+                        />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -1001,7 +1013,7 @@ onMounted(fetchAll)
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 1200px;
+  width: 100%;
 }
 
 .settings-header {

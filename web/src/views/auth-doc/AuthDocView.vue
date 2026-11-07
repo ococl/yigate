@@ -202,7 +202,7 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 1200px;
+  width: 100%;
 }
 
 .auth-doc-title {

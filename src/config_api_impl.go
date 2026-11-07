@@ -29,6 +29,13 @@ type configEditor struct {
 // errNotFound 表示资源不存在，用于区分 404 和 400 响应。
 var errNotFound = proxy.ErrNotFound
 
+func effectiveTrafficRetentionDays(days int) int {
+	if days <= 0 {
+		return proxy.DefaultTrafficRetentionDays
+	}
+	return days
+}
+
 // newConfigEditor 创建配置编辑器。
 // apply 回调用于触发热加载（通常是 Server.LoadAndApply）。
 func newConfigEditor(cfgPath string, apply func() error) *configEditor {
@@ -661,10 +668,11 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		RateLimitBurst:     access.RateLimit.Burst,
 		MaxConnsPerUser:    access.MaxConnsPerUser,
 
-		TrafficAuditEnabled: cfg.TrafficAudit.Enabled,
-		PerUserQuota:        cfg.TrafficAudit.PerUserQuota,
-		PerUpstreamQuota:    cfg.TrafficAudit.PerUpstreamQuota,
-		QuotaWindowSec:      time.Duration(cfg.TrafficAudit.QuotaWindow).Seconds(),
+		TrafficAuditEnabled:  cfg.TrafficAudit.Enabled,
+		PerUserQuota:         cfg.TrafficAudit.PerUserQuota,
+		PerUpstreamQuota:     cfg.TrafficAudit.PerUpstreamQuota,
+		QuotaWindowSec:       time.Duration(cfg.TrafficAudit.QuotaWindow).Seconds(),
+		TrafficRetentionDays: effectiveTrafficRetentionDays(cfg.TrafficAudit.RetentionDays),
 
 		LogLevel: cfg.Log.Level,
 	}
@@ -821,6 +829,9 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	}
 	if patch.QuotaWindowSec != nil {
 		cfg.TrafficAudit.QuotaWindow = durationFromSeconds(*patch.QuotaWindowSec)
+	}
+	if patch.TrafficRetentionDays != nil {
+		cfg.TrafficAudit.RetentionDays = *patch.TrafficRetentionDays
 	}
 	if patch.LogLevel != nil {
 		cfg.Log.Level = strings.ToLower(strings.TrimSpace(*patch.LogLevel))

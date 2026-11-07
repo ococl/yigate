@@ -331,7 +331,7 @@ function copyToClipboard(text: string) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 1200px;
+  width: 100%;
 }
 
 .api-docs-title {

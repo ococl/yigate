@@ -222,17 +222,14 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 	router.Start()
 
-	trafficAccounter := proxy.NewTrafficAccounter(cfg.TrafficAudit)
-	proxy.SetGlobalTrafficAccounter(trafficAccounter)
-
 	oldState := s.currentRuntime()
+	var trafficAccounter *proxy.TrafficAccounter
 	newState := &runtimeState{
-		config:           cfg,
-		manager:          mgr,
-		router:           router,
-		geoUpdate:        updater,
-		listeners:        listenerRuntimes,
-		trafficAccounter: trafficAccounter,
+		config:    cfg,
+		manager:   mgr,
+		router:    router,
+		geoUpdate: updater,
+		listeners: listenerRuntimes,
 	}
 
 	// WebUI 开关属于热加载项（未设置时默认启用）：先更新全局状态，
@@ -314,6 +311,20 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	}
 
 	proxy.SetTimeouts(cfg.Timeouts)
+
+	// 热加载时复用同一个流量统计器：上游增删/启停不应清空历史流量。
+	if oldState != nil && oldState.trafficAccounter != nil {
+		trafficAccounter = oldState.trafficAccounter
+		trafficAccounter.Reconfigure(cfg.TrafficAudit)
+	} else {
+		storePath := ""
+		if s.cfgPath != "" {
+			storePath = filepath.Join(baseDir, "traffic.json")
+		}
+		trafficAccounter = proxy.NewTrafficAccounterWithStore(cfg.TrafficAudit, storePath)
+	}
+	newState.trafficAccounter = trafficAccounter
+	proxy.SetGlobalTrafficAccounter(trafficAccounter)
 	s.runtime.Store(newState)
 
 	if !initialLoad {
@@ -366,7 +377,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		if oldState.router != nil {
 			oldState.router.Stop()
 		}
-		if oldState.trafficAccounter != nil {
+		if oldState.trafficAccounter != nil && oldState.trafficAccounter != trafficAccounter {
 			oldState.trafficAccounter.Stop()
 		}
 		for _, lr := range oldState.listeners {

@@ -52,10 +52,11 @@ type SettingsView struct {
 	RateLimitBurst     int      `json:"rate_limit_burst"`
 	MaxConnsPerUser    int      `json:"max_conns_per_user"`
 
-	TrafficAuditEnabled bool    `json:"traffic_audit_enabled"`
-	PerUserQuota        int64   `json:"per_user_quota"`
-	PerUpstreamQuota    int64   `json:"per_upstream_quota"`
-	QuotaWindowSec      float64 `json:"quota_window_seconds"`
+	TrafficAuditEnabled  bool    `json:"traffic_audit_enabled"`
+	PerUserQuota         int64   `json:"per_user_quota"`
+	PerUpstreamQuota     int64   `json:"per_upstream_quota"`
+	QuotaWindowSec       float64 `json:"quota_window_seconds"`
+	TrafficRetentionDays int     `json:"traffic_retention_days"`
 
 	LogLevel string `json:"log_level"`
 }
@@ -107,10 +108,11 @@ type SettingsPatch struct {
 	RateLimitBurst     *int     `json:"rate_limit_burst"`
 	MaxConnsPerUser    *int     `json:"max_conns_per_user"`
 
-	TrafficAuditEnabled *bool    `json:"traffic_audit_enabled"`
-	PerUserQuota        *int64   `json:"per_user_quota"`
-	PerUpstreamQuota    *int64   `json:"per_upstream_quota"`
-	QuotaWindowSec      *float64 `json:"quota_window_seconds"`
+	TrafficAuditEnabled  *bool    `json:"traffic_audit_enabled"`
+	PerUserQuota         *int64   `json:"per_user_quota"`
+	PerUpstreamQuota     *int64   `json:"per_upstream_quota"`
+	QuotaWindowSec       *float64 `json:"quota_window_seconds"`
+	TrafficRetentionDays *int     `json:"traffic_retention_days"`
 
 	LogLevel *string `json:"log_level"`
 }

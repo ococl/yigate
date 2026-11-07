@@ -805,6 +805,9 @@ traffic_audit:
 	if cfg.TrafficAudit.PerUserQuota != 0 {
 		t.Fatalf("per_user_quota = %d, want 0", cfg.TrafficAudit.PerUserQuota)
 	}
+	if cfg.TrafficAudit.RetentionDays != 30 {
+		t.Fatalf("retention_days = %d, want 30", cfg.TrafficAudit.RetentionDays)
+	}
 }
 
 // ============================================================

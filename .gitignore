@@ -52,6 +52,7 @@ logs/
 *.log
 geosite.dat
 upstream-types.txt
+/traffic.json
 *.pid
 *.sock
 *.tmp

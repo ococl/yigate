@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -175,8 +177,110 @@ func TestTrafficAccounterWindowReset(t *testing.T) {
 
 	time.Sleep(120 * time.Millisecond)
 	snap = a.Snapshot()
-	if len(snap.Entries) != 0 {
-		t.Fatalf("expected 0 entries after window reset, got %d", len(snap.Entries))
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected history to survive window reset, got %d entries", len(snap.Entries))
+	}
+	if snap.Entries[0].Total != 300 {
+		t.Fatalf("expected 300 bytes after window reset, got %d", snap.Entries[0].Total)
+	}
+	if usage := a.UserUsage("alice"); usage != 0 {
+		t.Fatalf("quota window usage should reset to 0, got %d", usage)
+	}
+}
+
+func TestTrafficAccounterReconfigurePreservesHistory(t *testing.T) {
+	a := NewTrafficAccounter(TrafficAuditConfig{Enabled: true})
+	defer a.Stop()
+
+	key := TrafficKey{User: "alice", Upstream: "up1", Target: "example.com"}
+	_ = a.Record(key, 100, 200)
+
+	a.Reconfigure(TrafficAuditConfig{
+		Enabled:          true,
+		PerUserQuota:     1000,
+		PerUpstreamQuota: 2000,
+		QuotaWindow:      Duration(2 * time.Hour),
+		RetentionDays:    30,
+	})
+	snap := a.Snapshot()
+	if len(snap.Entries) != 1 || snap.Entries[0].Total != 300 {
+		t.Fatalf("history lost after reconfigure: %+v", snap.Entries)
+	}
+}
+
+func TestTrafficAccounterToggleEnabledPreservesHistory(t *testing.T) {
+	a := NewTrafficAccounter(TrafficAuditConfig{Enabled: true})
+	defer a.Stop()
+
+	key := TrafficKey{User: "alice", Upstream: "up1", Target: "example.com"}
+	_ = a.Record(key, 100, 200)
+
+	a.Reconfigure(TrafficAuditConfig{Enabled: false})
+	a.Reconfigure(TrafficAuditConfig{Enabled: true})
+
+	snap := a.Snapshot()
+	if len(snap.Entries) != 1 || snap.Entries[0].Total != 300 {
+		t.Fatalf("history lost after toggling audit: %+v", snap.Entries)
+	}
+	if usage := a.UserUsage("alice"); usage != 0 {
+		t.Fatalf("quota usage should reset after toggling audit, got %d", usage)
+	}
+}
+
+func TestTrafficAccounterPersistsHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "traffic.json")
+	key := TrafficKey{User: "alice", Upstream: "up1", Target: "example.com"}
+
+	a := NewTrafficAccounterWithStore(TrafficAuditConfig{Enabled: true, RetentionDays: 30}, path)
+	if err := a.Record(key, 100, 200); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	a.Stop()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("traffic history file not written: %v", err)
+	}
+
+	b := NewTrafficAccounterWithStore(TrafficAuditConfig{Enabled: true, RetentionDays: 30}, path)
+	defer b.Stop()
+	snap := b.Snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected 1 persisted entry, got %d", len(snap.Entries))
+	}
+	if snap.Entries[0].BytesIn != 100 || snap.Entries[0].BytesOut != 200 {
+		t.Fatalf("unexpected persisted entry: %+v", snap.Entries[0])
+	}
+	if snap.RetentionDays != 30 {
+		t.Fatalf("retention_days = %d, want 30", snap.RetentionDays)
+	}
+}
+
+func TestTrafficAccounterPrunesExpiredHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "traffic.json")
+	today := time.Now().Format(time.DateOnly)
+	oldDay := time.Now().AddDate(0, 0, -31).Format(time.DateOnly)
+	err := writeTrafficHistory(path, []trafficHistoryDiskEntry{
+		{Day: oldDay, User: "old", Upstream: "up1", Target: "old.example.com", BytesIn: 1, BytesOut: 2},
+		{Day: today, User: "new", Upstream: "up1", Target: "new.example.com", BytesIn: 3, BytesOut: 4},
+	})
+	if err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	a := NewTrafficAccounterWithStore(TrafficAuditConfig{Enabled: true, RetentionDays: 30}, path)
+	defer a.Stop()
+	snap := a.Snapshot()
+	if len(snap.Entries) != 1 || snap.Entries[0].User != "new" {
+		t.Fatalf("expired history not pruned: %+v", snap.Entries)
+	}
+
+	a.Flush()
+	loaded, err := loadTrafficHistory(path)
+	if err != nil {
+		t.Fatalf("load after prune: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Day != today {
+		t.Fatalf("expired entry still on disk: %+v", loaded)
 	}
 }
 
