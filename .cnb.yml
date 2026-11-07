@@ -137,7 +137,7 @@ main:
         - name: vulnerability-scan
           script: |
             cd src
-            go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+            go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
             export PATH="$(go env GOPATH)/bin:$PATH"
             govulncheck ./...
         - name: webui-test
