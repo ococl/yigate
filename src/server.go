@@ -104,16 +104,17 @@ func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 		}
 	}
 	return proxy.StatusSnapshot{
-		Status:        "up",
-		Listen:        strings.Join(listens, ","),
-		Management:    cur.Management,
-		UpstreamCount: len(cur.Upstreams),
-		RouterReady:   s.Router() != nil,
-		ManagerReady:  mgr != nil,
-		PprofEnabled:  pprofEnabled,
-		WebUIEnabled:  proxy.WebUIEnabled(),
-		Ready:         ready,
-		Upstreams:     mgr.UpstreamStatuses(),
+		Status:         "up",
+		Listen:         strings.Join(listens, ","),
+		Management:     cur.Management,
+		UpstreamCount:  len(cur.Upstreams),
+		RouterReady:    s.Router() != nil,
+		ManagerReady:   mgr != nil,
+		PprofEnabled:   pprofEnabled,
+		WebUIEnabled:   proxy.WebUIEnabled(),
+		Ready:          ready,
+		Upstreams:      mgr.UpstreamStatuses(),
+		ProxyEndpoints: buildProxyEndpoints(cur.Listeners),
 	}
 }
 

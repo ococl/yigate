@@ -41,24 +41,35 @@ type UpstreamStatus struct {
 	ActiveConns     int64     `json:"active_conns"`
 }
 
+// ProxyEndpoint 描述一个可用于连接代理的地址，由后端根据监听配置与本机网卡探测。
+type ProxyEndpoint struct {
+	Address       string `json:"address"`
+	Port          int    `json:"port"`
+	Family        string `json:"family,omitempty"`         // ipv4 / ipv6 / hostname
+	InterfaceName string `json:"interface_name,omitempty"` // 网卡名称，仅自动探测的地址有值
+	Loopback      bool   `json:"loopback,omitempty"`
+	TLS           bool   `json:"tls,omitempty"`
+}
+
 // StatusSnapshot 用于 /api/v1/status 返回的进程运行摘要。
 type StatusSnapshot struct {
-	Status        string           `json:"status"`
-	Listen        string           `json:"listen"`
-	Management    string           `json:"management"`
-	UpstreamCount int              `json:"upstream_count"`
-	RouterReady   bool             `json:"router_ready"`
-	ManagerReady  bool             `json:"manager_ready"`
-	PprofEnabled  bool             `json:"pprof_enabled"`
-	WebUIEnabled  bool             `json:"webui_enabled"`
-	Ready         bool             `json:"ready"`
-	Upstreams     []UpstreamStatus `json:"upstreams,omitempty"`
-	Version       string           `json:"version"`
-	Commit        string           `json:"commit"`
-	BuildTime     string           `json:"build_time"`
-	GoVersion     string           `json:"go_version"`
-	UptimeSeconds int64            `json:"uptime_seconds"`
-	Timestamp     time.Time        `json:"timestamp"`
+	Status         string           `json:"status"`
+	Listen         string           `json:"listen"`
+	Management     string           `json:"management"`
+	UpstreamCount  int              `json:"upstream_count"`
+	RouterReady    bool             `json:"router_ready"`
+	ManagerReady   bool             `json:"manager_ready"`
+	PprofEnabled   bool             `json:"pprof_enabled"`
+	WebUIEnabled   bool             `json:"webui_enabled"`
+	Ready          bool             `json:"ready"`
+	Upstreams      []UpstreamStatus `json:"upstreams,omitempty"`
+	ProxyEndpoints []ProxyEndpoint  `json:"proxy_endpoints,omitempty"`
+	Version        string           `json:"version"`
+	Commit         string           `json:"commit"`
+	BuildTime      string           `json:"build_time"`
+	GoVersion      string           `json:"go_version"`
+	UptimeSeconds  int64            `json:"uptime_seconds"`
+	Timestamp      time.Time        `json:"timestamp"`
 }
 
 // ManagementServer 提供管理接口，如健康检查、指标、状态与手动重载等。

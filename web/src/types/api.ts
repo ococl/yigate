@@ -26,6 +26,15 @@ export interface UpstreamStatus {
   active_conns: number
 }
 
+export interface ProxyEndpoint {
+  address: string
+  port: number
+  family?: string
+  interface_name?: string
+  loopback?: boolean
+  tls?: boolean
+}
+
 export interface StatusSnapshot {
   status: string
   listen: string
@@ -37,6 +46,7 @@ export interface StatusSnapshot {
   webui_enabled?: boolean
   ready?: boolean
   upstreams?: UpstreamStatus[]
+  proxy_endpoints?: ProxyEndpoint[]
   version: string
   commit: string
   build_time: string

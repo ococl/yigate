@@ -50,7 +50,7 @@ export const apiGroups: ApiGroup[] = [
         params: [],
         responseBody: `{
   "status": "up",
-  "listen": "127.0.0.1:1080",
+  "listen": "0.0.0.0:1080",
   "upstream_count": 3,
   "router_ready": true,
   "manager_ready": true,
@@ -60,7 +60,7 @@ export const apiGroups: ApiGroup[] = [
           request: 'curl http://127.0.0.1:8890/health',
           response: `{
   "status": "up",
-  "listen": "127.0.0.1:1080",
+  "listen": "0.0.0.0:1080",
   "upstream_count": 3,
   "router_ready": true,
   "manager_ready": true,
@@ -108,32 +108,63 @@ yigate_connections_total 12345
         method: 'GET',
         path: '/api/v1/status',
         summary: '运行状态摘要',
-        description: '返回进程运行状态摘要，包含监听地址、管理端口、上游数量、pprof 与内置 WebUI 开关等。',
+        description:
+          '返回进程运行状态摘要，包含监听地址、管理端口、上游数量、pprof 与内置 WebUI 开关，以及自动探测的可用代理地址等。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
         responseBody: `{
   "status": "up",
-  "listen": "127.0.0.1:1080",
+  "listen": "0.0.0.0:1080",
   "management": "127.0.0.1:8890",
   "upstream_count": 3,
   "router_ready": true,
   "manager_ready": true,
   "pprof_enabled": false,
   "webui_enabled": true,
+  "proxy_endpoints": [
+    {
+      "address": "192.168.1.10",
+      "port": 1080,
+      "family": "ipv4",
+      "interface_name": "eth0"
+    },
+    {
+      "address": "127.0.0.1",
+      "port": 1080,
+      "family": "ipv4",
+      "interface_name": "lo",
+      "loopback": true
+    }
+  ],
   "timestamp": "2025-01-01T00:00:00Z"
 }`,
         example: {
           request: 'curl http://127.0.0.1:8890/api/v1/status',
           response: `{
   "status": "up",
-  "listen": "127.0.0.1:1080",
+  "listen": "0.0.0.0:1080",
   "management": "127.0.0.1:8890",
   "upstream_count": 3,
   "router_ready": true,
   "manager_ready": true,
   "pprof_enabled": false,
   "webui_enabled": true,
+  "proxy_endpoints": [
+    {
+      "address": "192.168.1.10",
+      "port": 1080,
+      "family": "ipv4",
+      "interface_name": "eth0"
+    },
+    {
+      "address": "127.0.0.1",
+      "port": 1080,
+      "family": "ipv4",
+      "interface_name": "lo",
+      "loopback": true
+    }
+  ],
   "timestamp": "2025-01-01T00:00:00Z"
 }`,
         },
