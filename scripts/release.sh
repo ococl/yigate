@@ -10,10 +10,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/src"
 WEB_DIR="${REPO_ROOT}/web"
 WEBUI_DIST="${SRC_DIR}/proxy/webui_dist"
-RELEASE_DIR="${REPO_ROOT}/release"
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
-
-source "${SCRIPTS_DIR}/platforms.sh"
 
 VERSION="${1:-}"
 if [[ -z "${VERSION}" ]]; then
@@ -52,8 +49,6 @@ fi
 COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
 BUILD_TIME="$(git -C "${REPO_ROOT}" log -1 --format=%cI "${TAG}")"
 
-LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
-
 echo "Building yigate ${TAG} (commit ${COMMIT:0:12}, built ${BUILD_TIME})"
 
 # 前端必须先构建并嵌入，禁止发布占位 WebUI。
@@ -70,48 +65,16 @@ if ! find "${WEBUI_DIST}/assets" -maxdepth 1 -type f -name '*.js' -print -quit |
   exit 1
 fi
 
-# 清空并重建 release staging
-rm -rf "${RELEASE_DIR}"
-mkdir -p "${RELEASE_DIR}"
+if ! command -v syft >/dev/null 2>&1; then
+  echo "error: 正式发布需要 syft 生成 SBOM" >&2
+  exit 1
+fi
 
-# 依赖校验
-(
-  cd "${SRC_DIR}"
-  GOPROXY=https://goproxy.cn,direct go mod verify
-)
+# 编译、打包、SBOM 与校验和统一交给唯一构建入口。
+YIGATE_VERSION="${VERSION}" \
+YIGATE_COMMIT="${COMMIT}" \
+YIGATE_BUILD_TIME="${BUILD_TIME}" \
+YIGATE_REQUIRE_SBOM=1 \
+  "${SCRIPTS_DIR}/ci-build.sh" "${VERSION}"
 
-# 跨平台构建
-for platform in $(all_platforms); do
-  name="$(output_name "${VERSION}" "${platform}")"
-  env_str="$(build_env "${platform}")"
-  echo "Building ${name}..."
-  (
-    cd "${SRC_DIR}"
-    env ${env_str} CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct \
-      go build -trimpath -mod=readonly -ldflags "${LDFLAGS}" \
-      -o "${RELEASE_DIR}/${name}" .
-  )
-done
-
-# 全平台打包
-for platform in $(all_platforms); do
-  "${SCRIPTS_DIR}/package.sh" "${VERSION}" "${platform}"
-done
-
-# 删除裸二进制
-for platform in $(all_platforms); do
-  name="$(output_name "${VERSION}" "${platform}")"
-  rm -f "${RELEASE_DIR}/${name}"
-done
-
-# 生成 SBOM
-syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/yigate-${VERSION}.spdx.json"
-
-# 生成校验和
-(
-  cd "${RELEASE_DIR}"
-  find . -maxdepth 1 -type f ! -name '.version' ! -name 'SHA256SUMS' -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS
-  sha256sum -c SHA256SUMS
-)
-
-echo "Release artifacts written to ${RELEASE_DIR}"
+echo "Release artifacts written to ${REPO_ROOT}/release"

@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ci-build.sh — CI 环境下的跨平台构建脚本。
+# ci-build.sh — Unix 环境下唯一的正式制品构建入口。
 #
-# 功能: 依赖下载 → 跨平台编译 → 全平台打包 → SBOM(可选) → 校验和
+# 功能: 依赖校验 → 跨平台编译 → 全平台打包 → SBOM → 校验和
 # 用法: scripts/ci-build.sh [version]
-#   version 可选，未提供时调用 scripts/version.sh 自动确定
+#   version 可选，未提供时调用 scripts/version.sh 自动确定。
+#
+# 可覆盖环境变量:
+#   YIGATE_VERSION       版本号（优先于位置参数）
+#   YIGATE_COMMIT        构建提交
+#   YIGATE_BUILD_TIME    构建时间
+#   YIGATE_REQUIRE_SBOM  为 1 时 SBOM 缺失即失败（正式发布使用）
 #
 # 产物输出到 release/ 目录，版本号写入 release/.version 供下游阶段使用。
 # 产物仅包含压缩归档 (tar.gz/zip) + SHA256SUMS，不含裸二进制。
@@ -22,8 +28,8 @@ if ! find "${SRC_DIR}/proxy/webui_dist/assets" -maxdepth 1 -type f -name '*.js' 
   exit 1
 fi
 
-# 确定版本号
-VERSION="${1:-}"
+# 确定版本号和构建元数据；正式发布由 release.sh 显式覆盖。
+VERSION="${YIGATE_VERSION:-${1:-}}"
 if [[ -z "$VERSION" ]]; then
     VERSION="$(bash "${SCRIPTS_DIR}/version.sh")"
 fi
@@ -41,8 +47,8 @@ if [[ ! -d "${SRC_DIR}/proxy/webui_dist/assets" ]]; then
     fi
 fi
 
-COMMIT="${CNB_COMMIT:-$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)}"
-BUILD_TIME="${CNB_BUILD_START_TIME:-$(git -C "${REPO_ROOT}" log -1 --format=%cI 2>/dev/null || echo unknown)}"
+COMMIT="${YIGATE_COMMIT:-${CNB_COMMIT:-$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)}}"
+BUILD_TIME="${YIGATE_BUILD_TIME:-${CNB_BUILD_START_TIME:-$(git -C "${REPO_ROOT}" log -1 --format=%cI 2>/dev/null || echo unknown)}}"
 
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
 
@@ -53,11 +59,12 @@ rm -rf "${RELEASE_DIR}"
 mkdir -p "${RELEASE_DIR}"
 echo "$VERSION" > "${RELEASE_DIR}/.version"
 
-# 下载依赖
-echo "--- Downloading dependencies ---"
+# 校验并下载依赖
+echo "--- Verifying dependencies ---"
 (
     cd "${SRC_DIR}"
     GOPROXY=https://goproxy.cn,direct go mod download
+    GOPROXY=https://goproxy.cn,direct go mod verify
 )
 
 # 跨平台编译
@@ -69,7 +76,7 @@ for platform in $(all_platforms); do
     (
         cd "${SRC_DIR}"
         env ${env_str} CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct \
-            go build -trimpath -ldflags "${LDFLAGS}" \
+            go build -trimpath -mod=readonly -ldflags "${LDFLAGS}" \
             -o "${RELEASE_DIR}/${name}" .
     )
 done
@@ -87,10 +94,13 @@ for platform in $(all_platforms); do
     rm -f "${RELEASE_DIR}/${name}"
 done
 
-# 生成 SBOM (如果 syft 可用)
+# 生成 SBOM；正式发布要求必须产出
 if command -v syft >/dev/null 2>&1; then
     echo "--- Generating SBOM ---"
     syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/yigate-${VERSION}.spdx.json"
+elif [[ "${YIGATE_REQUIRE_SBOM:-0}" == "1" ]]; then
+    echo "error: YIGATE_REQUIRE_SBOM=1 但未安装 syft" >&2
+    exit 1
 else
     echo "--- Skipping SBOM (syft not installed) ---"
 fi

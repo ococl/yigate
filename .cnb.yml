@@ -29,6 +29,10 @@ dev:
           script: cd src && go vet ./...
         - name: test
           script: cd src && go test -timeout 120s ./...
+        - name: webui-test
+          image: node:22.18-alpine
+          script: |
+            cd web && npm ci && npm test
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -43,7 +47,14 @@ dev:
         - name: build
           script: |
             rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
+            mkdir -p build
+            (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
+        - name: webui-e2e
+          image: mcr.microsoft.com/playwright:v1.65.0-noble
+          script: |
+            cd web && npm ci
+            YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         - name: prepare-release-notes
           script: |
             cat > release/RELEASE_NOTES.md <<EOF
@@ -108,6 +119,10 @@ main:
           script: cd src && go vet ./...
         - name: test
           script: cd src && go test -timeout 120s ./...
+        - name: webui-test
+          image: node:22.18-alpine
+          script: |
+            cd web && npm ci && npm test
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -122,7 +137,14 @@ main:
         - name: build
           script: |
             rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
+            mkdir -p build
+            (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
+        - name: webui-e2e
+          image: mcr.microsoft.com/playwright:v1.65.0-noble
+          script: |
+            cd web && npm ci
+            YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         - name: prepare-release-notes
           script: |
             cat > release/RELEASE_NOTES.md <<EOF
@@ -176,6 +198,10 @@ main:
           script: cd src && go vet ./...
         - name: test
           script: cd src && go test -timeout 120s ./...
+        - name: webui-test
+          image: node:22.18-alpine
+          script: |
+            cd web && npm ci && npm test
       failStages:
         - name: pr-check-failed
           script: echo "PR 检查未通过，请修复后重新提交"
@@ -200,6 +226,10 @@ main:
           script: cd src && go vet ./...
         - name: test
           script: cd src && go test -timeout 120s ./...
+        - name: webui-test
+          image: node:22.18-alpine
+          script: |
+            cd web && npm ci && npm test
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -214,7 +244,14 @@ main:
         - name: build
           script: |
             rm -rf src/proxy/webui_dist && mkdir -p src/proxy/webui_dist && cp -r web/dist/* src/proxy/webui_dist/
+            mkdir -p build
+            (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
+        - name: webui-e2e
+          image: mcr.microsoft.com/playwright:v1.65.0-noble
+          script: |
+            cd web && npm ci
+            YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         - name: verify-release
           script: bash scripts/check-release-files.sh "$BUILD_VERSION"
         - name: generate-changelog

@@ -52,7 +52,14 @@ npm run build    # 输出到 web/dist/
   ```
 
 - 仅改动 `src/proxy` 时至少运行 `go test ./proxy`；涉及配置、启动、热加载或管理接口时运行全部测试。
-- 前端：`cd web && npm run type-check && npm run build`。
+- 前端：`cd web && npm run type-check && npm test && npm run build`。
+- 管理页面或登录流程改动需运行真实浏览器 E2E：
+
+  ```bash
+  make web-e2e-install   # 首次安装 Chromium
+  make web-e2e
+  ```
+
 - 协议入口改动需覆盖 HTTP、CONNECT、SOCKS5 三类路径；路由改动补充 `router` / `route_cache` / `socks5h` 测试；上游改动关注优先级、权重、健康检查与指定上游白名单。
 
 ## 提交规范
@@ -88,6 +95,7 @@ refactor: 将默认配置路径从 config/ 迁移到 data/config.yml
 - 预览版由 `dev` / `main` 分支推送自动构建（详见 `VERSIONING.md`）。
 - 正式版由 `vX.Y.Z` 标签推送触发，请先确认测试与 changelog 就绪。
 - 发布构建脚本：`./scripts/release.sh X.Y.Z`；平台清单见 `scripts/platforms.sh`。
+- 正式发布与 CI 产物统一由 `scripts/ci-build.sh` 编译、打包、生成 SBOM 和校验和。
 
 ## 行为准则
 

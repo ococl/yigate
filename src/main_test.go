@@ -94,14 +94,27 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		}
 	}
 
-	// release.sh 已重写，使用 platforms.sh 作为唯一平台清单
+	// release.sh 负责发布前校验与 WebUI 构建，制品统一由 ci-build.sh 生成。
 	release, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "release.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"set -euo pipefail", "source", "platforms.sh", "npm ci", "npm run build", "WebUI 构建产物缺少 JS assets", "go build -trimpath", "-X main.version", "-X main.commit", "-X main.buildTime", "git -C"} {
+	for _, want := range []string{"set -euo pipefail", "npm ci", "npm run build", "WebUI 构建产物缺少 JS assets", "\"${SCRIPTS_DIR}/ci-build.sh\"", "YIGATE_REQUIRE_SBOM=1", "git -C"} {
 		if !bytes.Contains(release, []byte(want)) {
 			t.Fatalf("release.sh missing %q", want)
+		}
+	}
+	if bytes.Contains(release, []byte("for platform in $(all_platforms)")) {
+		t.Fatalf("release.sh must not duplicate platform build loops")
+	}
+
+	ciBuild, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "ci-build.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"source", "platforms.sh", "YIGATE_VERSION", "YIGATE_COMMIT", "YIGATE_BUILD_TIME", "YIGATE_REQUIRE_SBOM", "go mod verify", "-mod=readonly"} {
+		if !bytes.Contains(ciBuild, []byte(want)) {
+			t.Fatalf("ci-build.sh missing %q", want)
 		}
 	}
 

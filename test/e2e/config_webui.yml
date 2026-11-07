@@ -1,0 +1,48 @@
+# WebUI Playwright E2E 专用配置。
+# 固定测试 Token 仅用于本地/CI 隔离实例，不得用于生产环境。
+
+listen: "127.0.0.1:4480"
+management: "127.0.0.1:8894"
+management_auth_token: "yigate-webui-e2e-token"
+users: {}
+
+upstreams: []
+
+routing:
+  final: direct
+  geosite:
+    auto_update: false
+  socks5h_redirect:
+    enabled: false
+  rules: []
+
+destination_policy:
+  protect_private: false
+  default_action: allow
+  deny_cidrs:
+    - "169.254.0.0/16"
+
+socks5:
+  allow_bind: false
+  allow_udp_associate: false
+
+access_control:
+  allowed_clients: []
+  rate_limit:
+    connections_per_second: 0
+    burst: 0
+  max_conns_per_user: 0
+
+timeouts:
+  dial: 10s
+  handshake: 10s
+  http_exchange: 60s
+  tunnel_idle: 5m
+
+log:
+  level: warn
+  format: json
+  output: stdout
+
+check_interval: 3
+max_connections: 64

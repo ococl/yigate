@@ -169,8 +169,20 @@ make build
 测试：
 
 ```bash
+# Go 全量测试与竞态检测
 cd src && GOPROXY=https://goproxy.cn,direct go test ./...
+cd src && GOPROXY=https://goproxy.cn,direct go test -race ./...
+
+# 前端单元/API 契约测试
+make web-test
+
+# 真实浏览器 E2E（首次需安装 Chromium）
+make web-e2e-install
+make web-e2e
 ```
+
+`release.sh` 只负责发布门禁与 WebUI 构建，跨平台编译、打包、SBOM 和校验和统一由
+`scripts/ci-build.sh` 生成，避免 CI 与正式发布出现两套制品流程。
 
 ---
 

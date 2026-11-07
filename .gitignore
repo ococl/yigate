@@ -27,6 +27,9 @@ vite.config.d.ts
 .stylelintcache
 .npm/
 .pnpm-store/
+web/playwright-report/
+web/test-results/
+web/blob-report/
 
 # 注意：web/src/auto-imports.d.ts 与 web/src/components.d.ts 需纳入版本控制，
 # 以便干净构建（Docker/CI）时 vue-tsc 能找到全局类型声明。

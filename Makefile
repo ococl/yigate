@@ -1,4 +1,4 @@
-.PHONY: all build test cross clean release lint web web-build web-embed web-dev web-install
+.PHONY: all build test cross clean release lint web web-build web-embed web-dev web-install web-test web-e2e web-e2e-install
 
 GO ?= go
 GOPROXY ?= https://goproxy.cn,direct
@@ -66,5 +66,16 @@ web-dev:
 
 web-build:
 	cd $(WEB_DIR) && npm run build
+
+web-test:
+	cd $(WEB_DIR) && npm test
+
+web-e2e-install:
+	cd $(WEB_DIR) && npx playwright install --with-deps chromium
+
+web-e2e: web-embed
+	@mkdir -p $(BUILD_DIR)
+	cd $(SRC_DIR) && GOPROXY=$(GOPROXY) go build -o ../$(BUILD_DIR)/yigate-e2e .
+	cd $(WEB_DIR) && npm run test:e2e
 
 web: web-build

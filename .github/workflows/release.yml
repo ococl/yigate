@@ -27,6 +27,19 @@ jobs:
           go-version: '1.21'
           cache-dependency-path: ./src/go.sum
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: npm
+          cache-dependency-path: ./web/package-lock.json
+
+      - name: Frontend unit tests
+        working-directory: ./web
+        run: |
+          npm ci
+          npm test
+
       - name: Download dependencies
         env:
           GOPROXY: https://goproxy.cn,direct
@@ -99,8 +112,13 @@ jobs:
       - name: Check release files
         run: ./scripts/check-release-files.sh "${GITHUB_REF_NAME#v}"
 
-      - name: Smoke test Linux binary
-        run: ./release/yigate-${GITHUB_REF_NAME#v}-linux-amd64 -version
+      - name: Smoke test Linux archive
+        run: |
+          smoke_dir="${RUNNER_TEMP}/yigate-smoke"
+          rm -rf "${smoke_dir}"
+          mkdir -p "${smoke_dir}"
+          tar -xzf "release/yigate-${GITHUB_REF_NAME#v}-linux-amd64.tar.gz" -C "${smoke_dir}"
+          "${smoke_dir}/yigate" -version
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
