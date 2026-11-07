@@ -1,0 +1,28 @@
+# 统一换行符：仓库内一律使用 LF，避免 Windows/Linux 混用导致
+# 全文件 diff 抖动、shell 脚本在容器内因 CRLF 无法执行。
+* text=auto eol=lf
+
+# Windows 批处理脚本保留 CRLF，否则 cmd.exe 解析异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资源不做换行符转换与文本 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.dat binary
+*.gz binary
+*.zip binary
+*.tar binary
+
+# 构建产物与占位文件不参与 diff 统计
+src/proxy/webui_dist/index.html linguist-generated=true
+web/package-lock.json linguist-generated=true
+src/go.sum linguist-generated=true

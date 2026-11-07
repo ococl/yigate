@@ -2,7 +2,7 @@
 FROM node:20-alpine AS webui
 WORKDIR /webui
 COPY web/ ./web/
-RUN cd web && npm install && npm run build
+RUN cd web && npm ci && npm run build
 
 # 构建阶段
 FROM golang:1.21-alpine AS builder

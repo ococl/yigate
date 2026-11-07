@@ -156,9 +156,10 @@ sudo systemctl enable --now yigate
 # Go 后端
 cd src && GOPROXY=https://goproxy.cn,direct go build -o yigate .
 
-# 前端（独立项目）
-cd web && npm install && npm run build
+# 前端（独立项目，Node ^20.19 或 >=22.12，见 .nvmrc）
+cd web && npm ci && npm run build
 # 构建后需将 web/dist 内容拷贝到 src/proxy/webui_dist 并重新编译 Go 以嵌入 WebUI
+# （直接 make build 会自动完成这两步）
 
 # 全量构建 / 发布
 make build

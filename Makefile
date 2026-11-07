@@ -53,7 +53,7 @@ lint:
 # --- Frontend (web/) ---
 
 web-install:
-	cd $(WEB_DIR) && npm install
+	cd $(WEB_DIR) && npm ci
 
 web-dev:
 	cd $(WEB_DIR) && npm run dev

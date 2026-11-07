@@ -2,21 +2,109 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YiGate</title>
-    <script type="module" crossorigin src="/assets/index-BNfSECbx.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/runtime-core.esm-bundler-BnWIXDoN.js">
-    <link rel="modulepreload" crossorigin href="/assets/focus-CSbhcdP4.js">
-    <link rel="modulepreload" crossorigin href="/assets/useApi-CROJJdhE-CCAt816e.js">
-    <link rel="modulepreload" crossorigin href="/assets/config-provider-CEhvdsDS.js">
-    <link rel="modulepreload" crossorigin href="/assets/styleChecker-X17PkKGC.js">
-    <link rel="modulepreload" crossorigin href="/assets/ColorPresets-_Utm4ckv.js">
-    <link rel="modulepreload" crossorigin href="/assets/button-8t-MIoYQ.js">
-    <link rel="modulepreload" crossorigin href="/assets/isNonNullable-Duda0q5g.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-DZEqoNmZ.css">
+    <title>YiGate · WebUI 未构建</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1f2328;
+        --muted: #59636e;
+        --bg: #f6f8fa;
+        --card: #ffffff;
+        --border: #d8dee4;
+        --code-bg: #eff2f5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e6edf3;
+          --muted: #9198a1;
+          --bg: #0d1117;
+          --card: #161b22;
+          --border: #30363d;
+          --code-bg: #21262d;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.7 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+          'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 640px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 28px 32px;
+      }
+      h1 { margin: 0 0 4px; font-size: 20px; }
+      p { margin: 0 0 12px; color: var(--muted); }
+      p.lead { color: var(--fg); }
+      ol { margin: 0 0 16px; padding-left: 20px; }
+      li { margin-bottom: 8px; }
+      code, pre {
+        font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+        font-size: 13px;
+      }
+      code {
+        background: var(--code-bg);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      pre {
+        margin: 6px 0 0;
+        padding: 10px 12px;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow-x: auto;
+      }
+      hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+      footer { font-size: 12px; color: var(--muted); }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <main>
+      <h1>YiGate WebUI 未构建</h1>
+      <p class="lead">
+        当前二进制是用仓库内的占位页面构建的，管理 API 可正常使用，但内置前端尚未打包。
+      </p>
+
+      <p>构建带前端的二进制：</p>
+      <pre><code>make build          # 构建前端 → 拷贝到 src/proxy/webui_dist → 编译 Go 二进制</code></pre>
+
+      <p style="margin-top: 16px;">或者仅构建前端后重新编译：</p>
+      <pre><code>cd web &amp;&amp; npm ci &amp;&amp; npm run build
+rm -rf src/proxy/webui_dist &amp;&amp; mkdir -p src/proxy/webui_dist
+cp -r web/dist/* src/proxy/webui_dist/
+cd src &amp;&amp; go build -o ../build/yigate .</code></pre>
+
+      <hr />
+
+      <ol>
+        <li>
+          直接使用官方镜像即可获得完整前端：
+          <code>docker compose up -d</code>（镜像内会构建前端）。
+        </li>
+        <li>
+          构建完成后如需保持工作区干净，可恢复占位页：
+          <code>git checkout -- src/proxy/webui_dist/index.html</code>。
+        </li>
+        <li>
+          不想启用前端时，可在配置中设置 <code>webui.enabled: false</code>，
+          管理端口将仅提供 API。
+        </li>
+      </ol>
+
+      <footer>YiGate · 轻量级统一代理网关</footer>
+    </main>
   </body>
 </html>

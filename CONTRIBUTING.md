@@ -25,12 +25,14 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 
 ```bash
 cd web
-npm install
+npm ci           # 按 package-lock.json 安装（Node 版本见 .nvmrc）
 npm run dev      # 开发服务器，代理 /api 到 127.0.0.1:8890
 npm run build    # 输出到 web/dist/
 ```
 
-前端改动若要进入二进制，需将 `web/dist/` 内容拷贝到 `src/proxy/webui_dist/` 后重新编译 Go。
+前端改动若要进入二进制，需将 `web/dist/` 内容拷贝到 `src/proxy/webui_dist/` 后重新编译 Go；
+`make build` 已包含这两步。构建后如需保持工作区干净，执行
+`git checkout -- src/proxy/webui_dist/index.html` 还原占位页。
 
 ## 代码约定
 

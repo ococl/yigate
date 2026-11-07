@@ -127,15 +127,18 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 ./yigate -config data/config.yml run
 ```
 
-前端（`web/` 目录，独立管理）：
+前端（`web/` 目录，独立管理；Node 版本见 `.nvmrc`，依赖安装统一用 `npm ci` 以保证与 `package-lock.json` 一致）：
 
 ```bash
 cd web
-npm install
+npm ci            # 按锁文件安装依赖
 npm run dev       # 开发服务器
 npm run build     # 生产构建（输出到 web/dist/，需拷贝到 src/proxy/webui_dist/ 后重新编译 Go 以嵌入）
 npm run preview   # 预览构建产物
 ```
+
+`src/proxy/webui_dist/index.html` 是被跟踪的占位页（保证纯 `go build`/`go vet` 的 `//go:embed` 有文件可嵌入），
+`make build` 会用真实产物覆盖它；构建后可用 `git checkout -- src/proxy/webui_dist/index.html` 还原，保持工作区干净。
 
 或通过 Makefile：
 
