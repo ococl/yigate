@@ -243,7 +243,8 @@ npm run build       # 构建即验证
 - `GET/POST /api/v1/config/users`：列出/添加用户。
 - `PUT /api/v1/config/users/{username}`：修改用户密码。
 - `DELETE /api/v1/config/users/{username}`：删除用户。
-- `GET/PUT /api/v1/config/settings`：读取/部分更新全局设置（含 `webui_enabled`；多 listener 模式下 socks5/访问控制/并发上限的修改会同步到各 listener）。
+- `GET/PUT /api/v1/config/settings`：读取/部分更新全局设置（含 `webui_enabled` 与 `management_auth_token`；多 listener 模式下 socks5/访问控制/并发上限的修改会同步到各 listener）。
+- `GET /api/v1/status` 返回 `pprof_enabled` 与 `webui_enabled`，前端据此展示开关状态。
 - 配置写入前校验，热加载失败时自动回滚配置文件。
 - `/debug/pprof/*`：仅在 `enable_pprof: true` 时启用。
 

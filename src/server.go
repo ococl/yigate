@@ -111,6 +111,7 @@ func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 		RouterReady:   s.Router() != nil,
 		ManagerReady:  mgr != nil,
 		PprofEnabled:  pprofEnabled,
+		WebUIEnabled:  proxy.WebUIEnabled(),
 		Ready:         ready,
 		Upstreams:     mgr.UpstreamStatuses(),
 	}
@@ -397,18 +398,19 @@ func (s *Server) currentListener(addr string) net.Listener {
 }
 
 func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
-	listenAddrs := make([]string, 0, len(cfg.Listeners))
-	for _, lc := range cfg.Listeners {
-		listenAddrs = append(listenAddrs, lc.Listen)
-	}
-	listen := cfg.Listen
-	if len(listenAddrs) > 0 {
-		listen = strings.Join(listenAddrs, ",")
-	}
 	mgmt := proxy.NewManagementServer(func() proxy.HealthStatus {
 		curCfg := s.Config()
 		if curCfg == nil {
 			return proxy.HealthStatus{Status: "up"}
+		}
+		// 监听地址必须在每次请求时从当前配置读取：热加载/复用管理服务时闭包内捕获的旧值会过期。
+		listen := curCfg.Listen
+		if len(curCfg.Listeners) > 0 {
+			addrs := make([]string, 0, len(curCfg.Listeners))
+			for _, lc := range curCfg.Listeners {
+				addrs = append(addrs, lc.Listen)
+			}
+			listen = strings.Join(addrs, ",")
 		}
 		return proxy.HealthStatus{
 			Status:        "up",

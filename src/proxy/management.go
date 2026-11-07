@@ -50,6 +50,7 @@ type StatusSnapshot struct {
 	RouterReady   bool             `json:"router_ready"`
 	ManagerReady  bool             `json:"manager_ready"`
 	PprofEnabled  bool             `json:"pprof_enabled"`
+	WebUIEnabled  bool             `json:"webui_enabled"`
 	Ready         bool             `json:"ready"`
 	Upstreams     []UpstreamStatus `json:"upstreams,omitempty"`
 	Version       string           `json:"version"`

@@ -23,8 +23,12 @@ const request = axios.create({
 })
 
 // 请求拦截器：注入 Token
+// 调用方显式指定 Authorization 时（如登录页验证尚未写入的令牌）不覆盖，避免被旧令牌污染
 request.interceptors.request.use(
   (config) => {
+    if (config.headers?.Authorization) {
+      return config
+    }
     const token = getToken()
     if (token) {
       config.headers.Authorization = `Bearer ${token}`

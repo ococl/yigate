@@ -96,6 +96,14 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
         会被环境变量展开。环境变量前缀为 <a-typography-text code>YIGATE_</a-typography-text>。
         缺失或空值会导致启动失败。
       </a-typography-paragraph>
+
+      <a-typography-title :level="5">令牌轮换</a-typography-title>
+      <a-typography-paragraph type="secondary">
+        令牌可在「系统设置 → 管理面板与安全」中修改，或通过
+        <a-typography-text code>PUT /api/v1/config/settings</a-typography-text> 传入
+        <a-typography-text code>management_auth_token</a-typography-text>。修改后立即生效且无需重启，
+        旧令牌当场失效，当前会话会被强制重新登录。清除令牌（传空字符串）仅在管理端口绑定回环地址时允许。
+      </a-typography-paragraph>
     </a-card>
   </div>
 </template>

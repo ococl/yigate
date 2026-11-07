@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import { getStatus, reloadConfig } from '@/api/system'
 import { getSettings, updateSettings } from '@/api/settings'
+import { useAuthStore } from '@/stores/auth'
 import type { SettingsView, SettingsPatch, StatusSnapshot } from '@/types/api'
+
+const router = useRouter()
+const authStore = useAuthStore()
 
 const status = ref<StatusSnapshot | null>(null)
 const settings = ref<SettingsView | null>(null)
 const loading = ref(false)
 const reloading = ref(false)
 const saving = ref(false)
+const clearingToken = ref(false)
 const activeTab = ref('status')
+// 新管理令牌输入：留空表示不修改，避免每次保存都覆盖现有令牌
+const tokenInput = ref('')
 
 function defaultSettings(): SettingsView {
   return {
@@ -83,6 +91,7 @@ const finalOptions = [
   { label: 'auto（按规则与探测自动决定）', value: 'auto' },
   { label: 'proxy（默认走上游）', value: 'proxy' },
   { label: 'direct（默认直连）', value: 'direct' },
+  { label: 'deny（拒绝未命中流量）', value: 'deny' },
 ]
 const autoModeOptions = [
   { label: 'direct_first（直连优先，失败后走上游）', value: 'direct_first' },
@@ -119,11 +128,30 @@ function formatUptime(seconds: number): string {
   return `${m} 分钟`
 }
 
-function parsePorts(text: string): number[] {
-  return text
-    .split(/[,\s]+/)
-    .map((v) => Number(v.trim()))
-    .filter((v) => Number.isInteger(v) && v > 0 && v <= 65535)
+// 实际生效的监听地址：多 listener 模式下由后端以逗号拼接返回
+const listenList = computed(() =>
+  (settings.value?.listen || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean),
+)
+const multiListener = computed(() => listenList.value.length > 1)
+
+// 端口输入允许 1-65535 的整数，非法片段单独提示，避免后端校验失败后才发现
+function parsePorts(text: string): { ports: number[]; invalid: string[] } {
+  const ports: number[] = []
+  const invalid: string[] = []
+  for (const raw of text.split(/[,\s]+/)) {
+    const v = raw.trim()
+    if (!v) continue
+    const n = Number(v)
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+      invalid.push(v)
+      continue
+    }
+    ports.push(n)
+  }
+  return { ports, invalid }
 }
 
 function applySettingsToForm(view: SettingsView) {
@@ -131,6 +159,7 @@ function applySettingsToForm(view: SettingsView) {
   form.value = { ...view }
   denyPortsText.value = (view.deny_ports || []).join(', ')
   allowPortsText.value = (view.allow_ports || []).join(', ')
+  tokenInput.value = ''
 }
 
 async function fetchAll() {
@@ -181,10 +210,23 @@ async function handleSave() {
     message.warning('启用 GeoSite 自动更新时，更新间隔必须大于 0')
     return
   }
+  const denyParsed = parsePorts(denyPortsText.value)
+  const allowParsed = parsePorts(allowPortsText.value)
+  const invalidPorts = [...denyParsed.invalid, ...allowParsed.invalid]
+  if (invalidPorts.length > 0) {
+    message.warning(`端口需为 1-65535 的整数，请修正：${invalidPorts.join(', ')}`)
+    return
+  }
+  const newToken = tokenInput.value.trim()
+  if (newToken && newToken.length < 8) {
+    message.warning('管理令牌至少 8 位，过短的令牌容易被暴力破解')
+    return
+  }
 
   const patch: SettingsPatch = {
     check_interval_seconds: Math.round(f.check_interval_seconds),
     max_connections: Math.round(f.max_connections),
+    webui_enabled: f.webui_enabled,
     enable_pprof: f.enable_pprof,
     socks5_allow_bind: f.socks5_allow_bind,
     socks5_allow_udp_associate: f.socks5_allow_udp_associate,
@@ -213,8 +255,8 @@ async function handleSave() {
     allow_cidrs: f.allow_cidrs || [],
     deny_domains: f.deny_domains || [],
     allow_domains: f.allow_domains || [],
-    deny_ports: parsePorts(denyPortsText.value),
-    allow_ports: parsePorts(allowPortsText.value),
+    deny_ports: denyParsed.ports,
+    allow_ports: allowParsed.ports,
     allowed_clients: f.allowed_clients || [],
     rate_limit_connections_per_second: Math.round(f.rate_limit_connections_per_second),
     rate_limit_burst: Math.round(f.rate_limit_burst),
@@ -226,9 +268,21 @@ async function handleSave() {
     log_level: f.log_level,
   }
 
+  if (newToken) {
+    patch.management_auth_token = newToken
+  }
+
   saving.value = true
   try {
     await updateSettings(patch)
+    if (newToken) {
+      // 令牌已轮换：当前会话的旧令牌立即失效，清理本地状态并回到登录页
+      message.success('设置已保存，管理令牌已更新，请使用新令牌重新登录')
+      tokenInput.value = ''
+      authStore.logout()
+      router.push('/login')
+      return
+    }
     message.success('设置已保存并生效')
     const view = await getSettings()
     applySettingsToForm(view)
@@ -240,6 +294,21 @@ async function handleSave() {
   }
 }
 
+// 清除管理令牌：仅回环管理地址允许（非回环时后端会拒绝）
+async function handleClearToken() {
+  clearingToken.value = true
+  try {
+    await updateSettings({ management_auth_token: '' })
+    message.success('管理令牌已清除，管理端口现在无需认证')
+    const view = await getSettings()
+    applySettingsToForm(view)
+  } catch {
+    // 错误已由拦截器处理
+  } finally {
+    clearingToken.value = false
+  }
+}
+
 onMounted(fetchAll)
 </script>
 
@@ -248,7 +317,7 @@ onMounted(fetchAll)
     <div>
       <a-typography-title :level="4" style="margin: 0;">系统设置</a-typography-title>
       <a-typography-text type="secondary">
-        修改后立即写入配置文件并热加载；监听地址等启动参数需重启生效。
+        修改后立即写入配置文件并热加载；WebUI 开关、pprof 与管理令牌同样即时生效，监听地址等启动参数需重启。
       </a-typography-text>
     </div>
     <a-space>
@@ -288,16 +357,76 @@ onMounted(fetchAll)
 
     <a-tab-pane key="general" tab="全局设置">
       <a-spin :spinning="loading">
+        <a-descriptions size="small" bordered :column="3" style="margin-bottom: 16px;">
+          <a-descriptions-item label="生效监听地址">
+            <a-typography-text code>{{ settings?.listen || '—' }}</a-typography-text>
+          </a-descriptions-item>
+          <a-descriptions-item label="管理端口">
+            <a-typography-text code>{{ settings?.management || '未配置' }}</a-typography-text>
+          </a-descriptions-item>
+          <a-descriptions-item label="管理令牌">
+            <a-tag :color="settings?.management_token_set ? 'green' : 'orange'">
+              {{ settings?.management_token_set ? '已设置' : '未设置' }}
+            </a-tag>
+          </a-descriptions-item>
+        </a-descriptions>
+        <a-alert
+          v-if="multiListener"
+          type="info"
+          show-icon
+          style="margin-bottom: 16px;"
+          message="检测到多个监听端口"
+          :description="`共 ${listenList.length} 个端口（${listenList.join(', ')}）。SOCKS5 命令、访问控制与最大连接数的修改会同步写入所有端口；如需按端口差异化配置，请直接编辑 YAML 中的 listeners。`"
+        />
+
         <a-form layout="vertical">
-          <a-card size="small" title="基础" style="margin-bottom: 16px;">
+          <a-card size="small" title="管理面板与安全" style="margin-bottom: 16px;">
             <a-row :gutter="16">
               <a-col :xs="24" :md="8">
-                <a-form-item label="健康检查间隔（秒）" tooltip="上游健康检查的全局默认间隔">
-                  <a-input-number v-model:value="form.check_interval_seconds" :min="1" style="width: 100%;" />
+                <a-form-item label="内置 WebUI" tooltip="关闭后管理端口仅提供 API，不再返回前端页面">
+                  <a-switch v-model:checked="form.webui_enabled" checked-children="启用" un-checked-children="关闭" />
                 </a-form-item>
               </a-col>
               <a-col :xs="24" :md="8">
-                <a-form-item label="最大连接数" tooltip="0 表示不限制">
+                <a-form-item label="pprof 调试端点" tooltip="启用后可在管理端口访问 /debug/pprof/">
+                  <a-switch v-model:checked="form.enable_pprof" checked-children="启用" un-checked-children="关闭" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
+                <a-form-item label="管理令牌" :tooltip="`对应 management_auth_token；当前${settings?.management_token_set ? '已设置' : '未设置'}。留空表示保持不变。`">
+                  <a-input-password
+                    v-model:value="tokenInput"
+                    placeholder="留空则不修改，修改后需重新登录"
+                    autocomplete="new-password"
+                  />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-space wrap>
+              <a-popconfirm
+                v-if="settings?.management_token_set"
+                title="清除后管理端口将不再要求认证，仅建议在回环地址下使用，确定清除？"
+                ok-text="清除"
+                cancel-text="取消"
+                @confirm="handleClearToken"
+              >
+                <a-button danger :loading="clearingToken">清除管理令牌</a-button>
+              </a-popconfirm>
+              <a-typography-text type="secondary" style="font-size: 12px;">
+                WebUI 开关与令牌修改保存后立即生效；轮换令牌会强制当前会话重新登录。
+              </a-typography-text>
+            </a-space>
+          </a-card>
+
+          <a-card size="small" title="基础" style="margin-bottom: 16px;">
+            <a-row :gutter="16">
+              <a-col :xs="24" :md="8">
+                <a-form-item label="健康检查间隔（秒）" tooltip="上游健康检查的全局默认间隔；0 表示停止周期性检查">
+                  <a-input-number v-model:value="form.check_interval_seconds" :min="0" style="width: 100%;" />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="8">
+                <a-form-item label="最大连接数（兜底）" tooltip="listener 未单独设置时的并发上限；0 表示不限制">
                   <a-input-number v-model:value="form.max_connections" :min="0" style="width: 100%;" />
                 </a-form-item>
               </a-col>
@@ -308,17 +437,12 @@ onMounted(fetchAll)
               </a-col>
             </a-row>
             <a-row :gutter="16">
-              <a-col :xs="24" :md="8">
-                <a-form-item label="pprof 调试端口" tooltip="启用后可在管理端口访问 /debug/pprof/">
-                  <a-switch v-model:checked="form.enable_pprof" checked-children="启用" un-checked-children="关闭" />
-                </a-form-item>
-              </a-col>
-              <a-col :xs="24" :md="8">
+              <a-col :xs="24" :md="12">
                 <a-form-item label="SOCKS5 BIND">
                   <a-switch v-model:checked="form.socks5_allow_bind" checked-children="允许" un-checked-children="禁止" />
                 </a-form-item>
               </a-col>
-              <a-col :xs="24" :md="8">
+              <a-col :xs="24" :md="12">
                 <a-form-item label="SOCKS5 UDP ASSOCIATE">
                   <a-switch
                     v-model:checked="form.socks5_allow_udp_associate"
@@ -421,22 +545,28 @@ onMounted(fetchAll)
           </a-card>
 
           <a-card size="small" title="超时" style="margin-bottom: 16px;">
+            <a-alert
+              type="info"
+              show-icon
+              style="margin-bottom: 12px;"
+              message="填写 0 表示使用内置默认值（拨号/握手 10s、HTTP 交换 60s、隧道空闲 5min）；数值单位为秒。"
+            />
             <a-row :gutter="16">
               <a-col :xs="24" :md="6">
                 <a-form-item label="拨号超时（秒）">
-                  <a-input-number v-model:value="form.dial_timeout_seconds" :min="0.1" :step="0.1" style="width: 100%;" />
+                  <a-input-number v-model:value="form.dial_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
                 </a-form-item>
               </a-col>
               <a-col :xs="24" :md="6">
                 <a-form-item label="握手超时（秒）">
-                  <a-input-number v-model:value="form.handshake_timeout_seconds" :min="0.1" :step="0.1" style="width: 100%;" />
+                  <a-input-number v-model:value="form.handshake_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
                 </a-form-item>
               </a-col>
               <a-col :xs="24" :md="6">
                 <a-form-item label="HTTP 交换超时（秒）">
                   <a-input-number
                     v-model:value="form.http_exchange_timeout_seconds"
-                    :min="0.1"
+                    :min="0"
                     :step="0.1"
                     style="width: 100%;"
                   />

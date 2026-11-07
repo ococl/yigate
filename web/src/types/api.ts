@@ -34,6 +34,7 @@ export interface StatusSnapshot {
   router_ready: boolean
   manager_ready: boolean
   pprof_enabled: boolean
+  webui_enabled?: boolean
   ready?: boolean
   upstreams?: UpstreamStatus[]
   version: string
@@ -218,7 +219,11 @@ export interface SettingsView {
   log_level: string
 }
 
-export type SettingsPatch = Partial<Omit<SettingsView, 'listen' | 'management' | 'management_token_set' | 'webui_enabled'>>
+// 可写字段：listen/management 为启动参数不可在线修改，management_token_set 为只读状态；
+// management_auth_token 仅用于设置新令牌（留空表示不修改），因此单独声明。
+export interface SettingsPatch extends Partial<Omit<SettingsView, 'listen' | 'management' | 'management_token_set'>> {
+  management_auth_token?: string
+}
 
 export interface ApiResult {
   status: string

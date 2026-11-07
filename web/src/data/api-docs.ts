@@ -108,7 +108,7 @@ yigate_connections_total 12345
         method: 'GET',
         path: '/api/v1/status',
         summary: '运行状态摘要',
-        description: '返回进程运行状态摘要，包含监听地址、管理端口、上游数量、pprof 状态等。',
+        description: '返回进程运行状态摘要，包含监听地址、管理端口、上游数量、pprof 与内置 WebUI 开关等。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -120,6 +120,7 @@ yigate_connections_total 12345
   "router_ready": true,
   "manager_ready": true,
   "pprof_enabled": false,
+  "webui_enabled": true,
   "timestamp": "2025-01-01T00:00:00Z"
 }`,
         example: {
@@ -132,6 +133,7 @@ yigate_connections_total 12345
   "router_ready": true,
   "manager_ready": true,
   "pprof_enabled": false,
+  "webui_enabled": true,
   "timestamp": "2025-01-01T00:00:00Z"
 }`,
         },
@@ -861,11 +863,15 @@ yigate_connections_total 12345
         path: '/api/v1/config/settings',
         summary: '读取全局设置',
         description:
-          '返回路由、DNS、超时、目标策略、访问控制、流量审计、日志级别等全局设置。',
+          '返回路由、DNS、超时、目标策略、访问控制、流量审计、日志级别等全局设置。多监听端口模式下 listen 为逗号拼接的实际监听地址，socks5/访问控制/并发上限返回首个端口的值；management_token_set 表示是否已配置管理令牌（不回显明文）。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
         responseBody: `{
+  "listen": "127.0.0.1:4479,127.0.0.1:4480",
+  "management": "127.0.0.1:8892",
+  "management_token_set": true,
+  "webui_enabled": true,
   "routing_final": "auto",
   "auto_mode": "direct_first",
   "dns_type": "system",
@@ -895,7 +901,7 @@ yigate_connections_total 12345
         path: '/api/v1/config/settings',
         summary: '修改全局设置',
         description:
-          '部分更新全局设置，仅提交需要修改的字段。校验失败时不会写入配置文件，运行时保持原配置。监听地址等启动参数需重启生效。',
+          '部分更新全局设置，仅提交需要修改的字段。校验失败时不会写入配置文件，运行时保持原配置。webui_enabled、enable_pprof、management_auth_token 可热加载；management_auth_token 传空字符串表示清除，但管理端口为非回环地址时会被拒绝。listen/management 属于启动参数，需重启生效。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -904,6 +910,8 @@ yigate_connections_total 12345
   "dns_type": "doh",
   "doh_url": "https://dns.example/dns-query",
   "traffic_audit_enabled": true,
+  "webui_enabled": false,
+  "management_auth_token": "new-strong-token",
   "log_level": "debug"
 }`,
         responseBody: `{

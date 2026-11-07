@@ -101,10 +101,7 @@ async function handleSubmit() {
     message.warning('请输入至少一个匹配值')
     return
   }
-  if (needsUpstreams.value && form.value.upstreams.length === 0) {
-    message.warning('proxy 动作需要至少选择一个上游')
-    return
-  }
+  // proxy 动作未指定上游时表示使用全部可用上游，无需强制选择
 
   const payload: RuleRequest = {
     type: form.value.type,
@@ -273,8 +270,9 @@ onMounted(fetchData)
         />
         <template #extra>
           <span v-if="form.type === 'domain_suffix'">按域名后缀匹配，example.com 会同时匹配 a.example.com。</span>
-          <span v-else-if="form.type === 'ip_cidr'">使用 CIDR 格式，例如 10.0.0.0/8。</span>
+          <span v-else-if="form.type === 'ip_cidr'">使用 CIDR 格式，例如 10.0.0.0/8，非法网段会在保存时报错。</span>
           <span v-else-if="form.type === 'domain_regex'">使用 Go 正则语法，保存前会校验合法性。</span>
+          <span v-else-if="form.type === 'geosite'">填写 geosite 分类名，例如 cn、geolocation-!cn；需要先配置并加载 geosite.dat。</span>
           <span v-else>每行一条，空行会被忽略。</span>
         </template>
       </a-form-item>
@@ -283,7 +281,7 @@ onMounted(fetchData)
         <a-alert type="info" show-icon message="match 类型匹配所有请求，无需填写匹配值，通常放在规则末尾作为兜底。" />
       </a-form-item>
 
-      <a-form-item v-if="needsUpstreams" label="指定上游（可多选）" required>
+      <a-form-item v-if="needsUpstreams" label="指定上游（可多选）">
         <a-select
           v-model:value="form.upstreams"
           mode="multiple"

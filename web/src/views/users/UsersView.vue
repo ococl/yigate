@@ -46,6 +46,10 @@ async function handleSubmit() {
     message.warning('请输入密码')
     return
   }
+  if (form.value.password.length < 4) {
+    message.warning('密码至少 4 位')
+    return
+  }
   submitting.value = true
   try {
     await addUser({ username: form.value.username.trim(), password: form.value.password })

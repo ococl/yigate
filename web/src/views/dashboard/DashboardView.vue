@@ -14,8 +14,9 @@ const { token } = theme.useToken()
 
 let timer: ReturnType<typeof setInterval> | null = null
 
-async function fetchData() {
-  loading.value = true
+// silent=true 用于定时刷新：避免每次自动刷新都整页 loading 抖动
+async function fetchData(silent = false) {
+  if (!silent) loading.value = true
   try {
     const [h, s, t] = await Promise.all([
       getHealth().catch(() => null),
@@ -27,7 +28,7 @@ async function fetchData() {
     traffic.value = t
     lastRefreshed.value = new Date()
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -99,7 +100,7 @@ const upstreamColumns = [
 
 onMounted(() => {
   fetchData()
-  timer = setInterval(fetchData, 10000)
+  timer = setInterval(() => fetchData(true), 10000)
 })
 
 onUnmounted(() => {
@@ -119,7 +120,7 @@ onUnmounted(() => {
       </div>
       <a-space>
         <a-tag color="blue">{{ status?.version || 'dev' }}</a-tag>
-        <a-button @click="fetchData" :loading="loading">刷新</a-button>
+        <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
       </a-space>
     </div>
 
@@ -169,6 +170,11 @@ onUnmounted(() => {
             <a-descriptions-item label="pprof">
               <a-tag :color="status?.pprof_enabled ? 'green' : 'default'">
                 {{ status?.pprof_enabled ? '已启用' : '未启用' }}
+              </a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item label="内置 WebUI">
+              <a-tag :color="status?.webui_enabled === false ? 'default' : 'green'">
+                {{ status?.webui_enabled === false ? '已关闭' : '已启用' }}
               </a-tag>
             </a-descriptions-item>
             <a-descriptions-item label="构建时间">

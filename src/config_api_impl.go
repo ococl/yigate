@@ -649,14 +649,14 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 
 		ProtectPrivate: cfg.DestinationPolicy.ProtectPrivate,
 		DefaultAction:  strings.ToLower(strings.TrimSpace(cfg.DestinationPolicy.DefaultAction)),
-		DenyCIDRs:      cfg.DestinationPolicy.DenyCIDRs,
-		AllowCIDRs:     cfg.DestinationPolicy.AllowCIDRs,
-		DenyDomains:    cfg.DestinationPolicy.DenyDomains,
-		AllowDomains:   cfg.DestinationPolicy.AllowDomains,
-		DenyPorts:      cfg.DestinationPolicy.DenyPorts,
-		AllowPorts:     cfg.DestinationPolicy.AllowPorts,
+		DenyCIDRs:      orEmptyStrings(cfg.DestinationPolicy.DenyCIDRs),
+		AllowCIDRs:     orEmptyStrings(cfg.DestinationPolicy.AllowCIDRs),
+		DenyDomains:    orEmptyStrings(cfg.DestinationPolicy.DenyDomains),
+		AllowDomains:   orEmptyStrings(cfg.DestinationPolicy.AllowDomains),
+		DenyPorts:      orEmptyInts(cfg.DestinationPolicy.DenyPorts),
+		AllowPorts:     orEmptyInts(cfg.DestinationPolicy.AllowPorts),
 
-		AllowedClients:     access.AllowedClients,
+		AllowedClients:     orEmptyStrings(access.AllowedClients),
 		RateLimitPerSecond: access.RateLimit.ConnectionsPerSecond,
 		RateLimitBurst:     access.RateLimit.Burst,
 		MaxConnsPerUser:    access.MaxConnsPerUser,
@@ -669,6 +669,21 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		LogLevel: cfg.Log.Level,
 	}
 	return view, nil
+}
+
+// orEmptyStrings 保证 JSON 输出为 [] 而不是 null，便于前端与 API 调用方统一处理。
+func orEmptyStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
+}
+
+func orEmptyInts(in []int) []int {
+	if in == nil {
+		return []int{}
+	}
+	return in
 }
 
 // UpdateSettings 应用全局设置的部分更新。
