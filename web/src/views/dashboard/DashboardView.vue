@@ -80,24 +80,6 @@ const readyColor = computed(() =>
   health.value?.router_ready && health.value?.manager_ready ? token.value.colorSuccess : token.value.colorError,
 )
 
-function upstreamStatusText(u: UpstreamStatus): string {
-  if (!checked(u)) return '未检测'
-  return u.dead ? '不可用' : '可用'
-}
-
-function upstreamStatusColor(u: UpstreamStatus): string {
-  if (!checked(u)) return 'default'
-  return u.dead ? 'error' : 'success'
-}
-
-const upstreamColumns = [
-  { title: '名称', dataIndex: 'name', key: 'name', width: 140 },
-  { title: 'URL', dataIndex: 'url', key: 'url', ellipsis: true },
-  { title: '状态', key: 'status', width: 110 },
-  { title: '失败 / 成功', key: 'counts', width: 130 },
-  { title: '最后检查', key: 'last_check', width: 180 },
-]
-
 onMounted(() => {
   fetchData()
   timer = setInterval(() => fetchData(true), 10000)
@@ -126,12 +108,12 @@ onUnmounted(() => {
 
     <a-row :gutter="16" style="margin-bottom: 16px;">
       <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small">
+        <a-card size="small" style="height: 100%;">
           <a-statistic title="运行状态" :value="health?.status || '-'" :value-style="{ color: statusColor }" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small">
+        <a-card size="small" style="height: 100%;">
           <a-statistic title="可用上游" :value="aliveCount" :suffix="`/ ${upstreams.length || health?.upstream_count || 0}`" />
           <a-typography-text type="secondary" style="font-size: 12px;">
             不可用 {{ deadCount }} · 未检测 {{ uncheckedCount }}
@@ -139,7 +121,7 @@ onUnmounted(() => {
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small">
+        <a-card size="small" style="height: 100%;">
           <a-statistic
             title="路由 / 管理就绪"
             :value="health?.router_ready && health?.manager_ready ? '就绪' : '异常'"
@@ -148,7 +130,7 @@ onUnmounted(() => {
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small">
+        <a-card size="small" style="height: 100%;">
           <a-statistic title="运行时长" :value="formatUptime(status?.uptime_seconds || 0)" />
           <a-typography-text type="secondary" style="font-size: 12px;">
             {{ status?.go_version || '' }}
@@ -216,35 +198,5 @@ onUnmounted(() => {
         </a-card>
       </a-col>
     </a-row>
-
-    <a-card size="small" title="上游健康状态">
-      <template #extra>
-        <RouterLink to="/upstreams">
-          <a-button type="link" size="small">管理上游</a-button>
-        </RouterLink>
-      </template>
-      <a-table
-        :data-source="upstreams"
-        :columns="upstreamColumns"
-        row-key="name"
-        size="small"
-        :pagination="false"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'status'">
-            <a-tag :color="upstreamStatusColor(record)">{{ upstreamStatusText(record) }}</a-tag>
-          </template>
-          <template v-else-if="column.key === 'counts'">
-            {{ record.failures }} / {{ record.successes }}
-          </template>
-          <template v-else-if="column.key === 'last_check'">
-            {{ formatTime(record.last_check_at) }}
-          </template>
-        </template>
-        <template #emptyText>
-          <a-empty description="尚未配置上游" />
-        </template>
-      </a-table>
-    </a-card>
   </a-spin>
 </template>
