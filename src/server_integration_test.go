@@ -507,6 +507,91 @@ func TestIntegrationManagementTrafficNoAuth(t *testing.T) {
 	}
 }
 
+// TestIntegrationTrafficPersistsAcrossRestart 验证流量明细会落盘并在进程重启后恢复。
+func TestIntegrationTrafficPersistsAcrossRestart(t *testing.T) {
+	originAddr := startOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "persist traffic")
+	})
+
+	cfg := defaultConfig()
+	cfg.Routing.Final = "direct"
+	cfg.Routing.Socks5HRedirect.Enabled = false
+	cfg.DestinationPolicy.ProtectPrivate = false
+	cfg.TrafficAudit.Enabled = true
+	cfg.TrafficAudit.RetentionDays = 3
+	cfg.Listen = findFreePort(t)
+	cfg.Management = findFreePort(t)
+	cfg.ManagementAuthToken = "test-token"
+	cfg.Log.Level = "warn"
+	cfg.Log.Output = "stdout"
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+
+	first, err := NewServer(cfgPath, cfg)
+	if err != nil {
+		t.Fatalf("NewServer(first): %v", err)
+	}
+	go func() {
+		if err := first.Start(); err != nil {
+			t.Logf("first.Start returned: %v", err)
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		first.listenersMu.Lock()
+		ln := first.listeners[cfg.Listen]
+		first.listenersMu.Unlock()
+		if ln != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	proxyURL, _ := url.Parse("http://" + cfg.Listen)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+	resp, err := client.Get("http://" + originAddr + "/")
+	if err != nil {
+		t.Fatalf("proxy GET: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	before := first.currentRuntime().trafficAccounter.Snapshot()
+	if len(before.Entries) == 0 {
+		t.Fatal("no traffic recorded before restart")
+	}
+	var originalTotal int64
+	for _, entry := range before.Entries {
+		originalTotal += entry.Total
+	}
+	first.Stop()
+
+	if _, err := os.Stat(filepath.Join(dir, "traffic.json")); err != nil {
+		t.Fatalf("traffic.json not written: %v", err)
+	}
+
+	second, err := NewServer(cfgPath, cfg)
+	if err != nil {
+		t.Fatalf("NewServer(second): %v", err)
+	}
+	defer second.Stop()
+
+	after := second.currentRuntime().trafficAccounter.Snapshot()
+	if after.RetentionDays != 3 {
+		t.Fatalf("retention_days = %d, want 3", after.RetentionDays)
+	}
+	var restoredTotal int64
+	for _, entry := range after.Entries {
+		restoredTotal += entry.Total
+	}
+	if restoredTotal < originalTotal {
+		t.Fatalf("restored total = %d, want >= %d", restoredTotal, originalTotal)
+	}
+}
+
 // ============================================================
 // 配置 API 端到端测试
 // ============================================================
