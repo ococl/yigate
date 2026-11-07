@@ -40,12 +40,13 @@ function handleLogout() {
 </script>
 
 <template>
-  <a-layout style="min-height: 100vh">
+  <a-layout class="app-layout">
     <a-layout-sider
       v-model:collapsed="appStore.sidebarCollapsed"
       :trigger="null"
       collapsible
       :width="216"
+      class="app-sider"
       :style="siderStyle"
     >
       <div class="logo">
@@ -56,51 +57,53 @@ function handleLogout() {
           管理后台
         </span>
       </div>
-      <a-menu :selected-keys="selectedKeys" v-model:open-keys="openKeys" mode="inline" class="nav-menu">
-        <a-menu-item key="dashboard">
-          <RouterLink to="/dashboard">仪表盘</RouterLink>
-        </a-menu-item>
+      <div class="nav-scroll">
+        <a-menu :selected-keys="selectedKeys" v-model:open-keys="openKeys" mode="inline" class="nav-menu">
+          <a-menu-item key="dashboard">
+            <RouterLink to="/dashboard">仪表盘</RouterLink>
+          </a-menu-item>
 
-        <a-sub-menu key="manage">
-          <template #title>管理</template>
-          <a-menu-item key="upstreams">
-            <RouterLink to="/upstreams">上游管理</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="rules">
-            <RouterLink to="/rules">路由规则</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="users">
-            <RouterLink to="/users">用户管理</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="traffic">
-            <RouterLink to="/traffic">流量审计</RouterLink>
-          </a-menu-item>
-        </a-sub-menu>
+          <a-sub-menu key="manage">
+            <template #title>管理</template>
+            <a-menu-item key="upstreams">
+              <RouterLink to="/upstreams">上游管理</RouterLink>
+            </a-menu-item>
+            <a-menu-item key="rules">
+              <RouterLink to="/rules">路由规则</RouterLink>
+            </a-menu-item>
+            <a-menu-item key="users">
+              <RouterLink to="/users">用户管理</RouterLink>
+            </a-menu-item>
+            <a-menu-item key="traffic">
+              <RouterLink to="/traffic">流量审计</RouterLink>
+            </a-menu-item>
+          </a-sub-menu>
 
-        <a-sub-menu key="system">
-          <template #title>系统</template>
-          <a-menu-item key="settings">
-            <RouterLink to="/settings">系统设置</RouterLink>
-          </a-menu-item>
-        </a-sub-menu>
+          <a-sub-menu key="system">
+            <template #title>系统</template>
+            <a-menu-item key="settings">
+              <RouterLink to="/settings">系统设置</RouterLink>
+            </a-menu-item>
+          </a-sub-menu>
 
-        <a-sub-menu key="docs">
-          <template #title>文档</template>
-          <a-menu-item key="docs-auth">
-            <RouterLink to="/docs/auth">认证机制</RouterLink>
-          </a-menu-item>
-          <a-menu-item key="docs-api">
-            <RouterLink to="/docs/api">API 文档</RouterLink>
-          </a-menu-item>
-        </a-sub-menu>
+          <a-sub-menu key="docs">
+            <template #title>文档</template>
+            <a-menu-item key="docs-auth">
+              <RouterLink to="/docs/auth">认证机制</RouterLink>
+            </a-menu-item>
+            <a-menu-item key="docs-api">
+              <RouterLink to="/docs/api">API 文档</RouterLink>
+            </a-menu-item>
+          </a-sub-menu>
 
-        <a-menu-item key="about">
-          <RouterLink to="/about">关于</RouterLink>
-        </a-menu-item>
-      </a-menu>
+          <a-menu-item key="about">
+            <RouterLink to="/about">关于</RouterLink>
+          </a-menu-item>
+        </a-menu>
+      </div>
     </a-layout-sider>
 
-    <a-layout>
+    <a-layout class="main-layout">
       <a-layout-header class="header" :style="headerStyle">
         <a-button type="text" @click="appStore.toggleSidebar">☰</a-button>
 
@@ -128,8 +131,26 @@ function handleLogout() {
 </template>
 
 <style scoped>
+/* 根布局撑满视口并禁止整体滚动，滚动交给侧栏与工作区各自处理 */
+.app-layout {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app-sider {
+  height: 100%;
+}
+
+.app-sider :deep(.ant-layout-sider-children) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
 .logo {
-  height: 56px;
+  flex: 0 0 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -148,12 +169,30 @@ function handleLogout() {
   font-size: 12px;
 }
 
+/* 菜单区域独立滚动，logo 固定在顶部 */
+.nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .nav-menu {
   border-inline-end: none !important;
   background: transparent;
 }
 
+.main-layout {
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 页头锁定，不随工作区滚动 */
 .header {
+  flex: 0 0 56px;
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -168,15 +207,21 @@ function handleLogout() {
   gap: 8px;
 }
 
+/* 工作区独立滚动 */
 .content {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 16px;
   padding: 24px;
-  min-height: 360px;
   border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .footer {
+  flex: 0 0 auto;
   text-align: center;
-  padding: 12px 0 20px;
+  padding: 0 0 12px;
 }
 </style>

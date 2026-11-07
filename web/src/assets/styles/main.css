@@ -34,6 +34,54 @@ body.app-dark {
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* 滚动条主题适配：浅色模式深色滑块，暗黑模式浅色滑块 */
+:root {
+  color-scheme: light;
+  --app-scrollbar-thumb: rgba(0, 0, 0, 0.22);
+  --app-scrollbar-thumb-hover: rgba(0, 0, 0, 0.4);
+}
+
+body.app-dark {
+  color-scheme: dark;
+  --app-scrollbar-thumb: rgba(255, 255, 255, 0.22);
+  --app-scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
+}
+
+/* 根元素同步主题，覆盖可能出现的视口滚动条 */
+html:has(body.app-dark) {
+  color-scheme: dark;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--app-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--app-scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox 原生滚动条（不支持 ::-webkit-scrollbar） */
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--app-scrollbar-thumb) transparent;
+  }
+}
+
 /* 页面通用布局 */
 .page-header {
   display: flex;
