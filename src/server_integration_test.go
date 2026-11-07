@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -76,6 +77,15 @@ func startTestServer(t *testing.T, cfg *Config) (*Server, string, string) {
 	return s, proxyAddr, s.mgmt.Addr()
 }
 
+// stopTestServer 在测试中快速关闭服务器。
+// 生产用的 Stop 会为排空存量连接等待 10s；测试里断言已完成，无需优雅排空，
+// 改用很短的宽限期，避免每个用例固定多花 10s（会顶到流水线的 120s 超时）。
+func stopTestServer(s *Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_ = s.Shutdown(ctx)
+}
+
 // startOriginServer 启动一个简单的 HTTP 后端服务器，返回监听地址。
 func startOriginServer(t *testing.T, handler http.HandlerFunc) string {
 	t.Helper()
@@ -114,7 +124,7 @@ func TestIntegrationHTTPProxy(t *testing.T) {
 	cfg.DestinationPolicy.ProtectPrivate = false
 
 	s, proxyAddr, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 通过代理发送 HTTP 请求
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -172,7 +182,7 @@ func TestIntegrationHTTPConnect(t *testing.T) {
 	cfg.DestinationPolicy.ProtectPrivate = false
 
 	s, proxyAddr, _ := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// CONNECT 隧道
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -214,7 +224,7 @@ func TestIntegrationSOCKS5(t *testing.T) {
 	cfg.DestinationPolicy.ProtectPrivate = false
 
 	s, proxyAddr, _ := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	conn, err := net.Dial("tcp", proxyAddr)
 	if err != nil {
@@ -283,7 +293,7 @@ func TestIntegrationManagementHealth(t *testing.T) {
 	cfg.Routing.Socks5HRedirect.Enabled = false
 
 	s, _, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 无认证应 401
 	resp, err := http.Get("http://" + mgmtAddr + "/health")
@@ -313,7 +323,7 @@ func TestIntegrationManagementMetrics(t *testing.T) {
 	cfg.Routing.Socks5HRedirect.Enabled = false
 
 	s, _, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	req := mgmtRequest("GET", mgmtAddr, "/metrics", nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -336,7 +346,7 @@ func TestIntegrationManagementStatus(t *testing.T) {
 	cfg.Routing.Socks5HRedirect.Enabled = false
 
 	s, proxyAddr, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	req := mgmtRequest("GET", mgmtAddr, "/api/v1/status", nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -391,7 +401,7 @@ log:
 			t.Logf("Start: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 等待管理端口就绪
 	for i := 0; i < 50; i++ {
@@ -428,7 +438,7 @@ func TestIntegrationManagementTraffic(t *testing.T) {
 	cfg.TrafficAudit.Enabled = true
 
 	s, proxyAddr, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 通过代理发送请求产生流量
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -478,7 +488,7 @@ func TestIntegrationManagementTrafficMethodNotAllowed(t *testing.T) {
 	cfg.Routing.Socks5HRedirect.Enabled = false
 
 	s, _, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	req := mgmtRequest("POST", mgmtAddr, "/api/v1/traffic", nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -497,7 +507,7 @@ func TestIntegrationManagementTrafficNoAuth(t *testing.T) {
 	cfg.Routing.Socks5HRedirect.Enabled = false
 
 	s, _, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	resp, err := http.Get("http://" + mgmtAddr + "/api/v1/traffic")
 	if err != nil {
@@ -627,7 +637,7 @@ log:
 			t.Logf("Start: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	for i := 0; i < 50; i++ {
 		if s.mgmt.Addr() != "" {
@@ -701,7 +711,7 @@ func TestIntegrationTLSTermination(t *testing.T) {
 	cfg.TLS.KeyFile = keyFile
 
 	s, proxyAddr, _ := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 通过 TLS 连接发送 HTTP 代理请求
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
@@ -765,7 +775,7 @@ func TestIntegrationMultiListener(t *testing.T) {
 			t.Logf("Start: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 等待两个监听器就绪
 	for i := 0; i < 50; i++ {
@@ -853,7 +863,7 @@ func TestIntegrationIPv6Listen(t *testing.T) {
 			t.Logf("Start: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 等待监听就绪
 	var proxyAddr string
@@ -927,7 +937,7 @@ log:
 			t.Logf("Start: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 等待就绪
 	for i := 0; i < 50; i++ {
@@ -989,7 +999,7 @@ func TestIntegrationConcurrentRequests(t *testing.T) {
 	cfg.DestinationPolicy.ProtectPrivate = false
 
 	s, proxyAddr, _ := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
 	client := &http.Client{
@@ -1042,7 +1052,7 @@ func TestIntegrationMetricsAfterTraffic(t *testing.T) {
 	cfg.DestinationPolicy.ProtectPrivate = false
 
 	s, proxyAddr, mgmtAddr := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// 产生流量
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -1099,7 +1109,7 @@ func TestIntegrationAccessControl(t *testing.T) {
 	cfg.AccessControl.AllowedClients = []string{"10.0.0.1/32"} // 只允许不存在的 IP
 
 	s, proxyAddr, _ := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
 	client := &http.Client{
@@ -1129,7 +1139,7 @@ func TestIntegrationDestinationPolicy(t *testing.T) {
 	cfg.DestinationPolicy.DenyCIDRs = []string{"127.0.0.0/8"}
 
 	s, proxyAddr, _ := startTestServer(t, cfg)
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
 	client := &http.Client{
@@ -1202,7 +1212,7 @@ log:
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 	for i := 0; i < 100; i++ {
 		if s.mgmt.Addr() != "" {
 			break
@@ -1351,7 +1361,7 @@ func TestIntegrationTrafficSurvivesConfigReload(t *testing.T) {
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 	for i := 0; i < 100; i++ {
 		s.listenersMu.Lock()
 		ln := s.listeners[cfg.Listen]

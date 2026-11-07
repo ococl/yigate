@@ -90,7 +90,7 @@ func TestServerTLSRequiresClientCert(t *testing.T) {
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	ln := waitForFirstListener(t, s)
 	addr := ln.Addr().String()
@@ -135,7 +135,7 @@ log:
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	var oldAddr string
 	ln := waitForFirstListener(t, s)
@@ -476,7 +476,7 @@ log:
 	if err := s.watchConfig(); err != nil {
 		t.Fatalf("watchConfig: %v", err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	// trigger a reload by touching the file
 	content, err := os.ReadFile(path)
@@ -498,7 +498,7 @@ func TestServerStatusSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 	snapshot := s.statusSnapshot()
 	if snapshot.Status != "up" {
 		t.Fatalf("expected status up, got %q", snapshot.Status)
@@ -536,7 +536,7 @@ log:
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	var mgmtAddr string
 	for i := 0; i < 50; i++ {
@@ -583,7 +583,7 @@ log:
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	var oldAddr string
 	ln := waitForFirstListener(t, s)
@@ -629,7 +629,7 @@ log:
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 	oldAddr := s.mgmt.Addr()
 	if oldAddr == "" {
 		t.Fatal("management server not ready")
@@ -694,7 +694,7 @@ log:
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 	oldAddr := s.mgmt.Addr()
 	if oldAddr == "" {
 		t.Fatal("management server not ready")
@@ -745,7 +745,7 @@ log:
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 	oldState := s.currentRuntime()
 	oldMgmtAddr := s.managementServer().Addr()
 
@@ -792,7 +792,7 @@ func TestServerConnCountAcrossLimitReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 	c1, peer1 := net.Pipe()
 	defer peer1.Close()
 	if !s.acquireConnSlot(c1, s.maxConns.Load()) {
@@ -875,7 +875,7 @@ access_control:
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	_ = writeTestConfig(t, dir, `listen: 127.0.0.1:0
 log:
@@ -936,7 +936,7 @@ func TestServerStartMultipleListeners(t *testing.T) {
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	addrs := make(map[string]bool)
 	for i := 0; i < 50 && len(addrs) < 2; i++ {
@@ -982,7 +982,7 @@ log:
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	oldAddr := waitForFirstListener(t, s).Addr().String()
 
@@ -1053,7 +1053,7 @@ log:
 			t.Logf("Start returned: %v", err)
 		}
 	}()
-	defer s.Stop()
+	defer stopTestServer(s)
 
 	addrs := make(map[string]bool)
 	for i := 0; i < 50 && len(addrs) < 2; i++ {
