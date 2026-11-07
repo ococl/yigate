@@ -159,13 +159,16 @@ onUnmounted(() => {
 
     <a-row :gutter="16" style="margin-bottom: 16px;">
       <a-col :xs="24" :lg="8">
-        <a-card size="small" title="监听信息" style="height: 100%;">
+        <a-card size="small" title="运行信息" style="height: 100%;">
           <a-descriptions :column="1" size="small">
             <a-descriptions-item label="代理监听">
               <a-typography-text code>{{ status?.listen || '-' }}</a-typography-text>
             </a-descriptions-item>
             <a-descriptions-item label="管理端口">
               <a-typography-text code>{{ status?.management || '-' }}</a-typography-text>
+            </a-descriptions-item>
+            <a-descriptions-item label="上游数量">
+              {{ status?.upstream_count ?? '-' }}
             </a-descriptions-item>
             <a-descriptions-item label="pprof">
               <a-tag :color="status?.pprof_enabled ? 'green' : 'default'">
@@ -179,6 +182,9 @@ onUnmounted(() => {
             </a-descriptions-item>
             <a-descriptions-item label="构建时间">
               {{ status?.build_time && status.build_time !== 'unknown' ? status.build_time : '—' }}
+            </a-descriptions-item>
+            <a-descriptions-item label="状态时间">
+              {{ formatTime(status?.timestamp) }}
             </a-descriptions-item>
           </a-descriptions>
         </a-card>
@@ -203,7 +209,7 @@ onUnmounted(() => {
             </a-row>
           </template>
           <a-empty v-else description="流量审计未启用">
-            <RouterLink to="/settings">
+            <RouterLink to="/settings?section=quota">
               <a-button type="primary" size="small">前往系统设置开启</a-button>
             </RouterLink>
           </a-empty>
