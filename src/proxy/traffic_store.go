@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const trafficHistoryFileVersion = 1
@@ -84,5 +85,23 @@ func writeTrafficHistory(path string, entries []trafficHistoryDiskEntry) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	// 同步目录项，避免掉电后 rename 尚未落盘导致历史文件丢失。
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
+}
+
+// backupTrafficHistory 把无法解析的历史文件改名备份，避免后续写入直接覆盖掉原始数据。
+func backupTrafficHistory(path string) (string, error) {
+	suffix := time.Now().Format("20060102-150405")
+	backup := fmt.Sprintf("%s.corrupt-%s", path, suffix)
+	if err := os.Rename(path, backup); err != nil {
+		return "", err
+	}
+	return backup, nil
 }

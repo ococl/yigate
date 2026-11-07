@@ -372,3 +372,64 @@ func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 		t.Errorf("expected out=200, got %f", outVal)
 	}
 }
+
+// TestTrafficAccounterRestoresHistoryFromDiskWhenMemoryEmpty 保证统计器内存意外为空时
+// 不会把已持久化的历史覆盖成空文件。
+func TestTrafficAccounterRestoresHistoryFromDiskWhenMemoryEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "traffic.json")
+	key := TrafficKey{User: "alice", Upstream: "up1", Target: "example.com"}
+
+	a := NewTrafficAccounterWithStore(TrafficAuditConfig{Enabled: true, RetentionDays: 30}, path)
+	if err := a.Record(key, 100, 200); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	a.Flush()
+
+	// 模拟内存明细丢失（例如统计器被重建或加载异常）
+	a.mu.Lock()
+	a.history = make(map[string]*trafficHistoryEntry)
+	a.mu.Unlock()
+	a.dirtyGen.Add(1)
+
+	a.Flush()
+
+	snap := a.Snapshot()
+	if len(snap.Entries) != 1 {
+		t.Fatalf("expected history restored from disk, got %d entries", len(snap.Entries))
+	}
+	entries, err := loadTrafficHistory(path)
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].BytesIn != 100 || entries[0].BytesOut != 200 {
+		t.Fatalf("disk history was not preserved: %+v", entries)
+	}
+	a.Stop()
+}
+
+// TestTrafficHistoryCorruptFileBackedUp 保证无法解析的历史文件被备份而不是被静默覆盖。
+func TestTrafficHistoryCorruptFileBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "traffic.json")
+	if err := os.WriteFile(path, []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	a := NewTrafficAccounterWithStore(TrafficAuditConfig{Enabled: true, RetentionDays: 30}, path)
+	a.Stop()
+
+	matches, err := filepath.Glob(path + ".corrupt-*")
+	if err != nil {
+		t.Fatalf("glob backup: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 backup file, got %v", matches)
+	}
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	if string(raw) != "{not-json" {
+		t.Fatalf("backup content = %q", string(raw))
+	}
+}

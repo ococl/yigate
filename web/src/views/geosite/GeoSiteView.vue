@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { message } from 'antdv-next'
 import { getGeoSiteInfo, updateGeoSite } from '@/api/geosite'
 import { updateSettings } from '@/api/settings'
+import { formatDateTime } from '@/utils/datetime'
 import type { GeoSiteInfo, SettingsPatch } from '@/types/api'
 
 const info = ref<GeoSiteInfo | null>(null)
@@ -154,13 +155,6 @@ function formatBytes(value: number): string {
   return `${size.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`
 }
 
-function formatTime(value?: string): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
-
 async function copyText(text: string, tip: string) {
   try {
     if (navigator.clipboard?.writeText) {
@@ -200,11 +194,45 @@ onMounted(fetchInfo)
     </div>
 
     <div class="geosite-body">
+      <!-- 版本概要：横向铺开，避免占用左右分栏空间 -->
+      <a-card size="small" class="summary-card">
+        <a-descriptions :column="{ xs: 1, sm: 2, lg: 4 }" size="small" :colon="false">
+          <a-descriptions-item label="状态">
+            <a-tag :color="info?.exists ? 'green' : 'red'">
+              {{ info?.exists ? '已加载' : '未找到' }}
+            </a-tag>
+          </a-descriptions-item>
+          <a-descriptions-item label="版本">
+            <span class="mono">{{ info?.version || '—' }}</span>
+          </a-descriptions-item>
+          <a-descriptions-item label="文件大小">{{ formatBytes(info?.size || 0) }}</a-descriptions-item>
+          <a-descriptions-item label="数据更新时间">{{ formatDateTime(info?.updated_at) }}</a-descriptions-item>
+          <a-descriptions-item label="上次检查">{{ formatDateTime(info?.last_checked_at) }}</a-descriptions-item>
+          <a-descriptions-item label="自动更新">{{ info?.auto_update ? '已启用' : '已关闭' }}</a-descriptions-item>
+          <a-descriptions-item label="来源" :span="2">
+            <span class="mono ellipsis" :title="info?.source_url || ''">{{ info?.source_url || '—' }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+        <div class="summary-foot">
+          <a-typography-text type="secondary" class="mono ellipsis" :title="info?.path || ''">
+            数据路径：{{ info?.path || '—' }}
+          </a-typography-text>
+          <a-button
+            size="small"
+            type="link"
+            :disabled="!info?.sha256"
+            @click="copyText(info?.sha256 || '', '完整校验值已复制')"
+          >
+            复制完整 SHA-256
+          </a-button>
+        </div>
+      </a-card>
+
       <a-alert
         v-if="info && !info.exists"
         type="warning"
         show-icon
-        style="margin-bottom: 16px;"
+        class="geosite-alert"
         message="未找到 GeoSite 数据文件"
         description="引用 geosite 类型规则时匹配会被跳过。可配置更新地址后点击「立即更新」，或手动放置数据文件。"
       />
@@ -212,136 +240,125 @@ onMounted(fetchInfo)
         v-if="info?.last_error"
         type="error"
         show-icon
-        style="margin-bottom: 16px;"
+        class="geosite-alert"
         message="最近一次更新失败"
         :description="info.last_error"
       />
 
-      <a-row :gutter="16">
-        <a-col :xs="24" :xl="14">
-          <a-card size="small" title="版本信息" class="geosite-card">
-            <a-descriptions :column="2" bordered size="small">
-              <a-descriptions-item label="状态">
-                <a-tag :color="info?.exists ? 'green' : 'red'">
-                  {{ info?.exists ? '已加载' : '未找到' }}
-                </a-tag>
-              </a-descriptions-item>
-              <a-descriptions-item label="版本">
-                <span class="mono">{{ info?.version || '—' }}</span>
-              </a-descriptions-item>
-              <a-descriptions-item label="文件大小">{{ formatBytes(info?.size || 0) }}</a-descriptions-item>
-              <a-descriptions-item label="数据更新时间">{{ formatTime(info?.updated_at) }}</a-descriptions-item>
-              <a-descriptions-item label="上次检查">{{ formatTime(info?.last_checked_at) }}</a-descriptions-item>
-              <a-descriptions-item label="自动更新">{{ info?.auto_update ? '已启用' : '已关闭' }}</a-descriptions-item>
-              <a-descriptions-item label="数据来源" :span="2">
-                <span class="mono break-all">{{ info?.source_url || '—' }}</span>
-              </a-descriptions-item>
-              <a-descriptions-item label="本地路径" :span="2">
-                <span class="mono break-all">{{ info?.path || '—' }}</span>
-              </a-descriptions-item>
-            </a-descriptions>
-            <div class="geosite-foot">
-              <a-button size="small" :disabled="!info?.sha256" @click="copyText(info?.sha256 || '', '完整校验值已复制')">
-                复制完整 SHA-256
-              </a-button>
+      <!-- 左右分栏：左侧更新来源，右侧下游同步 -->
+      <div class="geosite-columns">
+        <section class="geosite-column">
+          <a-card size="small" title="更新来源" class="column-card">
+            <template #extra>
+              <a-tag :color="info?.auto_update ? 'green' : 'default'">
+                {{ info?.auto_update ? '自动更新' : '手动更新' }}
+              </a-tag>
+            </template>
+            <div class="column-scroll">
+              <a-form layout="vertical">
+                <a-form-item label="数据路径" tooltip="相对路径基于配置文件所在目录解析">
+                  <a-input v-model:value="sourceForm.path" placeholder="../data/geosite.dat" />
+                </a-form-item>
+                <a-form-item label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
+                  <a-input v-model:value="sourceForm.update_url" placeholder="https://..." />
+                </a-form-item>
+                <a-form-item label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
+                  <a-input-password
+                    v-model:value="sourceForm.update_token"
+                    :placeholder="info?.update_token_set ? '已设置，留空保持不变' : '可选，Bearer 令牌'"
+                    autocomplete="new-password"
+                  />
+                </a-form-item>
+
+                <div class="field-row">
+                  <div class="field-block">
+                    <a-form-item label="自动更新">
+                      <a-switch v-model:checked="sourceForm.auto_update" />
+                    </a-form-item>
+                  </div>
+                  <div class="field-block">
+                    <a-form-item label="间隔（小时）">
+                      <a-input-number
+                        v-model:value="sourceForm.update_interval_hours"
+                        :min="1"
+                        :max="8760"
+                        style="width: 100%;"
+                      />
+                    </a-form-item>
+                  </div>
+                </div>
+              </a-form>
+            </div>
+            <div class="column-foot">
+              <a-typography-text type="secondary" class="foot-hint">保存后立即热加载</a-typography-text>
+              <a-space>
+                <a-button :disabled="loading" @click="fetchInfo">还原</a-button>
+                <a-button type="primary" :loading="savingSource" @click="handleSaveSource">保存</a-button>
+              </a-space>
             </div>
           </a-card>
-        </a-col>
+        </section>
 
-        <a-col :xs="24" :xl="10">
-          <a-card size="small" title="更新来源" class="geosite-card">
-            <a-form layout="vertical">
-              <a-form-item label="数据路径" tooltip="相对路径基于配置文件所在目录解析">
-                <a-input v-model:value="sourceForm.path" placeholder="../data/geosite.dat" />
-              </a-form-item>
-              <a-form-item label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
-                <a-input v-model:value="sourceForm.update_url" placeholder="https://..." />
-              </a-form-item>
-              <a-form-item label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
-                <a-input-password
-                  v-model:value="sourceForm.update_token"
-                  :placeholder="info?.update_token_set ? '已设置，留空保持不变' : '可选，Bearer 令牌'"
-                  autocomplete="new-password"
-                />
-              </a-form-item>
-              <a-row :gutter="12">
-                <a-col :span="12">
-                  <a-form-item label="自动更新">
-                    <a-switch v-model:checked="sourceForm.auto_update" />
-                  </a-form-item>
-                </a-col>
-                <a-col :span="12">
-                  <a-form-item label="间隔（小时）">
-                    <a-input-number
-                      v-model:value="sourceForm.update_interval_hours"
-                      :min="1"
-                      :max="8760"
-                      style="width: 100%;"
-                    />
-                  </a-form-item>
-                </a-col>
-              </a-row>
-              <a-space>
-                <a-button type="primary" :loading="savingSource" @click="handleSaveSource">保存更新配置</a-button>
-                <a-button :disabled="loading" @click="fetchInfo">还原</a-button>
-              </a-space>
-            </a-form>
+        <section class="geosite-column">
+          <a-card size="small" title="下游节点同步" class="column-card">
+            <template #extra>
+              <a-tag :color="info?.sync_enabled ? 'green' : 'default'">
+                {{ info?.sync_enabled ? '已开启' : '未开启' }}
+              </a-tag>
+            </template>
+            <div class="column-scroll">
+              <a-alert
+                type="info"
+                show-icon
+                class="sync-tip"
+                message="只读同步"
+                description="下游使用同步令牌下载数据；响应带 ETag 与 X-GeoSite-Version，数据未变时返回 304，不重复传输。该令牌不能修改配置或触发更新。"
+              />
+
+              <a-form layout="vertical">
+                <div class="field-row">
+                  <div class="field-block">
+                    <a-form-item label="允许下游同步">
+                      <a-switch v-model:checked="syncForm.enabled" />
+                    </a-form-item>
+                  </div>
+                  <div class="field-block">
+                    <a-form-item label="同步令牌" tooltip="至少 8 位，仅授予读取 GeoSite 数据的权限">
+                      <a-input-password
+                        v-model:value="syncForm.token"
+                        :placeholder="info?.sync_token_set ? '已设置，留空保持不变' : '至少 8 位'"
+                        autocomplete="new-password"
+                      />
+                    </a-form-item>
+                  </div>
+                </div>
+              </a-form>
+
+              <a-descriptions :column="1" size="small" bordered class="sync-endpoint">
+                <a-descriptions-item label="下载地址">
+                  <div class="copy-line">
+                    <span class="mono ellipsis" :title="downloadURL">{{ downloadURL }}</span>
+                    <a-button type="link" size="small" @click="copyText(downloadURL, '下载地址已复制')">复制</a-button>
+                  </div>
+                </a-descriptions-item>
+                <a-descriptions-item label="当前版本">
+                  <span class="mono">{{ info?.version || '—' }}</span>
+                </a-descriptions-item>
+              </a-descriptions>
+
+              <div class="snippet-title">
+                <a-typography-text strong>下游接入配置</a-typography-text>
+                <a-button type="link" size="small" @click="copyText(syncSnippet, '下游配置片段已复制')">复制</a-button>
+              </div>
+              <pre class="snippet">{{ syncSnippet }}</pre>
+            </div>
+            <div class="column-foot">
+              <a-typography-text type="secondary" class="foot-hint">关闭后端点仅接受管理令牌</a-typography-text>
+              <a-button type="primary" :loading="savingSync" @click="handleSaveSync">保存</a-button>
+            </div>
           </a-card>
-        </a-col>
-      </a-row>
-
-      <a-card size="small" title="下游节点同步" class="geosite-card geosite-sync">
-        <a-alert
-          type="info"
-          show-icon
-          style="margin-bottom: 16px;"
-          message="只读同步机制"
-          description="开启后，其他节点可使用下方只读令牌下载 /api/v1/geosite/dat。响应带 ETag 与 X-GeoSite-Version，下游据此做条件请求：数据未变化时返回 304，不重复传输。该令牌不能修改配置或触发更新。"
-        />
-
-        <a-row :gutter="16">
-          <a-col :xs="24" :md="12">
-            <a-form layout="vertical">
-              <a-form-item label="允许下游同步">
-                <a-switch v-model:checked="syncForm.enabled" />
-                <a-typography-text type="secondary" style="margin-left: 8px;">
-                  关闭后该端点仅接受管理令牌
-                </a-typography-text>
-              </a-form-item>
-              <a-form-item label="同步令牌" tooltip="至少 8 位，仅授予读取 GeoSite 数据的权限">
-                <a-input-password
-                  v-model:value="syncForm.token"
-                  :placeholder="info?.sync_token_set ? '已设置，留空保持不变' : '至少 8 位'"
-                  autocomplete="new-password"
-                />
-              </a-form-item>
-              <a-button type="primary" :loading="savingSync" @click="handleSaveSync">保存同步设置</a-button>
-            </a-form>
-          </a-col>
-          <a-col :xs="24" :md="12">
-            <a-descriptions :column="1" size="small" bordered>
-              <a-descriptions-item label="下载地址">
-                <span class="mono break-all">{{ downloadURL }}</span>
-                <a-button type="link" size="small" @click="copyText(downloadURL, '下载地址已复制')">复制</a-button>
-              </a-descriptions-item>
-              <a-descriptions-item label="当前版本">
-                <span class="mono">{{ info?.version || '—' }}</span>
-              </a-descriptions-item>
-              <a-descriptions-item label="同步状态">
-                <a-tag :color="info?.sync_enabled ? 'green' : 'default'">
-                  {{ info?.sync_enabled ? '已开启' : '未开启' }}
-                </a-tag>
-              </a-descriptions-item>
-            </a-descriptions>
-          </a-col>
-        </a-row>
-
-        <div class="snippet-title">
-          <a-typography-text strong>下游接入配置</a-typography-text>
-          <a-button type="link" size="small" @click="copyText(syncSnippet, '下游配置片段已复制')">复制</a-button>
-        </div>
-        <pre class="snippet">{{ syncSnippet }}</pre>
-      </a-card>
+        </section>
+      </div>
     </div>
   </div>
 </template>
@@ -354,21 +371,111 @@ onMounted(fetchInfo)
 .geosite-body {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   overflow-y: auto;
   padding-right: 4px;
 }
 
-.geosite-card {
-  height: 100%;
-  margin-bottom: 16px;
+.summary-card :deep(.ant-card-body) {
+  padding: 12px 16px;
 }
 
-.geosite-foot {
+.summary-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(128, 128, 128, 0.2);
+}
+
+.geosite-alert {
+  margin: 0;
+}
+
+/* 左右分栏：两列等高、各自独立滚动，窄屏自动堆叠 */
+.geosite-columns {
+  display: flex;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.geosite-column {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+
+.column-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+.column-card :deep(.ant-card-body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+}
+
+.column-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.column-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(128, 128, 128, 0.18);
 }
 
-.geosite-sync {
-  height: auto;
+.foot-hint {
+  font-size: 12px;
+}
+
+.field-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.field-block {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sync-tip {
+  margin-bottom: 12px;
+}
+
+.sync-endpoint {
+  margin-bottom: 12px;
+}
+
+.copy-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.copy-line .mono {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .mono {
@@ -376,15 +483,18 @@ onMounted(fetchInfo)
   font-size: 12px;
 }
 
-.break-all {
-  word-break: break-all;
+.ellipsis {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .snippet-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 16px 0 8px;
+  margin: 0 0 8px;
 }
 
 .snippet {
@@ -396,5 +506,19 @@ onMounted(fetchInfo)
   font-size: 12px;
   line-height: 1.6;
   overflow-x: auto;
+}
+
+@media (max-width: 992px) {
+  .geosite-columns {
+    flex-direction: column;
+  }
+
+  .geosite-body {
+    overflow-y: auto;
+  }
+
+  .column-scroll {
+    overflow-y: visible;
+  }
 }
 </style>

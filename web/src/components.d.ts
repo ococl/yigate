@@ -33,6 +33,7 @@ declare module 'vue' {
     ALayoutSider: typeof import('antdv-next')['LayoutSider']
     AMenu: typeof import('antdv-next')['Menu']
     AMenuItem: typeof import('antdv-next')['MenuItem']
+    AMenuItemGroup: typeof import('antdv-next')['MenuItemGroup']
     AModal: typeof import('antdv-next')['Modal']
     APopconfirm: typeof import('antdv-next')['Popconfirm']
     ARadioGroup: typeof import('antdv-next')['RadioGroup']

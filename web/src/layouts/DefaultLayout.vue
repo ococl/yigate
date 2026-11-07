@@ -15,7 +15,7 @@ const selectedKeys = computed(() => {
   return [name || '']
 })
 
-const openKeys = ref<string[]>(['manage', 'system', 'docs'])
+const openKeys = ref<string[]>(['manage', 'system', 'help'])
 
 const siderStyle = computed(() => ({
   background: token.value.colorBgContainer,
@@ -71,9 +71,6 @@ function handleLogout() {
             <a-menu-item key="rules">
               <RouterLink to="/rules">路由规则</RouterLink>
             </a-menu-item>
-            <a-menu-item key="geosite">
-              <RouterLink to="/geosite">GeoSite 数据</RouterLink>
-            </a-menu-item>
             <a-menu-item key="users">
               <RouterLink to="/users">用户管理</RouterLink>
             </a-menu-item>
@@ -87,21 +84,26 @@ function handleLogout() {
             <a-menu-item key="settings">
               <RouterLink to="/settings">系统设置</RouterLink>
             </a-menu-item>
+            <a-menu-item key="geosite">
+              <RouterLink to="/geosite">GeoSite 数据</RouterLink>
+            </a-menu-item>
+            <a-menu-item key="pprof">
+              <RouterLink to="/pprof">pprof 性能分析</RouterLink>
+            </a-menu-item>
           </a-sub-menu>
 
-          <a-sub-menu key="docs">
-            <template #title>文档</template>
+          <a-sub-menu key="help">
+            <template #title>帮助</template>
             <a-menu-item key="docs-auth">
               <RouterLink to="/docs/auth">认证机制</RouterLink>
             </a-menu-item>
             <a-menu-item key="docs-api">
               <RouterLink to="/docs/api">API 文档</RouterLink>
             </a-menu-item>
+            <a-menu-item key="about">
+              <RouterLink to="/about">关于</RouterLink>
+            </a-menu-item>
           </a-sub-menu>
-
-          <a-menu-item key="about">
-            <RouterLink to="/about">关于</RouterLink>
-          </a-menu-item>
         </a-menu>
       </div>
     </a-layout-sider>

@@ -11,18 +11,15 @@ interface SettingsSection {
   key: string
   title: string
   description: string
-}
-
-interface PprofLink {
-  label: string
-  path: string
-  description: string
+  // group 用于左侧二级菜单归类，按数组顺序连续分组
+  group: string
 }
 
 const defaultSection: SettingsSection = {
   key: 'basic',
   title: '基础设置',
   description: '监听信息、健康检查、连接上限与 SOCKS5 能力',
+  group: '基础',
 }
 
 const sections: SettingsSection[] = [
@@ -31,116 +28,59 @@ const sections: SettingsSection[] = [
     key: 'panel',
     title: '管理面板与安全',
     description: '内置 WebUI 开关与管理令牌',
+    group: '基础',
   },
   {
     key: 'routing',
     title: '路由策略',
     description: '兜底路由与自动探测策略',
+    group: '网络',
   },
   {
     key: 'dns',
     title: 'DNS 解析',
     description: '解析方式、DoH/DoT、超时与 IP 优先级',
+    group: '网络',
   },
   {
     key: 'timeout',
     title: '连接与超时',
     description: '拨号、握手、HTTP 交换与隧道空闲超时',
+    group: '网络',
   },
   {
     key: 'destination',
     title: '目标访问策略',
     description: '默认动作与 CIDR、域名、端口黑白名单',
+    group: '访问与配额',
   },
   {
     key: 'access',
     title: '访问控制',
     description: '客户端白名单、连接限速与单用户并发上限',
+    group: '访问与配额',
   },
   {
     key: 'quota',
     title: '流量审计与配额',
     description: '流量审计开关、用户与上游配额',
-  },
-  {
-    key: 'pprof',
-    title: 'pprof 性能分析',
-    description: '运行时性能采集入口、profile 列表与使用方式',
+    group: '访问与配额',
   },
 ]
 
-const pprofGroups: { title: string; items: PprofLink[] }[] = [
-  {
-    title: '概览',
-    items: [
-      {
-        label: 'pprof 首页',
-        path: '/debug/pprof/',
-        description: '查看所有可用的运行时 profile 与当前 goroutine 概览',
-      },
-    ],
-  },
-  {
-    title: 'CPU 与执行追踪',
-    items: [
-      {
-        label: 'CPU Profile',
-        path: '/debug/pprof/profile?seconds=30',
-        description: '采集 30 秒 CPU 使用情况，适合定位计算热点',
-      },
-      {
-        label: '执行追踪',
-        path: '/debug/pprof/trace?seconds=5',
-        description: '采集 5 秒运行时事件，适合分析调度与阻塞',
-      },
-    ],
-  },
-  {
-    title: '内存',
-    items: [
-      {
-        label: '堆内存',
-        path: '/debug/pprof/heap',
-        description: '当前堆内存分配快照，定位内存驻留',
-      },
-      {
-        label: '内存分配',
-        path: '/debug/pprof/allocs',
-        description: '累计内存分配采样，定位频繁分配',
-      },
-    ],
-  },
-  {
-    title: '并发与阻塞',
-    items: [
-      {
-        label: 'Goroutine',
-        path: '/debug/pprof/goroutine',
-        description: '全部 goroutine 调用栈，排查泄漏与卡死',
-      },
-      {
-        label: '阻塞分析',
-        path: '/debug/pprof/block',
-        description: '同步原语导致的阻塞事件',
-      },
-      {
-        label: '互斥锁',
-        path: '/debug/pprof/mutex',
-        description: '互斥锁竞争情况',
-      },
-    ],
-  },
-  {
-    title: '运行时',
-    items: [
-      {
-        label: '线程创建',
-        path: '/debug/pprof/threadcreate',
-        description: '操作系统线程创建情况',
-      },
-    ],
-  },
-]
+// 按 group 折叠为带标题的分组菜单
+const groupedSections = computed(() => {
+  const groups: { title: string; items: SettingsSection[] }[] = []
+  for (const section of sections) {
+    const last = groups[groups.length - 1]
+    if (last && last.title === section.group) {
+      last.items.push(section)
+    } else {
+      groups.push({ title: section.group, items: [section] })
+    }
+  }
+  return groups
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -253,11 +193,6 @@ const listenList = computed(() =>
     .filter(Boolean),
 )
 const multiListener = computed(() => listenList.value.length > 1)
-
-// pprof 开关是否有未保存修改
-const pprofDirty = computed(
-  () => settings.value !== null && form.value.enable_pprof !== settings.value.enable_pprof,
-)
 
 function isSectionKey(value: unknown): value is string {
   return typeof value === 'string' && sections.some((section) => section.key === value)
@@ -390,7 +325,7 @@ async function handleSave() {
     check_interval_seconds: Math.round(f.check_interval_seconds),
     max_connections: Math.round(f.max_connections),
     webui_enabled: f.webui_enabled,
-    enable_pprof: f.enable_pprof,
+    // pprof 开关由独立页面管理，此处不提交，避免覆盖另一页面的修改
     socks5_allow_bind: f.socks5_allow_bind,
     socks5_allow_udp_associate: f.socks5_allow_udp_associate,
     routing_final: f.routing_final,
@@ -499,13 +434,19 @@ onMounted(fetchAll)
         <a-card size="small" class="settings-nav-card">
           <template #title>设置分类</template>
           <a-menu :selected-keys="[activeSection]" mode="inline" style="border: none;">
-            <a-menu-item
-              v-for="section in sections"
-              :key="section.key"
-              @click="selectSection(section.key)"
+            <a-menu-item-group
+              v-for="group in groupedSections"
+              :key="group.title"
+              :title="group.title"
             >
-              {{ section.title }}
-            </a-menu-item>
+              <a-menu-item
+                v-for="section in group.items"
+                :key="section.key"
+                @click="selectSection(section.key)"
+              >
+                {{ section.title }}
+              </a-menu-item>
+            </a-menu-item-group>
           </a-menu>
         </a-card>
       </aside>
@@ -670,15 +611,6 @@ onMounted(fetchAll)
                       启用后，目标为 socks5h:// 的请求会重定向到指定上游
                     </a-typography-text>
                   </a-form-item>
-                </a-card>
-
-                <a-card size="small" title="GeoSite 数据">
-                  <a-typography-text type="secondary">
-                    GeoSite 域名库的版本回显、更新来源与下游节点同步已迁移至独立页面。
-                  </a-typography-text>
-                  <div style="margin-top: 8px;">
-                    <RouterLink to="/geosite">前往 GeoSite 数据</RouterLink>
-                  </div>
                 </a-card>
               </div>
 
@@ -885,103 +817,6 @@ onMounted(fetchAll)
                 </a-card>
               </div>
 
-              <!-- pprof 性能分析 -->
-              <div v-show="activeSection === 'pprof'">
-                <a-alert
-                  type="warning"
-                  show-icon
-                  style="margin-bottom: 16px;"
-                  message="pprof 属于敏感调试入口"
-                  description="仅在管理端口绑定回环地址或受信网络时启用，请勿直接暴露到公网。采集期间会带来额外性能开销。"
-                />
-
-                <a-card size="small" title="采集开关" style="margin-bottom: 16px;">
-                  <a-row :gutter="16" align="middle">
-                    <a-col :xs="24" :md="10">
-                      <a-form-item label="pprof 调试端点" tooltip="启用后可在管理端口访问 /debug/pprof/">
-                        <a-switch v-model:checked="form.enable_pprof" checked-children="启用" un-checked-children="关闭" />
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="14">
-                      <a-space wrap>
-                        <a-tag :color="form.enable_pprof ? 'green' : 'default'">
-                          {{ form.enable_pprof ? '表单已启用' : '表单已关闭' }}
-                        </a-tag>
-                        <a-tag :color="settings?.enable_pprof ? 'blue' : 'default'">
-                          当前生效：{{ settings?.enable_pprof ? '已启用' : '未启用' }}
-                        </a-tag>
-                        <a-typography-text v-if="pprofDirty" type="warning" style="font-size: 12px;">
-                          有未保存的修改
-                        </a-typography-text>
-                      </a-space>
-                      <div style="margin-top: 8px;">
-                        <a-typography-text type="secondary">
-                          基础地址：<a-typography-text code>/debug/pprof/</a-typography-text>，需通过管理端口访问。
-                        </a-typography-text>
-                      </div>
-                    </a-col>
-                  </a-row>
-                  <a-alert
-                    v-if="!form.enable_pprof"
-                    type="info"
-                    show-icon
-                    style="margin-top: 12px;"
-                    message="pprof 尚未启用"
-                    description="开启上方开关并保存后，以下入口才可访问。"
-                  />
-                </a-card>
-
-                <a-card
-                  v-for="group in pprofGroups"
-                  :key="group.title"
-                  size="small"
-                  :title="group.title"
-                  style="margin-bottom: 16px;"
-                >
-                  <div class="pprof-list">
-                    <div v-for="item in group.items" :key="item.path" class="pprof-item">
-                      <div class="pprof-item-main">
-                        <a :href="item.path" target="_blank" rel="noopener noreferrer">{{ item.label }}</a>
-                        <a-typography-text type="secondary" style="font-size: 12px;">
-                          {{ item.description }}
-                        </a-typography-text>
-                      </div>
-                      <div class="pprof-item-actions">
-                        <a-typography-text code style="font-size: 12px;">{{ item.path }}</a-typography-text>
-                        <a :href="item.path" target="_blank" rel="noopener noreferrer">打开</a>
-                      </div>
-                    </div>
-                  </div>
-                </a-card>
-
-                <a-card size="small" title="使用方式">
-                  <a-typography-paragraph type="secondary">
-                    以本机管理端口 8890 为例，采集结果可下载后使用 <a-typography-text code>go tool pprof</a-typography-text> 分析。
-                  </a-typography-paragraph>
-
-                  <a-typography-title :level="5">采集 CPU Profile（30 秒）</a-typography-title>
-                  <div class="code-block">
-                    <div class="code-block-header">
-                      <span>cURL</span>
-                    </div>
-                    <pre><code>curl -o cpu.pprof "http://127.0.0.1:8890/debug/pprof/profile?seconds=30"</code></pre>
-                  </div>
-
-                  <a-typography-title :level="5">本地分析</a-typography-title>
-                  <div class="code-block">
-                    <div class="code-block-header">
-                      <span>终端</span>
-                    </div>
-                    <pre><code>go tool pprof -http=:8081 cpu.pprof</code></pre>
-                  </div>
-
-                  <a-typography-paragraph type="secondary" style="margin-top: 12px;">
-                    若管理令牌已启用，<code>curl</code> 请求需额外携带
-                    <a-typography-text code>Authorization: Bearer &lt;token&gt;</a-typography-text> 请求头；
-                    浏览器直接打开链接时需先通过管理端认证。
-                  </a-typography-paragraph>
-                </a-card>
-              </div>
             </a-form>
           </a-spin>
         </div>
@@ -1067,66 +902,4 @@ onMounted(fetchAll)
   overscroll-behavior: contain;
 }
 
-.pprof-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.pprof-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  flex-wrap: wrap;
-  padding: 8px 0;
-}
-
-.pprof-item + .pprof-item {
-  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
-}
-
-.pprof-item-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.pprof-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.code-block {
-  background: var(--ant-color-fill-quaternary, #f5f5f5);
-  border: 1px solid var(--ant-color-border-secondary, #e8e8e8);
-  border-radius: 6px;
-  overflow: hidden;
-  margin: 8px 0;
-}
-
-.code-block-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 12px;
-  background: var(--ant-color-fill-tertiary, #fafafa);
-  border-bottom: 1px solid var(--ant-color-border-secondary, #e8e8e8);
-  font-size: 12px;
-  color: var(--ant-color-text-secondary, #666);
-}
-
-.code-block pre {
-  margin: 0;
-  padding: 12px 16px;
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.code-block code {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-}
 </style>

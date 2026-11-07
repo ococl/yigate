@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"yigate/proxy"
 )
 
@@ -1304,5 +1306,100 @@ log:
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotModified {
 		t.Fatalf("conditional download status = %d, want 304", resp.StatusCode)
+	}
+}
+
+// TestIntegrationTrafficSurvivesConfigReload 模拟“修改上游后配置热加载”，
+// 确认已记录的流量明细不会因为重载而被清空。
+func TestIntegrationTrafficSurvivesConfigReload(t *testing.T) {
+	originAddr := startOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "reload traffic")
+	})
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	cfg := defaultConfig()
+	cfg.Listen = findFreePort(t)
+	cfg.Management = findFreePort(t)
+	cfg.ManagementAuthToken = "test-token"
+	cfg.Routing.Final = "direct"
+	cfg.Routing.Socks5HRedirect.Enabled = false
+	cfg.DestinationPolicy.ProtectPrivate = false
+	cfg.TrafficAudit.Enabled = true
+	cfg.TrafficAudit.RetentionDays = 30
+	cfg.Log.Level = "warn"
+	cfg.Log.Output = "stdout"
+
+	writeConfig := func(c *Config) {
+		t.Helper()
+		raw, err := yaml.Marshal(c)
+		if err != nil {
+			t.Fatalf("marshal config: %v", err)
+		}
+		if err := os.WriteFile(cfgPath, raw, 0644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+	writeConfig(cfg)
+
+	s, err := NewServer(cfgPath, cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go func() {
+		if err := s.Start(); err != nil {
+			t.Logf("Start returned: %v", err)
+		}
+	}()
+	defer s.Stop()
+	for i := 0; i < 100; i++ {
+		s.listenersMu.Lock()
+		ln := s.listeners[cfg.Listen]
+		s.listenersMu.Unlock()
+		if ln != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	proxyURL, _ := url.Parse("http://" + cfg.Listen)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+	resp, err := client.Get("http://" + originAddr + "/")
+	if err != nil {
+		t.Fatalf("proxy GET: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	total := func() int64 {
+		var sum int64
+		for _, entry := range s.currentRuntime().trafficAccounter.Snapshot().Entries {
+			sum += entry.Total
+		}
+		return sum
+	}
+	before := total()
+	if before <= 0 {
+		t.Fatal("no traffic recorded before reload")
+	}
+
+	// 增删/启停上游会触发同样的配置热加载流程
+	cfg.Upstreams = append(cfg.Upstreams, proxy.UpstreamConfig{
+		Name:     "reload-upstream",
+		URL:      "socks5://127.0.0.1:1080",
+		Types:    []string{"socks5"},
+		Priority: 1,
+		Weight:   1,
+	})
+	writeConfig(cfg)
+	if err := s.LoadAndApply(); err != nil {
+		t.Fatalf("LoadAndApply: %v", err)
+	}
+
+	if after := total(); after != before {
+		t.Fatalf("traffic total changed after reload: before=%d after=%d", before, after)
 	}
 }

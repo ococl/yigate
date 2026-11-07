@@ -58,6 +58,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/settings/SettingsView.vue'),
       },
       {
+        path: 'pprof',
+        name: 'pprof',
+        component: () => import('@/views/pprof/PprofView.vue'),
+      },
+      {
         path: 'docs/auth',
         name: 'docs-auth',
         component: () => import('@/views/auth-doc/AuthDocView.vue'),

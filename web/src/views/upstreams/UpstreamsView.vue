@@ -10,6 +10,7 @@ import {
   checkAllUpstreams,
 } from '@/api/upstreams'
 import { getStatus } from '@/api/system'
+import { formatDateTime } from '@/utils/datetime'
 import type {
   UpstreamInfo,
   AddUpstreamRequest,
@@ -347,7 +348,7 @@ function formatTime(value?: string) {
   if (!value) return '—'
   const t = new Date(value)
   if (Number.isNaN(t.getTime()) || t.getTime() <= 0) return '—'
-  return t.toLocaleString()
+  return formatDateTime(t)
 }
 
 function lastCheckText(record: UpstreamInfo) {

@@ -107,25 +107,15 @@ func newTrafficAccounter(cfg TrafficAuditConfig, storagePath string) *TrafficAcc
 	if storagePath != "" {
 		entries, err := loadTrafficHistory(storagePath)
 		if err != nil {
-			Logger().Warnw("load traffic history failed, starting with empty history",
-				"path", storagePath, "error", err)
-		} else {
-			for _, item := range entries {
-				if item.BytesIn < 0 || item.BytesOut < 0 {
-					continue
-				}
-				key := TrafficKey{User: item.User, Upstream: item.Upstream, Target: item.Target}
-				mapKey := trafficHistoryKey(item.Day, key)
-				if existing := a.history[mapKey]; existing != nil {
-					existing.bytesIn.Add(item.BytesIn)
-					existing.bytesOut.Add(item.BytesOut)
-					continue
-				}
-				entry := &trafficHistoryEntry{day: item.Day, key: key}
-				entry.bytesIn.Store(item.BytesIn)
-				entry.bytesOut.Store(item.BytesOut)
-				a.history[mapKey] = entry
+			// 解析失败时先备份原文件，避免下一次 Flush 用空数据覆盖已有记录。
+			if backup, backupErr := backupTrafficHistory(storagePath); backupErr == nil {
+				Logger().Errorw("load traffic history failed, backup created",
+					"path", storagePath, "backup", backup, "error", err)
+			} else {
+				Logger().Errorw("load traffic history failed", "path", storagePath, "error", err)
 			}
+		} else {
+			a.mergeHistoryLocked(entries)
 			if pruned := a.pruneHistoryLocked(a.now()); pruned > 0 {
 				a.dirtyGen.Add(1)
 			}
@@ -135,6 +125,33 @@ func newTrafficAccounter(cfg TrafficAuditConfig, storagePath string) *TrafficAcc
 
 	a.Start()
 	return a
+}
+
+// mergeHistoryLocked 把磁盘明细合并进内存：同一天同一组合的条目累加，
+// 其余条目原样恢复，用于启动加载与防止历史被空数据覆盖。
+func (a *TrafficAccounter) mergeHistoryLocked(entries []trafficHistoryDiskEntry) int {
+	if len(entries) == 0 {
+		return 0
+	}
+	merged := 0
+	for _, item := range entries {
+		if item.BytesIn < 0 || item.BytesOut < 0 {
+			continue
+		}
+		key := TrafficKey{User: item.User, Upstream: item.Upstream, Target: item.Target}
+		mapKey := trafficHistoryKey(item.Day, key)
+		if existing := a.history[mapKey]; existing != nil {
+			existing.bytesIn.Add(item.BytesIn)
+			existing.bytesOut.Add(item.BytesOut)
+			continue
+		}
+		entry := &trafficHistoryEntry{day: item.Day, key: key}
+		entry.bytesIn.Store(item.BytesIn)
+		entry.bytesOut.Store(item.BytesOut)
+		a.history[mapKey] = entry
+		merged++
+	}
+	return merged
 }
 
 // Start 启动配额窗口重置与持久化 goroutine。
@@ -191,6 +208,8 @@ func (a *TrafficAccounter) Reconfigure(cfg TrafficAuditConfig) {
 	if a.retentionDays.Swap(int64(retention)) != int64(retention) {
 		a.dirtyGen.Add(1)
 	}
+	// 配置变更（上游增删、启停等）时落盘一次，避免热加载后进程异常退出丢失最近明细。
+	a.Flush()
 }
 
 func (a *TrafficAccounter) windowLoop() {
@@ -388,6 +407,23 @@ func (a *TrafficAccounter) Flush() {
 	}
 	a.flushMu.Lock()
 	defer a.flushMu.Unlock()
+
+	// 内存中没有任何明细但磁盘上仍有历史时，先合并回来再写盘，
+	// 避免统计器重建或加载异常时用空数据把已持久化的记录清空。
+	a.mu.RLock()
+	empty := len(a.history) == 0
+	a.mu.RUnlock()
+	if empty && a.dirtyGen.Load() != a.flushedAt.Load() {
+		if diskEntries, err := loadTrafficHistory(a.storePath); err == nil && len(diskEntries) > 0 {
+			a.mu.Lock()
+			if merged := a.mergeHistoryLocked(diskEntries); merged > 0 {
+				a.dirtyGen.Add(1)
+				Logger().Warnw("traffic history was empty in memory, restored from disk",
+					"path", a.storePath, "entries", merged)
+			}
+			a.mu.Unlock()
+		}
+	}
 
 	a.mu.Lock()
 	if pruned := a.pruneHistoryLocked(a.now()); pruned > 0 {

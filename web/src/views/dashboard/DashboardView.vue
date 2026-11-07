@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { message, theme } from 'antdv-next'
 import { getHealth, getStatus, getTraffic } from '@/api/system'
+import { formatDateTime, formatTimeOnly } from '@/utils/datetime'
 import type { HealthStatus, ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
 
 const health = ref<HealthStatus | null>(null)
@@ -378,7 +379,7 @@ onUnmounted(() => {
         <a-typography-title :level="4" style="margin: 0;">仪表盘</a-typography-title>
         <a-typography-text type="secondary">
           网关实时状态概览 · 每 10 秒自动刷新
-          <span v-if="lastRefreshed"> · 最近更新 {{ lastRefreshed.toLocaleTimeString() }}</span>
+          <span v-if="lastRefreshed"> · 最近更新 {{ formatTimeOnly(lastRefreshed) }}</span>
         </a-typography-text>
       </div>
       <a-space>
@@ -456,7 +457,15 @@ onUnmounted(() => {
 
       <a-col :xs="24" :lg="16">
         <a-card size="small" title="流量概览" style="height: 100%;">
-          <template v-if="traffic?.enabled">
+          <template v-if="traffic && (traffic.enabled || traffic.entries.length > 0)">
+            <a-alert
+              v-if="!traffic.enabled"
+              type="warning"
+              show-icon
+              style="margin-bottom: 12px;"
+              message="流量审计已关闭"
+              description="以下为已持久化的历史记录；重新开启审计后才会记录新流量。"
+            />
             <div class="traffic-summary">
               <span>共 <strong>{{ totals.count }}</strong> 条记录</span>
               <span>覆盖 <strong>{{ totals.users }}</strong> 个用户</span>
@@ -547,9 +556,9 @@ onUnmounted(() => {
 
             <a-typography-text v-else type="secondary" class="charts-empty">暂无流量数据</a-typography-text>
           </template>
-          <a-empty v-else description="流量审计未启用">
+          <a-empty v-else :description="traffic ? '暂无流量记录' : '流量数据加载失败'">
             <RouterLink to="/settings?section=quota">
-              <a-button type="primary" size="small">前往系统设置开启</a-button>
+              <a-button type="primary" size="small">前往系统设置查看流量审计</a-button>
             </RouterLink>
           </a-empty>
         </a-card>
