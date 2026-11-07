@@ -27,6 +27,22 @@
 
 ---
 
+## 界面预览
+
+管理后台由二进制内嵌，随服务启动即可访问（默认 `http://127.0.0.1:8890`），无需单独部署前端。以下截图取自 `v0.2.0` 演示实例，数据均为示例。
+
+![仪表盘](docs/screenshots/dashboard.png)
+
+| 上游管理 | 路由规则 |
+| --- | --- |
+| [![上游管理](docs/screenshots/upstreams.png)](docs/screenshots/upstreams.png) | [![路由规则](docs/screenshots/rules.png)](docs/screenshots/rules.png) |
+| **用户管理** | **流量审计** |
+| [![用户管理](docs/screenshots/users.png)](docs/screenshots/users.png) | [![流量审计](docs/screenshots/traffic.png)](docs/screenshots/traffic.png) |
+| **系统设置** | **登录** |
+| [![系统设置](docs/screenshots/settings.png)](docs/screenshots/settings.png) | [![登录](docs/screenshots/login.png)](docs/screenshots/login.png) |
+
+---
+
 ## 目录结构
 
 ```text
