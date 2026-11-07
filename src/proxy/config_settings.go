@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"net/http"
-	"time"
 )
 
 // SettingsView 是运行时全局设置的只读视图（时间字段统一转换为秒）。
@@ -114,19 +113,6 @@ type SettingsPatch struct {
 	QuotaWindowSec      *float64 `json:"quota_window_seconds"`
 
 	LogLevel *string `json:"log_level"`
-}
-
-// durationFromSeconds 将秒转换为 Duration，负值按 0 处理。
-func durationFromSeconds(seconds float64) Duration {
-	if seconds <= 0 {
-		return 0
-	}
-	return Duration(time.Duration(seconds * float64(time.Second)))
-}
-
-// secondsFromDuration 将 Duration 转换为秒。
-func secondsFromDuration(d Duration) float64 {
-	return time.Duration(d).Seconds()
 }
 
 // handleSettingsAPI 处理 GET/PUT /api/v1/config/settings。

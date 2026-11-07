@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -40,11 +41,14 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"FROM golang:1.21-alpine AS builder",
-		"FROM alpine:3.20",
+		"FROM node:",
+		"FROM golang:",
+		"AS builder",
+		"FROM alpine:",
 		"go mod download",
 		"CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct",
 		"embed-dist.mjs",
+		"https://cnb.cool/yi.team/yigate",
 		"adduser -D -u 1000 yigate",
 		"COPY --from=builder /build/yigate /usr/local/bin/yigate",
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
@@ -78,7 +82,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"YIGATE_DEFAULT_LISTEN", "YIGATE_DEFAULT_MANAGEMENT", "CHOWN", "SETGID", "SETUID", "setpriv --reuid=1000", "Authorization: Bearer"} {
+	for _, want := range []string{"YIGATE_DEFAULT_LISTEN", "YIGATE_DEFAULT_MANAGEMENT", "CHOWN", "SETGID", "SETUID", "setpriv --reuid=1000", "Authorization: Bearer", "build:", "YIGATE_PROXY_BIND:-127.0.0.1"} {
 		if !bytes.Contains(rootCompose, []byte(want)) {
 			t.Fatalf("docker-compose.yml missing %q", want)
 		}
@@ -113,7 +117,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"source", "platforms.sh", "YIGATE_VERSION", "YIGATE_COMMIT", "YIGATE_BUILD_TIME", "YIGATE_REQUIRE_SBOM", "go mod verify", "-mod=readonly", "*.js.gz"} {
+	for _, want := range []string{"source", "platforms.sh", "YIGATE_VERSION", "YIGATE_COMMIT", "YIGATE_BUILD_TIME", "YIGATE_REQUIRE_SBOM", "go mod verify", "-mod=readonly", "-buildvcs=false", "anchore/syft", "*.js.gz"} {
 		if !bytes.Contains(ciBuild, []byte(want)) {
 			t.Fatalf("ci-build.sh missing %q", want)
 		}
@@ -137,6 +141,113 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	for _, want := range []string{"YIGATE_PLATFORMS=(", "linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64", "freebsd/amd64"} {
 		if !bytes.Contains(platforms, []byte(want)) {
 			t.Fatalf("platforms.sh missing %q", want)
+		}
+	}
+}
+
+func TestReleaseSecurityContracts(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join(".."))
+	read := func(parts ...string) []byte {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(append([]string{repoRoot}, parts...)...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+
+	cnb := read(".cnb.yml")
+	for _, removed := range []string{"early-bird-preview", "dev-latest", "早鸟预览版"} {
+		if bytes.Contains(cnb, []byte(removed)) {
+			t.Fatalf(".cnb.yml still contains removed preview pipeline marker %q", removed)
+		}
+	}
+	for _, want := range []string{"YIGATE_REQUIRE_SBOM", "check-release-configs.sh", "allowFailure: false"} {
+		if !bytes.Contains(cnb, []byte(want)) {
+			t.Fatalf(".cnb.yml missing %q", want)
+		}
+	}
+	formalStart := bytes.Index(cnb, []byte("\"v*\":\n  tag_push:"))
+	if formalStart < 0 {
+		t.Fatal(".cnb.yml missing formal release pipeline")
+	}
+	formal := cnb[formalStart:]
+	upload := bytes.Index(formal, []byte("name: upload-artifacts"))
+	create := bytes.Index(formal, []byte("name: create-release"))
+	if upload < 0 || create < 0 || upload > create {
+		t.Fatal("formal release must upload artifacts before create-release")
+	}
+	if !bytes.Contains(formal[upload:create], []byte("allowFailure: false")) {
+		t.Fatal("formal release artifact upload must fail closed")
+	}
+
+	configGate := read("scripts", "check-release-configs.sh")
+	for _, want := range []string{"deploy/config", "deploy/docker", "local-admin-token", "config.lan.yml"} {
+		if !bytes.Contains(configGate, []byte(want)) {
+			t.Fatalf("check-release-configs.sh missing %q", want)
+		}
+	}
+	fileGate := read("scripts", "check-release-files.sh")
+	for _, want := range []string{"spdx.json", "sha256sum -c"} {
+		if !bytes.Contains(fileGate, []byte(want)) {
+			t.Fatalf("check-release-files.sh missing %q", want)
+		}
+	}
+	for _, cfg := range [][]string{{"deploy", "config", "config.lan.yml"}, {"deploy", "docker", "config.lan.yml"}} {
+		data := read(cfg...)
+		if !bytes.Contains(data, []byte("__REPLACE_PROXY_PASSWORD__")) || !bytes.Contains(data, []byte("__REPLACE_MANAGEMENT_TOKEN__")) {
+			t.Fatalf("%s must use generated credential placeholders", filepath.Join(cfg...))
+		}
+		if bytes.Contains(data, []byte("change-me")) || bytes.Contains(data, []byte("local-admin-token")) {
+			t.Fatalf("%s still contains legacy fixed credentials", filepath.Join(cfg...))
+		}
+	}
+
+	quickstart := read("scripts", "quickstart-linux.sh")
+	for _, want := range []string{"YIGATE_RELEASE_URL", "SHA256SUMS", "User=ygate"} {
+		if !bytes.Contains(quickstart, []byte(want)) {
+			t.Fatalf("quickstart-linux.sh missing %q", want)
+		}
+	}
+	if bytes.Contains(quickstart, []byte("GITHUB_REPO")) {
+		t.Fatal("quickstart-linux.sh must not depend on the removed GitHub source")
+	}
+}
+
+// TestWorkflowActionsPinnedToCommitSHA 保证第三方 Action 以 commit SHA 固定，
+// 防止 tag 被上游移动导致供应链风险。
+func TestWorkflowActionsPinnedToCommitSHA(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join(".."))
+	workflows, err := filepath.Glob(filepath.Join(repoRoot, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workflows) == 0 {
+		t.Fatal("no workflow files found")
+	}
+	usesLine := regexp.MustCompile(`^\s*(?:-\s*)?uses:\s*(\S+)`)
+	shaPin := regexp.MustCompile(`^[0-9a-f]{40}$`)
+	for _, wf := range workflows {
+		data, err := os.ReadFile(wf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			m := usesLine.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			ref := m[1]
+			if strings.HasPrefix(ref, "./") {
+				continue // 本地 Action 无需 pin
+			}
+			at := strings.LastIndex(ref, "@")
+			if at < 0 {
+				t.Fatalf("%s: action %q is not pinned", filepath.Base(wf), ref)
+			}
+			if !shaPin.MatchString(ref[at+1:]) {
+				t.Fatalf("%s: action %q must be pinned to a 40-char commit SHA", filepath.Base(wf), ref)
+			}
 		}
 	}
 }

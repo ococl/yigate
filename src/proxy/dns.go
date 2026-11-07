@@ -374,7 +374,7 @@ func (r *DNSResolver) dotQuery(ctx context.Context, host string, qtype uint16) (
 		return nil, err
 	}
 	respLen := binary.BigEndian.Uint16(respLenBuf)
-	if respLen == 0 || respLen > 65535 {
+	if respLen == 0 {
 		return nil, fmt.Errorf("invalid DoT response length %d", respLen)
 	}
 
@@ -426,12 +426,12 @@ func buildDNSQuery(domain string, qtype uint16) []byte {
 
 	// Header (12 bytes)
 	id := uint16(time.Now().UnixNano() & 0xFFFF)
-	binary.Write(&buf, binary.BigEndian, id)             // ID
-	binary.Write(&buf, binary.BigEndian, uint16(0x0100)) // Flags: RD=1
-	binary.Write(&buf, binary.BigEndian, uint16(1))      // QDCOUNT
-	binary.Write(&buf, binary.BigEndian, uint16(0))      // ANCOUNT
-	binary.Write(&buf, binary.BigEndian, uint16(0))      // NSCOUNT
-	binary.Write(&buf, binary.BigEndian, uint16(0))      // ARCOUNT
+	_ = binary.Write(&buf, binary.BigEndian, id)             // ID
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0100)) // Flags: RD=1
+	_ = binary.Write(&buf, binary.BigEndian, uint16(1))      // QDCOUNT
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0))      // ANCOUNT
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0))      // NSCOUNT
+	_ = binary.Write(&buf, binary.BigEndian, uint16(0))      // ARCOUNT
 
 	// Question: QNAME
 	domain = strings.TrimSuffix(domain, ".")
@@ -448,8 +448,8 @@ func buildDNSQuery(domain string, qtype uint16) []byte {
 	buf.WriteByte(0) // root label
 
 	// Question: QTYPE + QCLASS
-	binary.Write(&buf, binary.BigEndian, qtype)     // QTYPE
-	binary.Write(&buf, binary.BigEndian, uint16(1)) // QCLASS = IN
+	_ = binary.Write(&buf, binary.BigEndian, qtype)     // QTYPE
+	_ = binary.Write(&buf, binary.BigEndian, uint16(1)) // QCLASS = IN
 
 	return buf.Bytes()
 }

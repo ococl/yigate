@@ -80,14 +80,16 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 docker compose up --build
 ```
 
-容器将挂载当前目录的 `./data` 与 `./logs`，配置位于 `/var/lib/yigate/data/config.yml`。
+容器将挂载当前目录的 `./data` 与 `./logs`，配置位于 `/var/lib/yigate/data/config.yml`。默认只把代理和管理端口绑定到宿主机回环地址；需要局域网访问时设置 `YIGATE_PROXY_BIND=0.0.0.0`，并先在配置中设置代理用户密码，避免开放匿名代理。
 
 ### 方式三：systemd
 
 ```bash
 sudo bash deploy/systemd/install.sh
-sudo systemctl enable --now yigate
+sudo systemctl start yigate
 ```
+
+`install.sh lan` 会生成随机代理密码和管理 Token，写入 `/etc/yigate/initial-credentials`（仅 root 可读）。
 
 ---
 
@@ -156,7 +158,7 @@ sudo systemctl enable --now yigate
 # Go 后端
 cd src && GOPROXY=https://goproxy.cn,direct go build -o yigate .
 
-# 前端（独立项目，Node ^22.18 或 >=24.11，见 .nvmrc）
+# 前端（独立项目，Node 26.13，见 .nvmrc）
 cd web && npm ci && npm run build
 # 构建后通过 embed-dist.mjs 压缩并嵌入 WebUI，再重新编译 Go
 # （直接 make build 会自动完成这两步）

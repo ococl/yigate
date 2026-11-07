@@ -202,10 +202,7 @@ func (m *UpstreamManager) CheckUpstream(name string) (UpstreamCheckResult, error
 // 返回结果按上游名称排序，便于前端展示巡检报告。
 func (m *UpstreamManager) CheckAllUpstreams() []UpstreamCheckResult {
 	m.mu.Lock()
-	ups := make([]*Upstream, 0, len(m.upstreams))
-	for _, u := range m.upstreams {
-		ups = append(ups, u)
-	}
+	ups := append([]*Upstream(nil), m.upstreams...)
 	m.mu.Unlock()
 
 	results := make([]UpstreamCheckResult, len(ups))
@@ -319,7 +316,7 @@ func checkHTTPProtocol(conn net.Conn, up *Upstream, timeout time.Duration) bool 
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return false
 	}
-	defer conn.SetDeadline(time.Time{})
+	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 
 	creds := proxyCredentials(up)
 	auth := ""
@@ -354,7 +351,7 @@ func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) boo
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return false
 	}
-	defer conn.SetDeadline(time.Time{})
+	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 
 	user, pass := "", ""
 	if up.URL != nil && up.URL.User != nil {

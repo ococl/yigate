@@ -1,14 +1,19 @@
 services:
   yigate:
-    image: ${YIGATE_IMAGE:-docker.cnb.cool/yi.team/yigate:main}
+    image: ${YIGATE_IMAGE:-ygate:local}
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
     container_name: yigate
     command: ["-config", "/var/lib/yigate/data/config.yml", "run"]
     environment:
-      # 仅用于首次生成配置；容器内须监听所有接口，宿主机管理端口仍只绑定回环。
+      # 仅用于首次生成配置；容器内须监听所有接口，宿主机端口默认只绑定回环。
       YIGATE_DEFAULT_LISTEN: "0.0.0.0:8891"
       YIGATE_DEFAULT_MANAGEMENT: "0.0.0.0:8890"
     ports:
-      - "8891:8891"   # 代理端口（HTTP/HTTPS/SOCKS5 共用）
+      # 默认只暴露到本机。需要局域网访问时显式设置 YIGATE_PROXY_BIND=0.0.0.0，
+      # 并先在 config.yml 中配置代理用户密码，避免开放匿名代理。
+      - "${YIGATE_PROXY_BIND:-127.0.0.1}:8891:8891"
       - "127.0.0.1:8890:8890"  # 管理端口（WebUI + API，建议仅暴露到回环）
     volumes:
       - ./data:/var/lib/yigate/data:rw   # 运行数据目录（含 config.yml，可写，首次启动自动生成默认配置）

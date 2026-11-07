@@ -1,12 +1,13 @@
 # yigate 局域网 Docker 认证代理模板
 # 容器内监听所有接口；代理端口对局域网开放，管理端口仅映射到宿主机回环。
-# 部署前必须修改下列示例密码和 Token，并按实际可信网段修改 allowed_clients。
+# 部署前必须把下列占位符替换为强密码和随机 Token，并按实际可信网段修改 allowed_clients。
+# 服务端会拒绝原样使用占位符启动。
 
 listen: "0.0.0.0:8891"
 users:
-  proxy: "change-me"
+  proxy: "__REPLACE_PROXY_PASSWORD__"
 management: "0.0.0.0:8890"
-management_auth_token: "change-me-admin-token"
+management_auth_token: "__REPLACE_MANAGEMENT_TOKEN__"
 upstreams: []
 routing:
   final: direct

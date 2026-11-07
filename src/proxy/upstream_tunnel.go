@@ -20,7 +20,7 @@ func (c *bufferedConn) CloseWrite() error {
 	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return cw.CloseWrite()
 	}
-	return c.Conn.Close()
+	return c.Close()
 }
 
 func (c *bufferedConn) CloseRead() error {

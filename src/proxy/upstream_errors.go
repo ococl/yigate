@@ -68,10 +68,7 @@ func IsUpstreamError(err error) bool {
 	// 未分类的错误（裸 net.Error 等）默认视为上游错误，
 	// 因为拨号到上游的连接失败最可能是上游问题。
 	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &netErr)
 }
 
 // IsTargetError 判断错误是否归因于目标端。

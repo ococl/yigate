@@ -211,11 +211,11 @@ func TestLoadConfigTLSPaths(t *testing.T) {
 	os.WriteFile(keyFile, []byte("key"), 0644)
 
 	path := filepath.Join(dir, "config.yml")
-	os.WriteFile(path, []byte(fmt.Sprintf(`listen: 127.0.0.1:0
+	os.WriteFile(path, []byte(`listen: 127.0.0.1:0
 tls:
   cert_file: server.crt
   key_file: server.key
-`)), 0644)
+`), 0644)
 
 	cfg, err := LoadConfig(path)
 	if err != nil {
@@ -575,12 +575,12 @@ func TestLoadConfigListenerTLSPaths(t *testing.T) {
 	os.WriteFile(keyFile, []byte("key"), 0644)
 
 	path := filepath.Join(dir, "config.yml")
-	os.WriteFile(path, []byte(fmt.Sprintf(`listeners:
+	os.WriteFile(path, []byte(`listeners:
   - listen: 127.0.0.1:0
     tls:
       cert_file: server.crt
       key_file: server.key
-`)), 0644)
+`), 0644)
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)

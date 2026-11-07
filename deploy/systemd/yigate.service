@@ -1,5 +1,5 @@
 [Unit]
-Description=yigate proxy server
+Description=YiGate Unified Proxy Gateway
 After=network.target
 
 [Service]

@@ -5,11 +5,11 @@
 
 listen: "0.0.0.0:8891"
 users:
-  proxy: "change-me"   # 代理客户端密码，请修改为强密码
+  proxy: "__REPLACE_PROXY_PASSWORD__"   # install.sh lan 会生成随机密码；手动部署必须先替换
 management: "127.0.0.1:8890"
 # management_auth_token: 管理端口鉴权令牌；非空时所有 /api/v1/* 端点要求 Bearer 认证。
-# 若留空且管理端口绑定非回环地址，启动将报错。可在此设置，或在 WebUI 中生成/修改。
-management_auth_token: "change-me-admin-token"
+# install.sh lan 会生成随机令牌；手动部署必须先替换。服务端拒绝原样使用占位符。
+management_auth_token: "__REPLACE_MANAGEMENT_TOKEN__"
 upstreams: []
 routing:
   final: direct

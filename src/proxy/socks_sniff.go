@@ -196,7 +196,7 @@ func writeSOCKS5ConnectReply(conn net.Conn, rep byte) bool {
 
 func readInitialClientBytes(conn net.Conn) []byte {
 	_ = conn.SetReadDeadline(time.Now().Add(socks5SniffTimeout))
-	defer conn.SetReadDeadline(time.Time{})
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 
 	buf := make([]byte, 0, 8192)
 	tmp := make([]byte, 2048)
@@ -227,7 +227,7 @@ func hasEnoughInitialBytes(buf []byte) bool {
 	if strings.Contains(text, "\r\n\r\n") || strings.Contains(text, "\n\n") {
 		return true
 	}
-	if !(strings.HasPrefix(text, "GET ") || strings.HasPrefix(text, "POST ") || strings.HasPrefix(text, "HEAD ") || strings.HasPrefix(text, "PUT ") || strings.HasPrefix(text, "DELETE ") || strings.HasPrefix(text, "OPTIONS ") || strings.HasPrefix(text, "PATCH ")) {
+	if !strings.HasPrefix(text, "GET ") && !strings.HasPrefix(text, "POST ") && !strings.HasPrefix(text, "HEAD ") && !strings.HasPrefix(text, "PUT ") && !strings.HasPrefix(text, "DELETE ") && !strings.HasPrefix(text, "OPTIONS ") && !strings.HasPrefix(text, "PATCH ") {
 		return true
 	}
 	return false
@@ -253,7 +253,7 @@ func rewriteSOCKS5TargetFromInitial(target string, initial []byte) string {
 
 func sniffHTTPHost(data []byte) string {
 	text := string(data)
-	if !(strings.HasPrefix(text, "GET ") || strings.HasPrefix(text, "POST ") || strings.HasPrefix(text, "HEAD ") || strings.HasPrefix(text, "PUT ") || strings.HasPrefix(text, "DELETE ") || strings.HasPrefix(text, "OPTIONS ") || strings.HasPrefix(text, "PATCH ")) {
+	if !strings.HasPrefix(text, "GET ") && !strings.HasPrefix(text, "POST ") && !strings.HasPrefix(text, "HEAD ") && !strings.HasPrefix(text, "PUT ") && !strings.HasPrefix(text, "DELETE ") && !strings.HasPrefix(text, "OPTIONS ") && !strings.HasPrefix(text, "PATCH ") {
 		return ""
 	}
 	for _, line := range strings.Split(text, "\n") {

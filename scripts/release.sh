@@ -63,8 +63,8 @@ if ! find "${WEBUI_DIST}/assets" -maxdepth 1 -type f \( -name '*.js' -o -name '*
   exit 1
 fi
 
-if ! command -v syft >/dev/null 2>&1; then
-  echo "error: 正式发布需要 syft 生成 SBOM" >&2
+if ! command -v syft >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then
+  echo "error: 正式发布需要 syft 或 Docker 生成 SBOM" >&2
   exit 1
 fi
 

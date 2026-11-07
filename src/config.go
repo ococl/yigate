@@ -348,6 +348,19 @@ func isLoopbackListen(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+func isPlaceholderCredential(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return false
+	}
+	for _, prefix := range []string{"__replace_", "change-me", "local-admin-token"} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateTLSConfig(tlsCfg *TLSConfig) error {
 	hasCert := strings.TrimSpace(tlsCfg.CertFile) != ""
 	hasKey := strings.TrimSpace(tlsCfg.KeyFile) != ""
@@ -408,7 +421,7 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("listeners[%d].listen %q is duplicated", i, lc.Listen)
 		}
 		seenListeners[lc.Listen] = struct{}{}
-		if err := validateTLSConfig(&lc.TLS); err != nil {
+		if err := validateTLSConfig(&cfg.Listeners[i].TLS); err != nil {
 			return fmt.Errorf("listeners[%d].tls: %w", i, err)
 		}
 		if lc.TProxy.Enabled {
@@ -460,6 +473,21 @@ func validateConfig(cfg *Config) error {
 		// pprof 端点会暴露堆栈、内存与 goroutine 等敏感信息，免认证时仅允许绑定回环地址。
 		if cfg.Management != "" && !isLoopbackListen(cfg.Management) {
 			return fmt.Errorf("management_auth_token is required when enable_pprof is true and management listens on a non-loopback address")
+		}
+	}
+	if isPlaceholderCredential(cfg.ManagementAuthToken) {
+		return fmt.Errorf("management_auth_token still uses a placeholder; replace it with a strong random token")
+	}
+	for username, password := range cfg.Users {
+		if isPlaceholderCredential(password) {
+			return fmt.Errorf("proxy user %q still uses a placeholder password", username)
+		}
+	}
+	for i, lc := range cfg.Listeners {
+		for username, password := range lc.Users {
+			if isPlaceholderCredential(password) {
+				return fmt.Errorf("listeners[%d] user %q still uses a placeholder password", i, username)
+			}
 		}
 	}
 	if err := proxy.ValidateLogConfig(cfg.Log); err != nil {
@@ -714,7 +742,7 @@ func DefaultConfigYAML(generateToken bool) (string, error) {
 	}
 	header := "# yigate 默认配置（自动生成）\n" +
 		"# 修改后可通过 POST /api/v1/reload 或 SIGHUP 热加载。\n" +
-		"# 详见文档：https://github.com/yi-team/yigate\n\n"
+		"# 详见文档：https://cnb.cool/yi.team/yigate\n\n"
 	return header + string(data), nil
 }
 

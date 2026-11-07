@@ -86,7 +86,9 @@ func TestAccessControllerUserSlots(t *testing.T) {
 	ac.ReleaseUserSlot("bob")   // unknown user should be no-op
 
 	open, _ := NewAccessController(AccessControlConfig{})
-	if !open.AcquireUserSlot("alice") || !open.AcquireUserSlot("alice") {
+	first := open.AcquireUserSlot("alice")
+	second := open.AcquireUserSlot("alice")
+	if !first || !second {
 		t.Fatal("expected unlimited when max conns disabled")
 	}
 }

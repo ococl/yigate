@@ -11,11 +11,10 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 - 修改代码后优先运行相关 Go 测试。
 - 下载 Go 依赖时优先使用国内镜像：`GOPROXY=https://goproxy.cn,direct`。
 - 不要提交真实代理密码、管理 Token、上游账号或私有地址。
-- `.codebuddy/` 是项目相关数据目录，不要删除。
 
 ## 技术栈
 
-- Go 1.21
+- Go 1.21+（CI 与构建镜像使用 Go 1.27.3）
 - `fsnotify`：配置文件热加载。
 - `kardianos/service`：系统服务管理。
 - `zap`：结构化日志。

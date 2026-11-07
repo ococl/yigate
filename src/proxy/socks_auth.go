@@ -22,7 +22,7 @@ func socks5NegotiateAuth(client net.Conn, r *bufio.Reader, users map[string]stri
 
 	if AuthRequired(users) {
 		if !contains(methods, 0x02) {
-			client.Write([]byte{0x05, 0xFF})
+			_, _ = client.Write([]byte{0x05, 0xFF})
 			return "", errors.New("no acceptable auth method")
 		}
 		if _, err := client.Write([]byte{0x05, 0x02}); err != nil {
@@ -32,7 +32,7 @@ func socks5NegotiateAuth(client net.Conn, r *bufio.Reader, users map[string]stri
 	}
 
 	if !contains(methods, 0x00) {
-		client.Write([]byte{0x05, 0xFF})
+		_, _ = client.Write([]byte{0x05, 0xFF})
 		return "", errors.New("no acceptable auth method")
 	}
 	_, err := client.Write([]byte{0x05, 0x00})
@@ -61,7 +61,7 @@ func socks5ServerAuth(client net.Conn, r *bufio.Reader, users map[string]string)
 		return "", err
 	}
 	if !Authenticate(string(uname), string(passwd), users) {
-		client.Write([]byte{0x01, 0x01})
+		_, _ = client.Write([]byte{0x01, 0x01})
 		return "", errors.New("socks5 auth failed")
 	}
 	_, err := client.Write([]byte{0x01, 0x00})

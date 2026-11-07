@@ -2,108 +2,20 @@
 # YiGate CNB CI/CD 配置
 #
 # 流水线概览:
-#   dev 分支 push    → 完整 CI → 早鸟预览版 (pre-release, 滚动 tag: dev-latest)
-#   main 分支 push   → 完整 CI → Beta 版    (pre-release, 滚动 tag: beta-latest) + Docker 镜像
-#   v* tag push      → 完整 CI → 正式版     (release, 标记为 latest) + Docker 镜像
-#   PR to main|dev   → lint + test (代码质量守护)
+#   main 分支 push   → 完整 CI → Beta 构件 + Docker 镜像 :main（覆盖式）
+#   v* tag push      → 完整 CI → 正式版（release, latest）+ Docker 镜像
+#   PR to main|dev   → lint + test + 前端校验（不发布）
 #
 # 二进制产物（跨平台归档）与 Docker 镜像同时发布，互为补充。
 # 版本方案详见 VERSIONING.md
 # ===========================================================================
-
-# ==================== dev 分支: 早鸟预览版 ====================
-dev:
-  push:
-    - name: early-bird-preview
-      docker:
-        image: golang:1.21
-        volumes:
-          - /go/pkg/mod          # Go 模块缓存
-      env:
-        GOPROXY: https://goproxy.cn,direct
-        CGO_ENABLED: "0"
-      label:
-        type: EARLY_BIRD
-      stages:
-        - name: lint
-          script: cd src && go vet ./...
-        - name: test
-          script: cd src && go test -timeout 120s ./...
-        - name: webui-test
-          image: node:22.18-alpine
-          script: |
-            cd web && npm ci && npm test
-        - name: determine-version
-          script: |
-            VERSION=$(bash scripts/version.sh)
-            echo "Version: $VERSION"
-            echo "##[set-output version=$VERSION]"
-          exports:
-            version: BUILD_VERSION
-        - name: webui-build
-          image: node:22.18-alpine
-          script: |
-            cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
-        - name: build
-          script: |
-            mkdir -p build
-            (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
-            bash scripts/ci-build.sh "$BUILD_VERSION"
-        - name: webui-e2e
-          image: mcr.microsoft.com/playwright:v1.65.0-noble
-          script: |
-            cd web && npm ci
-            YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
-        - name: prepare-release-notes
-          script: |
-            cat > release/RELEASE_NOTES.md <<EOF
-            早鸟预览版 (Early Bird Preview)
-
-            版本: ${BUILD_VERSION}
-            提交: ${CNB_COMMIT}
-            构建时间: ${CNB_BUILD_START_TIME}
-
-            此版本来自 dev 分支自动构建，仅供测试和预览，可能不稳定。
-            运行 yigate -version 查看版本详情。
-            EOF
-        - name: create-rolling-tag
-          script: |
-            git config user.name "CNB CI"
-            git config user.email "ci@cnb.cool"
-            git tag -f "dev-latest"
-            git push "https://${CNB_TOKEN_USER_NAME}:${CNB_TOKEN}@${CNB_REPO_URL_HTTPS#https://}" "dev-latest" -f
-          allowFailure: true
-        - name: create-release
-          type: git:release
-          options:
-            tag: dev-latest
-            title: YiGate Early Bird Preview
-            descriptionFromFile: release/RELEASE_NOTES.md
-            preRelease: true
-            overlying: true
-          allowFailure: true
-        - name: clear-old-artifacts
-          image: cnbcool/attachments
-          settings:
-            type: DELETE
-            tag: dev-latest
-          allowFailure: true
-        - name: upload-artifacts
-          image: cnbcool/attachments
-          settings:
-            tag: dev-latest
-            attachments:
-              - "./release/*.tar.gz"
-              - "./release/*.zip"
-              - "./release/SHA256SUMS"
-          allowFailure: true
 
 # ==================== main 分支: 每日构建 ====================
 main:
   push:
     - name: beta
       docker:
-        image: golang:1.21
+        image: golang:1.27.3
         volumes:
           - /go/pkg/mod
       services:
@@ -111,6 +23,7 @@ main:
       env:
         GOPROXY: https://goproxy.cn,direct
         CGO_ENABLED: "0"
+        YIGATE_REQUIRE_SBOM: "1"
       label:
         type: BETA
       stages:
@@ -118,10 +31,14 @@ main:
           script: cd src && go vet ./...
         - name: test
           script: cd src && go test -timeout 120s ./...
+        - name: race
+          script: cd src && go test -race -timeout 180s ./...
         - name: webui-test
-          image: node:22.18-alpine
+          image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm test
+            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm test
+        - name: check-release-configs
+          script: bash scripts/check-release-configs.sh
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -130,34 +47,19 @@ main:
           exports:
             version: BUILD_VERSION
         - name: webui-build
-          image: node:22.18-alpine
+          image: node:26.13.0-alpine
           script: |
             cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
         - name: build
           script: |
             mkdir -p build
-            (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
+            (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
         - name: webui-e2e
           image: mcr.microsoft.com/playwright:v1.65.0-noble
           script: |
             cd web && npm ci
             YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
-        - name: prepare-release-notes
-          script: |
-            cat > release/RELEASE_NOTES.md <<EOF
-            Beta 版
-
-            版本: ${BUILD_VERSION}
-            提交: ${CNB_COMMIT}
-            构建时间: ${CNB_BUILD_START_TIME}
-
-            此版本来自 main 分支自动构建，接近正式发布但可能存在不稳定因素。
-            运行 yigate -version 查看版本详情。
-            EOF
-        # 说明：main 分支不再自动打 beta-latest 滚动 tag、不再发布 beta 镜像。
-        # 正式 Docker 镜像 (`:latest` / `:vX.Y.Z`) 仅由 `v*` tag 流水线发布。
-        # 二进制归档仍照常发布，使用 main 作为附件桶标签（非 git 滚动 tag）。
         - name: clear-old-artifacts
           image: cnbcool/attachments
           settings:
@@ -171,11 +73,11 @@ main:
             attachments:
               - "./release/*.tar.gz"
               - "./release/*.zip"
+              - "./release/*.spdx.json"
               - "./release/SHA256SUMS"
-          allowFailure: true
+          allowFailure: false
         # ---- 每日构建镜像：每次 main 提交均触发，:main 标签覆盖式推送 ----
-        # 同名标签 push 即覆盖，仓库中 :main 始终指向最后一次构建（每日最后一套产物）。
-        # 与正式 :latest / :X.Y.Z（仅 v* tag 触发）区分，避免污染正式镜像。
+        # 正式 Docker 镜像 (:latest / :X.Y.Z) 仅由 v* tag 流水线发布。
         - name: docker-build
           script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main -f deploy/docker/Dockerfile .
         - name: docker-push
@@ -186,7 +88,7 @@ main:
   pull_request:
     - name: pr-check
       docker:
-        image: golang:1.21
+        image: golang:1.27.3
         volumes:
           - /go/pkg/mod
       env:
@@ -196,10 +98,14 @@ main:
           script: cd src && go vet ./...
         - name: test
           script: cd src && go test -timeout 120s ./...
+        - name: race
+          script: cd src && go test -race -timeout 180s ./...
         - name: webui-test
-          image: node:22.18-alpine
+          image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm test
+            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm test
+        - name: check-release-configs
+          script: bash scripts/check-release-configs.sh
       failStages:
         - name: pr-check-failed
           script: echo "PR 检查未通过，请修复后重新提交"
@@ -209,7 +115,7 @@ main:
   tag_push:
     - name: formal-release
       docker:
-        image: golang:1.21
+        image: golang:1.27.3
         volumes:
           - /go/pkg/mod
       services:
@@ -217,17 +123,31 @@ main:
       env:
         GOPROXY: https://goproxy.cn,direct
         CGO_ENABLED: "0"
+        YIGATE_REQUIRE_SBOM: "1"
       label:
         type: RELEASE
       stages:
         - name: lint
           script: cd src && go vet ./...
+        - name: golangci-lint
+          image: golangci/golangci-lint:v2.15.0
+          script: cd src && golangci-lint config verify && golangci-lint run
         - name: test
           script: cd src && go test -timeout 120s ./...
-        - name: webui-test
-          image: node:22.18-alpine
+        - name: race
+          script: cd src && go test -race -timeout 180s ./...
+        - name: vulnerability-scan
           script: |
-            cd web && npm ci && npm test
+            cd src
+            go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            govulncheck ./...
+        - name: webui-test
+          image: node:26.13.0-alpine
+          script: |
+            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm test
+        - name: check-release-configs
+          script: bash scripts/check-release-configs.sh
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -236,13 +156,13 @@ main:
           exports:
             version: BUILD_VERSION
         - name: webui-build
-          image: node:22.18-alpine
+          image: node:26.13.0-alpine
           script: |
             cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
         - name: build
           script: |
             mkdir -p build
-            (cd src && CGO_ENABLED=0 go build -trimpath -o ../build/yigate-e2e .)
+            (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
             bash scripts/ci-build.sh "$BUILD_VERSION"
         - name: webui-e2e
           image: mcr.microsoft.com/playwright:v1.65.0-noble
@@ -255,18 +175,7 @@ main:
           image: cnbcool/changelog
           settings:
             latestChangeLogTarget: LATEST_CHANGELOG.md
-        - name: create-release
-          type: git:release
-          options:
-            title: YiGate
-            descriptionFromFile: LATEST_CHANGELOG.md
-            latest: true
-        - name: upload-artifacts
-          image: cnbcool/attachments
-          settings:
-            path: release/
-          allowFailure: true
-        # ---- Docker 镜像发布（与二进制产物同时发布）----
+        # ---- 先完成所有产物与镜像，再创建 Release；任一步失败都不会产生空发布 ----
         - name: docker-build
           script: |
             docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION} -f deploy/docker/Dockerfile .
@@ -274,3 +183,18 @@ main:
           script: |
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION}
+        - name: upload-artifacts
+          image: cnbcool/attachments
+          settings:
+            attachments:
+              - "./release/*.tar.gz"
+              - "./release/*.zip"
+              - "./release/*.spdx.json"
+              - "./release/SHA256SUMS"
+          allowFailure: false
+        - name: create-release
+          type: git:release
+          options:
+            title: YiGate
+            descriptionFromFile: LATEST_CHANGELOG.md
+            latest: true

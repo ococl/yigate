@@ -20,6 +20,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC_DIR="${REPO_ROOT}/src"
 RELEASE_DIR="${REPO_ROOT}/release"
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
+# 固定 Syft 版本和镜像 digest，避免 SBOM 生成工具随上游 main 漂移。
+SYFT_IMAGE="${YIGATE_SYFT_IMAGE:-docker.io/anchore/syft:v1.57.0@sha256:3c70e6d5979364cefdc22b51617a78fd264574d3bd6b4f84a351204147025e2a}"
 
 source "${SCRIPTS_DIR}/platforms.sh"
 
@@ -76,7 +78,7 @@ for platform in $(all_platforms); do
     (
         cd "${SRC_DIR}"
         env ${env_str} CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct \
-            go build -trimpath -mod=readonly -ldflags "${LDFLAGS}" \
+            go build -trimpath -buildvcs=false -mod=readonly -ldflags "${LDFLAGS}" \
             -o "${RELEASE_DIR}/${name}" .
     )
 done
@@ -94,15 +96,44 @@ for platform in $(all_platforms); do
     rm -f "${RELEASE_DIR}/${name}"
 done
 
-# 生成 SBOM；正式发布要求必须产出
-if command -v syft >/dev/null 2>&1; then
-    echo "--- Generating SBOM ---"
-    syft dir "${SRC_DIR}" -o spdx-json > "${RELEASE_DIR}/yigate-${VERSION}.spdx.json"
+# 生成 SBOM；优先用本机 syft，否则使用固定 digest 的 Syft 容器。
+# 正式发布必须产出；本地普通构建在工具不可用时允许跳过。
+generate_sbom() {
+    local output="$1"
+    if command -v syft >/dev/null 2>&1; then
+        if syft dir "${SRC_DIR}" -o spdx-json > "${output}"; then
+            return 0
+        fi
+        rm -f "${output}"
+        return 1
+    fi
+    if ! command -v docker >/dev/null 2>&1 || ! docker version >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local cid
+    cid="$(docker create "${SYFT_IMAGE}" dir:/src -o spdx-json)" || return 1
+    if ! docker cp "${SRC_DIR}/." "${cid}:/src" >/dev/null; then
+        docker rm -f "${cid}" >/dev/null 2>&1 || true
+        rm -f "${output}"
+        return 1
+    fi
+    if ! docker start -a "${cid}" > "${output}"; then
+        docker rm -f "${cid}" >/dev/null 2>&1 || true
+        rm -f "${output}"
+        return 1
+    fi
+    docker rm -f "${cid}" >/dev/null 2>&1 || true
+    return 0
+}
+
+if generate_sbom "${RELEASE_DIR}/yigate-${VERSION}.spdx.json"; then
+    echo "--- Generated SBOM ---"
 elif [[ "${YIGATE_REQUIRE_SBOM:-0}" == "1" ]]; then
-    echo "error: YIGATE_REQUIRE_SBOM=1 但未安装 syft" >&2
+    echo "error: YIGATE_REQUIRE_SBOM=1 但 SBOM 生成失败（syft/Docker 不可用或执行失败）" >&2
     exit 1
 else
-    echo "--- Skipping SBOM (syft not installed) ---"
+    echo "--- Skipping SBOM (syft and Docker unavailable) ---"
 fi
 
 # 生成校验和

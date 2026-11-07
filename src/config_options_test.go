@@ -38,6 +38,31 @@ dns:
 	}
 }
 
+func TestValidateConfigRejectsPlaceholderCredentials(t *testing.T) {
+	cases := map[string]string{
+		"management token": `listen: "127.0.0.1:0"
+management: "127.0.0.1:0"
+management_auth_token: "__REPLACE_MANAGEMENT_TOKEN__"
+`,
+		"proxy password": `listen: "127.0.0.1:0"
+users:
+  proxy: "__REPLACE_PROXY_PASSWORD__"
+`,
+		"listener password": `listeners:
+  - listen: "127.0.0.1:0"
+    users:
+      proxy: "__REPLACE_PROXY_PASSWORD__"
+`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadConfigFromYAML(t, content); err == nil || !strings.Contains(err.Error(), "placeholder") {
+				t.Fatalf("expected placeholder credential error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateConfigRejectsInvalidRoutingEnum(t *testing.T) {
 	cases := map[string]string{
 		"routing.final": `listen: "127.0.0.1:0"

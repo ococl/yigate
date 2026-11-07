@@ -1,11 +1,11 @@
 # 前端构建阶段
-FROM node:22.18-alpine AS webui
+FROM node:26.13.0-alpine AS webui
 WORKDIR /webui
 COPY web/ ./web/
 RUN cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist /webui/webui_dist
 
 # 构建阶段
-FROM golang:1.21-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 WORKDIR /build
 
 ARG VERSION=dev
@@ -28,14 +28,14 @@ RUN cd src && CGO_ENABLED=0 GOOS=linux GOPROXY=https://goproxy.cn,direct \
     -o /build/yigate .
 
 # 运行阶段
-FROM alpine:3.20
+FROM alpine:3.24.4
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
 LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}" \
-      org.opencontainers.image.source="https://github.com/yi-team/yigate" \
+      org.opencontainers.image.source="https://cnb.cool/yi.team/yigate" \
       org.opencontainers.image.created="${BUILD_TIME}"
 
 RUN apk add --no-cache ca-certificates wget util-linux && \

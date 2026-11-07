@@ -455,12 +455,7 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusBadRequest, "action must not be empty")
 			return
 		}
-		rule := RouteRule{
-			Type:      req.Type,
-			Values:    req.Values,
-			Action:    req.Action,
-			Upstreams: req.Upstreams,
-		}
+		rule := RouteRule(req)
 		if err := editor.AddRule(rule); err != nil {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
@@ -490,12 +485,7 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusBadRequest, "action must not be empty")
 			return
 		}
-		rule := RouteRule{
-			Type:      req.Type,
-			Values:    req.Values,
-			Action:    req.Action,
-			Upstreams: req.Upstreams,
-		}
+		rule := RouteRule(req)
 		if err := editor.UpdateRule(index, rule); err != nil {
 			if errors.Is(err, errNotFound) {
 				writeJSONError(w, http.StatusNotFound, err.Error())

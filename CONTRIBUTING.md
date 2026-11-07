@@ -8,8 +8,8 @@ YiGate 是 **合规、轻量、可运维** 的统一代理网关。我们 **明�
 
 ## 开发环境
 
-- Go 1.21（依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
-- Node ^22.18 或 >=24.11（仅前端 `web/`，见 `.nvmrc`）
+- Go 1.21+（CI 使用 1.27.3；依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
+- Node 26.13（仅前端 `web/`，见 `.nvmrc`；`engines` 仍允许 ^22.18 或 >=24.11）
 - 推荐在 Linux 下进行透明代理（TPROXY）相关开发
 
 ### 后端
@@ -42,7 +42,6 @@ npm run build    # 输出到 web/dist/
 - Go 代码通过 `go vet ./...` 与 `gofmt` 检查。
 - 监听 / socket 选项等平台差异，使用 build tag 拆分文件（如 `server_unix.go` / `server_windows.go`），勿在单一文件中用 `runtime.GOOS` 绕过。
 - 不要提交真实代理密码、管理 Token、上游账号或私有地址；凭据一律通过 `${ENV_VAR}` 注入。
-- `.codebuddy/` 为项目相关数据目录，请勿删除或提交其内容。
 
 ## 测试要求
 
@@ -93,7 +92,7 @@ refactor: 将默认配置路径从 config/ 迁移到 data/config.yml
 
 ## 发布
 
-- 预览版由 `dev` / `main` 分支推送自动构建（详见 `VERSIONING.md`）。
+- Beta 版由 `main` 分支推送自动构建（详见 `VERSIONING.md`）。
 - 正式版由 `vX.Y.Z` 标签推送触发，请先确认测试与 changelog 就绪。
 - 发布构建脚本：`./scripts/release.sh X.Y.Z`；平台清单见 `scripts/platforms.sh`。
 - 正式发布与 CI 产物统一由 `scripts/ci-build.sh` 编译、打包、生成 SBOM 和校验和。

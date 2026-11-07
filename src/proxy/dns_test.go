@@ -500,10 +500,11 @@ func buildDNSResponseMulti(query []byte, rtype uint16, ips []net.IP) []byte {
 		// RDLENGTH
 		var rdlength uint16
 		var rdata []byte
-		if rtype == dnsRecordA {
+		switch rtype {
+		case dnsRecordA:
 			rdlength = 4
 			rdata = ip.To4()
-		} else if rtype == dnsRecordAAAA {
+		case dnsRecordAAAA:
 			rdlength = 16
 			rdata = ip.To16()
 		}

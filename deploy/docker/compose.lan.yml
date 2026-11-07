@@ -5,9 +5,9 @@ services:
       dockerfile: deploy/docker/Dockerfile
     image: yigate:lan
     container_name: yigate-lan
-    # 认证与密码不通过环境变量注入：在配置文件或 WebUI 中手动配置 management_auth_token 与 users。
+    # 部署前必须替换 config.lan.yml 中的占位密码/令牌；服务端会拒绝原样启动。
     ports:
-      - "8891:8891"
+      - "${YIGATE_PROXY_BIND:-0.0.0.0}:8891:8891"
       - "127.0.0.1:8890:8890"
     volumes:
       - ./config.lan.yml:/var/lib/yigate/data/config.yml:ro

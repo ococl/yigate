@@ -5,7 +5,6 @@ set -euo pipefail
 #
 # 版本方案:
 #   Tag push (vX.Y.Z)  → X.Y.Z              (正式版)
-#   dev 分支 push       → 0.0.0-dev.<short>  (早鸟预览版)
 #   main 分支 push      → 0.0.0-beta.<short> (Beta 版)
 #   其他                → 0.0.0-dev.<short>  (开发版)
 #
@@ -28,8 +27,6 @@ if [[ "$IS_TAG" == "true" ]]; then
         exit 1
     fi
     echo "$VERSION"
-elif [[ "$BRANCH" == "dev" ]]; then
-    echo "0.0.0-dev.${COMMIT_SHORT}"
 elif [[ "$BRANCH" == "main" ]]; then
     echo "0.0.0-beta.${COMMIT_SHORT}"
 else

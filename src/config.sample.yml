@@ -5,7 +5,7 @@
 listeners:
   - listen: "127.0.0.1:4479"
     # users:  # 留空表示允许匿名代理；需要认证时在 WebUI 或此处添加用户名与密码
-    #   username: "change-me"
+    #   username: "your-password"
     access_control:
       allowed_clients: []
       rate_limit:
@@ -20,7 +20,7 @@ listeners:
     #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
   - listen: "127.0.0.1:4480"
     # users:
-    #   service: "change-me"
+    #   service: "your-password"
     max_connections: 512
   # IPv6 监听示例：[::] 表示双栈监听（IPv4+IPv6），[::1] 仅监听 IPv6 回环。
   # - listen: "[::]:4482"
@@ -36,7 +36,7 @@ listeners:
 # 旧版单监听端口配置（listeners 为空时生效，与上述多监听配置二选一）。
 # listen: "127.0.0.1:4479"
 # users:
-#   username: "change-me"
+#   username: "your-password"
 management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
 # management_auth_token: 非空时所有管理端点要求 Authorization: Bearer <token>。
 # 若配置文件由程序首次自动生成，会注入一个随机高强度令牌（请从中读取）；
@@ -67,7 +67,7 @@ webui:
 #   key_file: "certs/server.key"
 #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
 users:
-  # username: "change-me"  # 留空表示允许匿名代理；需认证时在此或 WebUI 添加
+  # username: "your-password"  # 留空表示允许匿名代理；需认证时在此或 WebUI 添加
 upstreams:
   - name: "default"
     url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"

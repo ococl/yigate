@@ -4,7 +4,7 @@ set -euo pipefail
 # 校验 release/ 目录中的文件集合与预期白名单完全一致。
 # 用法: check-release-files.sh <version>
 #
-# 预期产物: 每个平台一个压缩归档 (tar.gz/zip) + SBOM(可选) + SHA256SUMS
+# 预期产物: 每个平台一个压缩归档 (tar.gz/zip) + SBOM + SHA256SUMS
 # 不含裸二进制和隐藏文件 (除 .version 外)。
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,10 +26,8 @@ for platform in $(all_platforms); do
     expected+=("yigate-${VERSION}-${suffix}.tar.gz")
   fi
 done
-# SBOM 为可选产物，存在时才校验
-if [[ -f "${RELEASE_DIR}/yigate-${VERSION}.spdx.json" ]]; then
-  expected+=("yigate-${VERSION}.spdx.json")
-fi
+# SBOM 是正式发布的必选产物
+expected+=("yigate-${VERSION}.spdx.json")
 expected+=("SHA256SUMS")
 
 # 获取实际文件集合 (排除隐藏文件)
@@ -63,6 +61,18 @@ done
 if find "${RELEASE_DIR}" -maxdepth 1 -type l | grep -q .; then
   echo "error: release 目录包含符号链接" >&2
   status=1
+fi
+
+# SHA256SUMS 必须覆盖 SBOM，且所有条目必须能通过校验
+if [[ -f "${RELEASE_DIR}/SHA256SUMS" ]]; then
+  if ! grep -q "yigate-${VERSION}.spdx.json" "${RELEASE_DIR}/SHA256SUMS"; then
+    echo "error: SHA256SUMS 未包含 SBOM" >&2
+    status=1
+  fi
+  if ! (cd "${RELEASE_DIR}" && sha256sum -c SHA256SUMS >/dev/null); then
+    echo "error: SHA256SUMS 校验失败" >&2
+    status=1
+  fi
 fi
 
 if [[ $status -eq 0 ]]; then
