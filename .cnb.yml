@@ -169,10 +169,26 @@ main:
             YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         - name: verify-release
           script: bash scripts/check-release-files.sh "$BUILD_VERSION"
+        # 首个正式版本没有“上一个 tag”，cnbcool/changelog 会因
+        # git describe --tags v0.2.0^ 失败而退出；先写一份兜底变更日志，
+        # 插件成功时覆盖，失败也不阻塞发布（Release 说明退化为提交列表）。
+        - name: prepare-changelog
+          script: |
+            PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+            if [ -n "$PREV" ]; then RANGE="${PREV}..HEAD"; else RANGE="HEAD"; fi
+            {
+              echo "## YiGate ${BUILD_VERSION}"
+              echo
+              echo "完整变更列表（最近 60 条）："
+              echo
+              git log --no-merges --max-count=60 --pretty='- %s (%h)' "$RANGE"
+            } > LATEST_CHANGELOG.md
+            echo "changelog fallback range: ${RANGE}"
         - name: generate-changelog
           image: cnbcool/changelog
           settings:
             latestChangeLogTarget: LATEST_CHANGELOG.md
+          allowFailure: true
         # ---- 先产出全部产物与镜像，再创建 Release，最后把产物挂到该 Release 上 ----
         # 注意：cnbcool/attachments 依赖已存在的 Release，顺序颠倒会 404。
         - name: docker-build
