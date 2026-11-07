@@ -58,7 +58,9 @@ request.interceptors.response.use(
           window.location.href = '/login'
         }
       } else if (status >= 500) {
-        message.error(`服务器错误 (${status})`)
+        // 后端通常会带上具体原因（例如下载失败），一并展示便于定位
+        const detail = error.response.data?.error
+        message.error(detail ? `服务器错误 (${status})：${detail}` : `服务器错误 (${status})`)
       } else if (status >= 400) {
         const msg = error.response.data?.error || error.response.data?.status || `请求错误 (${status})`
         message.error(msg)

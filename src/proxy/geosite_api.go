@@ -96,6 +96,11 @@ func (m *ManagementServer) handleGeoSiteUpdate(w http.ResponseWriter, r *http.Re
 	if !m.requireAuth(w, r) {
 		return
 	}
+	// 数据路径属于用户配置问题而非服务端故障，返回 400 便于前端给出可操作的提示。
+	if strings.TrimSpace(access.DatPath()) == "" {
+		writeJSONError(w, http.StatusBadRequest, "routing.geosite.path is required for update")
+		return
+	}
 	info, changed, err := access.Update(r.Context())
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())

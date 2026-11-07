@@ -102,6 +102,7 @@ func TestGeoSiteAPIUpdateRequiresManagementToken(t *testing.T) {
 	access := &stubGeoSiteAccess{
 		info:       GeoSiteInfo{Path: "/tmp/geosite.dat"},
 		sync:       GeoSiteSyncConfig{Enabled: true, Token: "readonly-token"},
+		datPath:    "/tmp/geosite.dat",
 		updateInfo: GeoSiteInfo{Path: "/tmp/geosite.dat", Version: "new-version"},
 		changed:    true,
 	}
@@ -229,5 +230,20 @@ func TestETagMatches(t *testing.T) {
 		if got := etagMatches(c.header, c.etag); got != c.want {
 			t.Fatalf("etagMatches(%q, %q) = %v, want %v", c.header, c.etag, got, c.want)
 		}
+	}
+}
+
+// TestGeoSiteAPIUpdateWithoutPath 未配置数据路径属于配置问题，应返回 400 而不是 500。
+func TestGeoSiteAPIUpdateWithoutPath(t *testing.T) {
+	access := &stubGeoSiteAccess{info: GeoSiteInfo{}, datPath: ""}
+	m := newGeoSiteTestServer(access)
+
+	rec := httptest.NewRecorder()
+	m.handleGeoSiteAPI(rec, geoSiteRequest(http.MethodPost, "/api/v1/geosite/update", testManagementToken))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if access.updateCalls != 0 {
+		t.Fatal("update should not run when path is not configured")
 	}
 }

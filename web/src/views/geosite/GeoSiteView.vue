@@ -90,6 +90,15 @@ async function fetchInfo() {
 }
 
 async function handleUpdate() {
+  // 数据路径/更新地址属于必要条件，先做前置校验，避免落到服务端 4xx/5xx。
+  if (!info.value?.path) {
+    message.warning('请先在「更新来源」中填写数据路径并保存，再执行更新')
+    return
+  }
+  if (!info.value?.update_url) {
+    message.warning('请先在「更新来源」中填写更新地址并保存，再执行更新')
+    return
+  }
   updating.value = true
   try {
     const result = await updateGeoSite()
