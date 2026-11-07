@@ -61,16 +61,11 @@ main:
           script: |
             cd web && npm ci
             YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
-        - name: clear-old-artifacts
-          image: cnbcool/attachments
-          settings:
-            type: DELETE
-            tag: main
-          allowFailure: true
+        # main 是分支事件，没有对应的 Release，附件只能挂到 commit 上：
+        # 不填 tag 时插件自动使用 $CNB_COMMIT（分支没有 Release，指定 tag 会 404）。
         - name: upload-artifacts
           image: cnbcool/attachments
           settings:
-            tag: main
             attachments:
               - "./release/*.tar.gz"
               - "./release/*.zip"
@@ -178,7 +173,8 @@ main:
           image: cnbcool/changelog
           settings:
             latestChangeLogTarget: LATEST_CHANGELOG.md
-        # ---- 先完成所有产物与镜像，再创建 Release；任一步失败都不会产生空发布 ----
+        # ---- 先产出全部产物与镜像，再创建 Release，最后把产物挂到该 Release 上 ----
+        # 注意：cnbcool/attachments 依赖已存在的 Release，顺序颠倒会 404。
         - name: docker-build
           script: |
             docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION} -f deploy/docker/Dockerfile .
@@ -186,6 +182,12 @@ main:
           script: |
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION}
+        - name: create-release
+          type: git:release
+          options:
+            title: YiGate
+            descriptionFromFile: LATEST_CHANGELOG.md
+            latest: true
         - name: upload-artifacts
           image: cnbcool/attachments
           settings:
@@ -195,9 +197,3 @@ main:
               - "./release/*.spdx.json"
               - "./release/SHA256SUMS"
           allowFailure: false
-        - name: create-release
-          type: git:release
-          options:
-            title: YiGate
-            descriptionFromFile: LATEST_CHANGELOG.md
-            latest: true

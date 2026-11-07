@@ -182,13 +182,28 @@ func TestReleaseSecurityContracts(t *testing.T) {
 		t.Fatal(".cnb.yml missing formal release pipeline")
 	}
 	formal := cnb[formalStart:]
-	upload := bytes.Index(formal, []byte("name: upload-artifacts"))
+	// cnbcool/attachments 只能把附件挂到“已存在”的 Release 上，
+	// 必须先 create-release 再 upload-artifacts，否则上传阶段 404。
 	create := bytes.Index(formal, []byte("name: create-release"))
-	if upload < 0 || create < 0 || upload > create {
-		t.Fatal("formal release must upload artifacts before create-release")
+	upload := bytes.Index(formal, []byte("name: upload-artifacts"))
+	if create < 0 || upload < 0 || create > upload {
+		t.Fatal("formal release must create the release before uploading attachments")
 	}
-	if !bytes.Contains(formal[upload:create], []byte("allowFailure: false")) {
+	if !bytes.Contains(formal[upload:], []byte("allowFailure: false")) {
 		t.Fatal("formal release artifact upload must fail closed")
+	}
+	// main 是分支事件，没有对应 Release；指定 tag: main 会让上传阶段 404，
+	// 不填 tag 时插件按 $CNB_COMMIT 挂到 commit 附件。
+	betaEnd := bytes.Index(cnb, []byte("\"(main|dev)\":"))
+	if betaEnd < 0 {
+		t.Fatal(".cnb.yml missing pull_request pipeline")
+	}
+	beta := cnb[:betaEnd]
+	if bytes.Contains(beta, []byte("tag: main")) {
+		t.Fatal("main branch has no release; beta attachments must not target tag main")
+	}
+	if bytes.Contains(beta, []byte("clear-old-artifacts")) {
+		t.Fatal("commit attachments need no cleanup stage")
 	}
 
 	configGate := read("scripts", "check-release-configs.sh")
