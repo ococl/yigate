@@ -1,11 +1,19 @@
+# 版本控制与流水线元数据
 .git
 .github
+.cnb.yml
+
+# 本地运行状态与规划文档
+data
 .local
 build
 release
 test
-.codebuddy
 docs/superpowers
+.codebuddy
+.playwright-cli
+
+# 测试与调试产物（镜像内仅需源码）
 **/*_test.go
 **/*.log
 **/*.prof
@@ -13,8 +21,15 @@ docs/superpowers
 **/__pycache__
 **/*.pyc
 **/__debug_bin*
+**/*.orig
+**/*.rej
+**/*.bak
+
+# 密钥与环境变量（构建期不应进入镜像层）
 .env
 .env.*
+**/*.pem
+**/*.key
 
 # 前端依赖与本地产物（镜像内重新安装/构建）
 web/node_modules

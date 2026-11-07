@@ -1,74 +1,115 @@
-# Binary
-yigate
+# ---------------------------------------------------------------------------
+# 二进制与构建产物
+# ---------------------------------------------------------------------------
+/yigate
 *.exe
 *.new
 *.out
-bin/
-
-# Generated artifacts
+/bin/
 /build/
 /release/
-/tmp/
 
-# 规划/过程文档（对话与任务规划，不纳入版本控制）
-/findings.md
-/progress.md
-/task_plan.md
-docs/superpowers/
-
-# Local runtime state
-/.local/
-.env
-.env.*
-
-# Logs and downloaded data
-logs/
-*.log
-geosite.dat
-upstream-types.txt
-*.tmp
-
-# Go
+# Go 工具链产物
 vendor/
-coverage.out
-coverage.*
 *.coverprofile
 *.prof
 *.test
 __debug_bin*
 
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
+# Node / 前端通用产物（web/ 另有 web/.gitignore 细化，此处兜底）
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.eslintcache
+.stylelintcache
+.npm/
+.pnpm-store/
 
-# IDEs
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# 注意：web/src/auto-imports.d.ts 与 web/src/components.d.ts 需纳入版本控制，
+# 以便干净构建（Docker/CI）时 vue-tsc 能找到全局类型声明。
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Test artifacts
-.last_proxy_test_summary
-.playwright-cli/
-
-# Frontend (web/)
-web/node_modules/
-web/dist/
-web/dist-ssr/
-web/*.local
-# auto-imports.d.ts / components.d.ts 需纳入版本控制，供干净构建时 vue-tsc 类型检查使用
-web/vite.config.js
-web/vite.config.d.ts
-web/tsconfig.node.tsbuildinfo
-
-# Embedded webui assets (generated from web/dist at build time)
+# ---------------------------------------------------------------------------
+# 内嵌前端产物（构建期由 web/dist 生成）
+# ---------------------------------------------------------------------------
 # 保留占位 index.html（纳入版本控制），确保 `go vet`/`go test`/纯 `go build` 时
 # //go:embed all:webui_dist 始终有文件可嵌入；真实前端产物在构建期覆盖此文件。
 src/proxy/webui_dist/*
 !src/proxy/webui_dist/index.html
+
+# ---------------------------------------------------------------------------
+# 本地运行数据与状态
+# ---------------------------------------------------------------------------
+# docker-compose 将 ./data 挂载为运行目录，其中的 config.yml 含管理令牌等敏感信息
+/data/
+/.local/
+logs/
+*.log
+geosite.dat
+upstream-types.txt
+*.pid
+*.sock
+*.tmp
+
+# ---------------------------------------------------------------------------
+# 环境变量与密钥
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
+# 规划/过程文档（对话与任务规划，不纳入版本控制）
+# ---------------------------------------------------------------------------
+/findings.md
+/progress.md
+/task_plan.md
+docs/superpowers/
+
+# ---------------------------------------------------------------------------
+# Python（e2e 脚本/工具）
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+htmlcov/
+.coverage
+.coverage.*
+
+# ---------------------------------------------------------------------------
+# IDE / 编辑器
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+.codebuddy/
+*.iml
+*.suo
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# 操作系统与临时文件
+# ---------------------------------------------------------------------------
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+*.orig
+*.rej
+*.bak
+
+# ---------------------------------------------------------------------------
+# 测试产物
+# ---------------------------------------------------------------------------
+.last_proxy_test_summary
+.playwright-cli/
+test-results/
+playwright-report/
