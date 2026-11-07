@@ -122,10 +122,6 @@ function handleLogout() {
       <a-layout-content class="content" :style="contentStyle">
         <RouterView />
       </a-layout-content>
-
-      <a-layout-footer class="footer">
-        YiGate &copy; {{ new Date().getFullYear() }}
-      </a-layout-footer>
     </a-layout>
   </a-layout>
 </template>
@@ -219,9 +215,4 @@ function handleLogout() {
   overscroll-behavior: contain;
 }
 
-.footer {
-  flex: 0 0 auto;
-  text-align: center;
-  padding: 0 0 12px;
-}
 </style>
