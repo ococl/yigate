@@ -119,9 +119,9 @@ function copyToClipboard(text: string) {
       allow-clear
     />
 
-    <a-row :gutter="16" class="api-docs-body">
-      <!-- 左侧分组导航 -->
-      <a-col :span="5" class="api-docs-aside">
+    <div class="api-docs-body">
+      <!-- 左侧分组导航：固定宽度，保证分组名称完整显示 -->
+      <aside class="api-docs-aside">
         <a-card size="small" class="group-card">
           <template #title>接口分组</template>
           <a-menu
@@ -145,10 +145,10 @@ function copyToClipboard(text: string) {
             </a-menu-item>
           </a-menu>
         </a-card>
-      </a-col>
+      </aside>
 
       <!-- 右侧端点详情：独立滚动 -->
-      <a-col :span="19" class="api-docs-detail">
+      <section class="api-docs-detail">
         <div ref="detailRef" class="api-docs-detail-scroll">
           <template v-for="group in filteredGroups" :key="group.key">
             <div v-show="activeGroup === group.key">
@@ -320,8 +320,8 @@ function copyToClipboard(text: string) {
             style="margin-top: 60px;"
           />
         </div>
-      </a-col>
-    </a-row>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -348,12 +348,24 @@ function copyToClipboard(text: string) {
 }
 
 .api-docs-body {
+  display: flex;
   flex: 1 1 auto;
+  gap: 16px;
   min-height: 0;
 }
 
-.api-docs-aside,
+/* 左侧分组固定宽度，避免分组名称被截断 */
+.api-docs-aside {
+  flex: 0 0 220px;
+  width: 220px;
+  min-width: 220px;
+  height: 100%;
+  min-height: 0;
+}
+
 .api-docs-detail {
+  flex: 1 1 auto;
+  min-width: 0;
   height: 100%;
   min-height: 0;
 }
