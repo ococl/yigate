@@ -62,6 +62,9 @@ def call(method: str, path: str, headers=None, json_body=None, raw: bool = False
             return Response(resp.status, resp.headers, resp.read())
     except urllib.error.HTTPError as exc:
         return Response(exc.code, exc.headers, exc.read())
+    except (urllib.error.URLError, OSError) as exc:
+        # 连接失败/超时也返回结果对象，让用例明确失败而不是让脚本崩溃。
+        return Response(0, {}, json.dumps({"error": f"request failed: {exc}"}).encode("utf-8"))
 
 
 def check(name: str, cond, detail="") -> None:
