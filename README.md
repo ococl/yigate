@@ -177,29 +177,28 @@ sudo systemctl start yigate
 
 ### GeoSite 更新与下游同步
 
-WebUI 的「GeoSite 数据」页面可查看版本（SHA-256 前 12 位）、文件大小、数据更新时间、来源地址与上次检查时间，并支持手动更新。
+WebUI 的「GeoSite 数据」页面可查看版本（SHA-256 前 12 位）、文件大小、数据更新时间、来源地址与上次检查时间，并支持手动更新。数据文件固定保存在配置文件同目录的 `geosite.dat`，由系统托管，无需也不允许在界面指定路径。更新时优先使用已配置且可用的上游代理，全部失败后回退直连；可通过 `use_upstream` 开关关闭。
 
-多节点部署时可由一个节点统一更新，其余节点只读同步：
+多节点部署时可由一个节点统一更新，其余节点只读同步。同步令牌由系统随机生成，在 WebUI 中默认掩码显示并可直接复制；勾选「允许下游同步」时若令牌为空会自动生成，也可一键「重新生成」（或调用 `GET`/`POST /api/v1/geosite/sync-token`），无需手写：
 
 ```yaml
-# 上游节点：对外提供只读同步
+# 上游节点：对外提供只读同步（sync_token 开启后自动生成并写回配置）
 routing:
   geosite:
-    path: "../data/geosite.dat"
     auto_update: true
     update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
     update_interval: 24h
+    use_upstream: true
     sync_enabled: true
-    sync_token: "${GEOSITE_SYNC_TOKEN}"   # 至少 8 位，仅可读取 GeoSite
 
 # 下游节点：从上游节点同步
 routing:
   geosite:
-    path: "../data/geosite.dat"
     auto_update: true
     update_url: "http://node-a:8892/api/v1/geosite/dat"
     update_interval: 24h
-    update_token: "${GEOSITE_SYNC_TOKEN}"
+    use_upstream: true
+    update_token: "<上游 WebUI 生成的同步令牌>"
 ```
 
 同步流程带条件请求：本节点响应 `ETag`（内容 SHA-256）与 `X-GeoSite-Version`，下游携带 `If-None-Match`，数据未变化时返回 `304` 且不重写文件、不触发重载。内容变化时原子替换 `geosite.dat` 并写入 `geosite.dat.meta.json`，随后热重载路由，无需重启。

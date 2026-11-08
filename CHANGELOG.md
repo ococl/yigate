@@ -46,9 +46,23 @@
   GeoSite 下载关闭空闲连接并响应请求取消。
 - 配置回滚失败不再被静默丢弃；配额错误可被 `errors.Is(err, ErrQuotaExceeded)` 识别。
 - 管理 `WriteTimeout` 调整为 120s，避免 pprof CPU profile 被提前切断。
+- 修复热加载时密钥类环境变量缺失导致保存设置或 GeoSite 更新返回 500
+  （如 `management_auth_token references unset or empty environment variable`）：
+  热加载沿用当前生效值并记录告警，启动期仍保持严格校验。
+- 修复 HTTP（非安全上下文）部署下整站复制按钮失效：统一使用 Clipboard API +
+  `execCommand` 兼容回退。
 
 ### Changed
 
+- GeoSite 数据路径改由系统托管（配置文件同目录的 `geosite.dat`），管理界面与
+  API 不再接受用户指定。
+- 下游同步令牌由系统随机生成：勾选「允许下游同步」时若令牌为空立即生成，
+  保存时再兜底一次；令牌在 WebUI 中默认掩码显示、可直接复制，并支持
+  `GET /api/v1/geosite/sync-token` 随时读取与一键重新生成；管理令牌在设置页也可直接生成。
+- GeoSite 更新优先使用已配置且可用的上游代理，全部失败后回退直连，并新增
+  `routing.geosite.use_upstream` 开关。
+- GeoSite「更新来源」支持一键恢复系统默认值（官方更新地址、24 小时间隔、
+  自动更新与上游代理开启），恢复后点击「保存」生效。
 - `make build` 不再污染被跟踪的 `webui_dist/index.html`；该占位页被移除，仅保留
   `PLACEHOLDER.md`，所有构建产物被忽略。
 - 开发代理默认端口统一为 8890；Go / Node 版本要求在文档、`go.mod` 与 `engines` 间对齐。
