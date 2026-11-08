@@ -22,6 +22,10 @@ type stubGeoSiteAccess struct {
 	changed     bool
 	updateErr   error
 	updateCalls int
+
+	rotateToken string
+	rotateCalls int
+	rotateErr   error
 }
 
 func (s *stubGeoSiteAccess) Info() GeoSiteInfo {
@@ -39,6 +43,14 @@ func (s *stubGeoSiteAccess) DatPath() string {
 
 func (s *stubGeoSiteAccess) SyncConfig() GeoSiteSyncConfig {
 	return s.sync
+}
+
+func (s *stubGeoSiteAccess) RotateSyncToken(context.Context) (string, error) {
+	s.rotateCalls++
+	if s.rotateErr != nil {
+		return "", s.rotateErr
+	}
+	return s.rotateToken, nil
 }
 
 func newGeoSiteTestServer(access GeoSiteAccess) *ManagementServer {
@@ -128,6 +140,66 @@ func TestGeoSiteAPIUpdateRequiresManagementToken(t *testing.T) {
 	}
 	if resp.Status != "ok" || !resp.Changed || resp.Info.Version != "new-version" {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+// TestGeoSiteAPISyncToken 读取/重新生成同步令牌都只能由管理令牌触发。
+func TestGeoSiteAPISyncToken(t *testing.T) {
+	access := &stubGeoSiteAccess{
+		info:        GeoSiteInfo{Path: "/tmp/geosite.dat", SyncTokenSet: true},
+		sync:        GeoSiteSyncConfig{Enabled: true, Token: "readonly-token"},
+		rotateToken: "generated-token-123",
+	}
+	m := newGeoSiteTestServer(access)
+
+	// 只读同步令牌不能轮换令牌。
+	rec := httptest.NewRecorder()
+	m.handleGeoSiteAPI(rec, geoSiteRequest(http.MethodPost, "/api/v1/geosite/sync-token", "readonly-token"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if access.rotateCalls != 0 {
+		t.Fatal("rotate must not run with sync token")
+	}
+
+	rec = httptest.NewRecorder()
+	m.handleGeoSiteAPI(rec, geoSiteRequest(http.MethodPost, "/api/v1/geosite/sync-token", testManagementToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp GeoSiteSyncTokenResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "ok" || resp.Token != "generated-token-123" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
+	}
+
+	// GET 返回当前令牌，便于 WebUI 默认掩码展示与复制。
+	rec = httptest.NewRecorder()
+	m.handleGeoSiteAPI(rec, geoSiteRequest(http.MethodGet, "/api/v1/geosite/sync-token", testManagementToken))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	resp = GeoSiteSyncTokenResponse{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Token != "readonly-token" {
+		t.Fatalf("token = %q, want readonly-token", resp.Token)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
+	}
+
+	// 只读同步令牌同样不能读取令牌明文。
+	rec = httptest.NewRecorder()
+	m.handleGeoSiteAPI(rec, geoSiteRequest(http.MethodGet, "/api/v1/geosite/sync-token", "readonly-token"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
 

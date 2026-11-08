@@ -21,6 +21,8 @@ type GeoSiteAccess interface {
 	DatPath() string
 	// SyncConfig 返回本节点对外提供的只读同步配置。
 	SyncConfig() GeoSiteSyncConfig
+	// RotateSyncToken 由系统生成新的只读同步令牌并持久化，返回新令牌明文（仅此一次）。
+	RotateSyncToken(ctx context.Context) (string, error)
 }
 
 // GeoSiteUpdateResponse 是手动更新的响应体。
@@ -28,6 +30,14 @@ type GeoSiteUpdateResponse struct {
 	Status  string      `json:"status"`
 	Changed bool        `json:"changed"`
 	Info    GeoSiteInfo `json:"info"`
+}
+
+// GeoSiteSyncTokenResponse 是重新生成同步令牌的响应体。
+// token 只在生成时返回一次，之后接口只回显是否已设置。
+type GeoSiteSyncTokenResponse struct {
+	Status string      `json:"status"`
+	Token  string      `json:"token"`
+	Info   GeoSiteInfo `json:"info"`
 }
 
 // SetGeoSiteAccess 注入 GeoSite 访问实现（宿主在启动时调用一次即可）。
@@ -45,9 +55,11 @@ func (m *ManagementServer) geoSiteAccessSafe() GeoSiteAccess {
 
 // handleGeoSiteAPI 处理 /api/v1/geosite/* 请求：
 //
-//	GET  /api/v1/geosite       查看版本与同步配置
-//	POST /api/v1/geosite/update 立即从 update_url 更新数据
-//	GET  /api/v1/geosite/dat    下载数据文件（供下游节点同步，支持条件请求）
+//	GET  /api/v1/geosite             查看版本与同步配置
+//	POST /api/v1/geosite/update      立即从 update_url 更新数据
+//	GET  /api/v1/geosite/sync-token  读取当前只读同步令牌
+//	POST /api/v1/geosite/sync-token  重新生成只读同步令牌
+//	GET  /api/v1/geosite/dat         下载数据文件（供下游节点同步，支持条件请求）
 func (m *ManagementServer) handleGeoSiteAPI(w http.ResponseWriter, r *http.Request) {
 	MetricInc("yigate_management_requests_total", "path="+geoSiteAPIPrefix)
 	// 未注入 GeoSiteAccess 时各 handler 会提前返回 501；此处仍先完成鉴权，
@@ -61,6 +73,8 @@ func (m *ManagementServer) handleGeoSiteAPI(w http.ResponseWriter, r *http.Reque
 		m.handleGeoSiteInfo(w, r)
 	case "update":
 		m.handleGeoSiteUpdate(w, r)
+	case "sync-token":
+		m.handleGeoSiteSyncToken(w, r)
 	case "dat":
 		m.handleGeoSiteDat(w, r)
 	default:
@@ -100,9 +114,9 @@ func (m *ManagementServer) handleGeoSiteUpdate(w http.ResponseWriter, r *http.Re
 	if !m.requireAuth(w, r) {
 		return
 	}
-	// 数据路径属于用户配置问题而非服务端故障，返回 400 便于前端给出可操作的提示。
+	// 数据路径由系统托管，正常情况下不会为空；仍保留兜底提示避免内部错误外泄。
 	if strings.TrimSpace(access.DatPath()) == "" {
-		writeJSONError(w, http.StatusBadRequest, "routing.geosite.path is required for update")
+		writeJSONError(w, http.StatusBadRequest, "geosite data path is not configured")
 		return
 	}
 	info, changed, err := access.Update(r.Context())
@@ -111,6 +125,40 @@ func (m *ManagementServer) handleGeoSiteUpdate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, GeoSiteUpdateResponse{Status: "ok", Changed: changed, Info: info})
+}
+
+// handleGeoSiteSyncToken 读取或重新生成只读同步令牌。
+//
+//	GET  返回当前令牌明文，供 WebUI 掩码展示与复制
+//	POST 重新生成令牌并返回新明文
+//
+// 两者都只要求管理令牌，只读同步令牌无法调用。
+func (m *ManagementServer) handleGeoSiteSyncToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "GET, POST")
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	access := m.geoSiteAccessSafe()
+	if access == nil {
+		writeJSONError(w, http.StatusNotImplemented, "geosite API not configured")
+		return
+	}
+	if !m.requireAuth(w, r) {
+		return
+	}
+	token := access.SyncConfig().Token
+	if r.Method == http.MethodPost {
+		rotated, err := access.RotateSyncToken(r.Context())
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		token = rotated
+	}
+	// 令牌属于敏感信息，禁止任何中间层缓存。
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, GeoSiteSyncTokenResponse{Status: "ok", Token: token, Info: access.Info()})
 }
 
 func (m *ManagementServer) handleGeoSiteDat(w http.ResponseWriter, r *http.Request) {

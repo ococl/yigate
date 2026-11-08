@@ -573,3 +573,78 @@ routing:
 		t.Fatalf("Select() = %#v, want nil when all upstreams are disabled", up)
 	}
 }
+
+// TestConfigEditorAutoGeneratesGeoSiteSyncToken 开启下游同步时由系统生成令牌，
+// 用户无需也无法手写。
+func TestConfigEditorAutoGeneratesGeoSiteSyncToken(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+  geosite:
+    auto_update: false
+`)
+	enabled := true
+	if err := editor.UpdateSettings(proxy.SettingsPatch{GeoSiteSyncEnabled: &enabled}); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.Routing.GeoSite.SyncEnabled {
+		t.Fatal("sync_enabled should be true")
+	}
+	token := cfg.Routing.GeoSite.SyncToken
+	if len(token) != 64 {
+		t.Fatalf("generated token length = %d, want 64", len(token))
+	}
+}
+
+// TestConfigEditorClearsGeoSiteUpdateToken 显式写入空值会清除已保存的更新令牌，
+// WebUI「恢复默认」依赖该语义把更新令牌一并恢复为空。
+func TestConfigEditorClearsGeoSiteUpdateToken(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+  geosite:
+    auto_update: false
+    update_token: "old-token"
+`)
+	empty := ""
+	if err := editor.UpdateSettings(proxy.SettingsPatch{GeoSiteUpdateToken: &empty}); err != nil {
+		t.Fatalf("UpdateSettings: %v", err)
+	}
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Routing.GeoSite.UpdateToken != "" {
+		t.Fatalf("update_token = %q, want empty", cfg.Routing.GeoSite.UpdateToken)
+	}
+}
+
+// TestConfigEditorRotateGeoSiteSyncToken 重新生成会替换旧令牌并写回配置。
+func TestConfigEditorRotateGeoSiteSyncToken(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+  geosite:
+    auto_update: false
+    sync_enabled: true
+    sync_token: "old-token-12345678"
+`)
+	token, err := editor.RotateGeoSiteSyncToken()
+	if err != nil {
+		t.Fatalf("RotateGeoSiteSyncToken: %v", err)
+	}
+	if len(token) != 64 || contains(token, "old-token") {
+		t.Fatalf("unexpected token %q", token)
+	}
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Routing.GeoSite.SyncToken != token {
+		t.Fatalf("persisted token = %q, want %q", cfg.Routing.GeoSite.SyncToken, token)
+	}
+}

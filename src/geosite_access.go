@@ -44,6 +44,18 @@ func (g geoSiteAccess) SyncConfig() proxy.GeoSiteSyncConfig {
 	return proxy.GeoSiteSyncConfig{}
 }
 
+// RotateSyncToken 生成新的只读同步令牌并写回配置文件。
+// 令牌由系统生成，前端只负责触发、掩码展示与复制。
+func (g geoSiteAccess) RotateSyncToken(ctx context.Context) (string, error) {
+	if g.s == nil || g.s.cfgPath == "" {
+		return "", fmt.Errorf("config path is not available")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return newConfigEditor(g.s.cfgPath, g.s.reloadConfig).RotateGeoSiteSyncToken()
+}
+
 func (g geoSiteAccess) Update(ctx context.Context) (proxy.GeoSiteInfo, bool, error) {
 	updater := g.updater()
 	if updater == nil {

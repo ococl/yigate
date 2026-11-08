@@ -226,10 +226,33 @@ func geoSiteRedirectPolicy(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// doRequest 优先使用已配置且可用的上游代理下载数据。
+// 网络受限环境下直连会失败，因此上游可用时主动走代理；上游全部失败再回退直连，
+// 避免上游故障导致 GeoSite 完全无法更新。UseUpstream 为 false 时始终直连。
 func (u *GeoSiteUpdater) doRequest(req *http.Request) (*http.Response, error) {
-	if u.mgr != nil && u.mgr.AttemptCount(nil) > 0 {
-		return u.requestViaAutoProxy(req)
+	useUpstream := u.cfg.UseUpstream && u.mgr != nil && u.mgr.HasAliveUpstreams()
+	if !useUpstream {
+		return u.directRequest(req)
 	}
+	resp, err := u.requestViaAutoProxy(req)
+	if err == nil {
+		// 5xx 通常是代理网关自身的故障，按失败处理并回退直连；
+		// 4xx 视为目标站点的真实响应，直接返回给调用方。
+		if resp.StatusCode < 500 {
+			return resp, nil
+		}
+		_ = resp.Body.Close()
+		err = fmt.Errorf("upstream returned %s", resp.Status)
+	}
+	Logger().Warnw("download geosite via upstream failed, falling back to direct connection", "error", err)
+	resp, directErr := u.directRequest(req.Clone(req.Context()))
+	if directErr != nil {
+		return nil, fmt.Errorf("download via upstream failed: %v; direct download failed: %w", err, directErr)
+	}
+	return resp, nil
+}
+
+func (u *GeoSiteUpdater) directRequest(req *http.Request) (*http.Response, error) {
 	client := &http.Client{Timeout: geoSiteDownloadTimeout, CheckRedirect: geoSiteRedirectPolicy}
 	return client.Do(req)
 }

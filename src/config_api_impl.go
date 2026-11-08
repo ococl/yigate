@@ -649,8 +649,9 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		AutoMode:               strings.ToLower(strings.TrimSpace(cfg.Routing.Auto.Mode)),
 		AutoDirectTimeoutSec:   time.Duration(cfg.Routing.Auto.DirectTimeout).Seconds(),
 		AutoCacheTTLSec:        time.Duration(cfg.Routing.Auto.CacheTTL).Seconds(),
-		GeoSitePath:            cfg.Routing.GeoSite.Path,
+		GeoSitePath:            effectiveGeoSitePath(cfg, e.cfgPath),
 		GeoSiteAutoUpdate:      cfg.Routing.GeoSite.AutoUpdate,
+		GeoSiteUseUpstream:     cfg.Routing.GeoSite.UseUpstream,
 		GeoSiteUpdateURL:       proxy.RedactURL(cfg.Routing.GeoSite.UpdateURL),
 		GeoSiteUpdateIntervalH: time.Duration(cfg.Routing.GeoSite.UpdateInterval).Hours(),
 		Socks5HRedirectEnabled: cfg.Routing.Socks5HRedirect.Enabled,
@@ -750,15 +751,13 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	if patch.AutoCacheTTLSec != nil {
 		cfg.Routing.Auto.CacheTTL = durationFromSeconds(*patch.AutoCacheTTLSec)
 	}
-	if patch.GeoSitePath != nil {
-		value := strings.TrimSpace(*patch.GeoSitePath)
-		if err := proxy.ValidateGeoSiteDataPath(e.cfgPath, value); err != nil {
-			return err
-		}
-		cfg.Routing.GeoSite.Path = value
-	}
+	// 数据路径由系统托管：字段仅为兼容旧客户端保留，写入时忽略。
+	// 路径始终解析为配置文件同目录下的 geosite.dat（或 YAML 中显式配置的路径）。
 	if patch.GeoSiteAutoUpdate != nil {
 		cfg.Routing.GeoSite.AutoUpdate = *patch.GeoSiteAutoUpdate
+	}
+	if patch.GeoSiteUseUpstream != nil {
+		cfg.Routing.GeoSite.UseUpstream = *patch.GeoSiteUseUpstream
 	}
 	if patch.GeoSiteUpdateURL != nil {
 		value := strings.TrimSpace(*patch.GeoSiteUpdateURL)
@@ -778,6 +777,14 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	}
 	if patch.GeoSiteSyncToken != nil {
 		cfg.Routing.GeoSite.SyncToken = strings.TrimSpace(*patch.GeoSiteSyncToken)
+	}
+	// 开启下游同步但还没有令牌时由系统生成，避免用户手写弱口令或留空导致保存失败。
+	if cfg.Routing.GeoSite.SyncEnabled && strings.TrimSpace(cfg.Routing.GeoSite.SyncToken) == "" {
+		token, err := proxy.GenerateGeoSiteSyncToken()
+		if err != nil {
+			return err
+		}
+		cfg.Routing.GeoSite.SyncToken = token
 	}
 	if patch.Socks5HRedirectEnabled != nil {
 		cfg.Routing.Socks5HRedirect.Enabled = *patch.Socks5HRedirectEnabled
@@ -903,6 +910,41 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 	}
 
 	return e.saveAndApply(cfg)
+}
+
+// RotateGeoSiteSyncToken 由系统生成新的只读同步令牌并立即生效。
+func (e *configEditor) RotateGeoSiteSyncToken() (string, error) {
+	token, err := proxy.GenerateGeoSiteSyncToken()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return "", err
+	}
+	cfg.Routing.GeoSite.SyncToken = token
+	if err := e.saveAndApply(cfg); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// effectiveGeoSitePath 返回实际生效的 GeoSite 数据路径，供设置页只读展示。
+func effectiveGeoSitePath(cfg *Config, cfgPath string) string {
+	if cfg == nil {
+		return ""
+	}
+	if cfgPath == "" {
+		return strings.TrimSpace(cfg.Routing.GeoSite.Path)
+	}
+	if path := strings.TrimSpace(cfg.Routing.GeoSite.Path); path != "" {
+		if filepath.IsAbs(path) {
+			return path
+		}
+		// 与运行时解析规则保持一致，回显绝对路径便于排查。
+		return filepath.Join(filepath.Dir(cfgPath), path)
+	}
+	return proxy.ManagedGeoSitePath(filepath.Dir(cfgPath))
 }
 
 // durationFromSeconds 将秒转换为 proxy.Duration。

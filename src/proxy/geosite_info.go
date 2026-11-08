@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -49,17 +50,32 @@ type GeoSiteInfo struct {
 	LastCheckedAt         *time.Time `json:"last_checked_at,omitempty"`
 	LastError             string     `json:"last_error,omitempty"`
 	AutoUpdate            bool       `json:"auto_update"`
+	UseUpstream           bool       `json:"use_upstream"`
 	UpdateURL             string     `json:"update_url"`
 	UpdateIntervalSeconds int64      `json:"update_interval_seconds"`
-	UpdateTokenSet        bool       `json:"update_token_set"`
-	SyncEnabled           bool       `json:"sync_enabled"`
-	SyncTokenSet          bool       `json:"sync_token_set"`
+	// DefaultUpdateURL/DefaultUpdateIntervalSeconds 供管理界面「恢复默认」使用，
+	// 避免前端重复硬编码系统默认值。
+	DefaultUpdateURL             string `json:"default_update_url"`
+	DefaultUpdateIntervalSeconds int64  `json:"default_update_interval_seconds"`
+	UpdateTokenSet               bool   `json:"update_token_set"`
+	SyncEnabled                  bool   `json:"sync_enabled"`
+	SyncTokenSet                 bool   `json:"sync_token_set"`
 }
 
 // GeoSiteSyncConfig 描述本节点对外提供的只读同步能力。
 type GeoSiteSyncConfig struct {
 	Enabled bool
 	Token   string
+}
+
+// GenerateGeoSiteSyncToken 生成只读同步令牌（32 字节随机数，64 位十六进制）。
+// 令牌由系统生成，用户无需也无法在界面上手写。
+func GenerateGeoSiteSyncToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate geosite sync token: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func geoSiteMetaPath(datPath string) string {
@@ -150,15 +166,18 @@ func (u *GeoSiteUpdater) Info() GeoSiteInfo {
 		return GeoSiteInfo{}
 	}
 	info := GeoSiteInfo{
-		Path:                  u.cfg.Path,
-		DownloadPath:          GeoSiteDatDownloadPath,
-		AutoUpdate:            u.cfg.AutoUpdate,
-		UpdateURL:             RedactURL(u.UpdateURLOrDefault()),
-		UpdateIntervalSeconds: int64(time.Duration(u.cfg.UpdateInterval).Seconds()),
-		UpdateTokenSet:        strings.TrimSpace(u.cfg.UpdateToken) != "",
-		SyncEnabled:           u.cfg.SyncEnabled,
-		SyncTokenSet:          strings.TrimSpace(u.cfg.SyncToken) != "",
-		LastError:             u.LastError(),
+		Path:                         u.cfg.Path,
+		DownloadPath:                 GeoSiteDatDownloadPath,
+		AutoUpdate:                   u.cfg.AutoUpdate,
+		UseUpstream:                  u.cfg.UseUpstream,
+		UpdateURL:                    RedactURL(u.UpdateURLOrDefault()),
+		UpdateIntervalSeconds:        int64(time.Duration(u.cfg.UpdateInterval).Seconds()),
+		DefaultUpdateURL:             defaultGeoSiteUpdateURL,
+		DefaultUpdateIntervalSeconds: int64(defaultGeoSiteUpdateInterval.Seconds()),
+		UpdateTokenSet:               strings.TrimSpace(u.cfg.UpdateToken) != "",
+		SyncEnabled:                  u.cfg.SyncEnabled,
+		SyncTokenSet:                 strings.TrimSpace(u.cfg.SyncToken) != "",
+		LastError:                    u.LastError(),
 	}
 	meta, hasMeta := loadGeoSiteMeta(u.cfg.Path)
 	if hasMeta {

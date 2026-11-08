@@ -131,6 +131,9 @@ func TestGeoSiteUpdaterInfoWithoutFile(t *testing.T) {
 	if info.DownloadPath != GeoSiteDatDownloadPath {
 		t.Fatalf("download path = %q", info.DownloadPath)
 	}
+	if info.DefaultUpdateURL == "" || info.DefaultUpdateIntervalSeconds != 24*3600 {
+		t.Fatalf("defaults not exposed: url=%q interval=%d", info.DefaultUpdateURL, info.DefaultUpdateIntervalSeconds)
+	}
 }
 
 func TestGeoSiteUpdaterRejectsTinyDownload(t *testing.T) {
@@ -169,6 +172,72 @@ func TestGeoSiteUpdaterRejectsOversizedDownload(t *testing.T) {
 	}
 	if string(got) != string(original) {
 		t.Fatal("oversized download replaced existing geosite file")
+	}
+}
+
+// TestGeoSiteUpdaterFallsBackToDirect 上游全部失败时应回退直连，
+// 避免上游故障导致 GeoSite 无法更新。
+func TestGeoSiteUpdaterFallsBackToDirect(t *testing.T) {
+	data := make([]byte, 2048)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer server.Close()
+
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{
+		Name: "broken",
+		URL:  "socks5h://127.0.0.1:1",
+	}})
+	if err != nil {
+		t.Fatalf("NewUpstreamManager: %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
+	updater := NewGeoSiteUpdater(GeoSiteConfig{
+		Path:        path,
+		UpdateURL:   server.URL,
+		UseUpstream: true,
+	}, mgr)
+	if err := updater.UpdateOnce(); err != nil {
+		t.Fatalf("UpdateOnce should fall back to direct: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("geosite.dat not written after fallback")
+	}
+}
+
+// TestGeoSiteUpdaterFallsBackOnUpstream5xx 上游网关返回 5xx 时也应回退直连。
+func TestGeoSiteUpdaterFallsBackOnUpstream5xx(t *testing.T) {
+	data := make([]byte, 2048)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer origin.Close()
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer proxyServer.Close()
+
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{
+		Name:  "bad-gateway",
+		URL:   proxyServer.URL,
+		Types: []string{"http"},
+	}})
+	if err != nil {
+		t.Fatalf("NewUpstreamManager: %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "geosite.dat")
+	updater := NewGeoSiteUpdater(GeoSiteConfig{
+		Path:        path,
+		UpdateURL:   origin.URL,
+		UseUpstream: true,
+	}, mgr)
+	if err := updater.UpdateOnce(); err != nil {
+		t.Fatalf("UpdateOnce should fall back to direct on 5xx: %v", err)
 	}
 }
 

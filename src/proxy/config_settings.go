@@ -22,6 +22,7 @@ type SettingsView struct {
 	AutoCacheTTLSec        float64 `json:"auto_cache_ttl_seconds"`
 	GeoSitePath            string  `json:"geosite_path"`
 	GeoSiteAutoUpdate      bool    `json:"geosite_auto_update"`
+	GeoSiteUseUpstream     bool    `json:"geosite_use_upstream"`
 	GeoSiteUpdateURL       string  `json:"geosite_update_url"`
 	GeoSiteUpdateIntervalH float64 `json:"geosite_update_interval_hours"`
 	GeoSiteUpdateTokenSet  bool    `json:"geosite_update_token_set"`
@@ -81,6 +82,7 @@ type SettingsPatch struct {
 	AutoCacheTTLSec        *float64 `json:"auto_cache_ttl_seconds"`
 	GeoSitePath            *string  `json:"geosite_path"`
 	GeoSiteAutoUpdate      *bool    `json:"geosite_auto_update"`
+	GeoSiteUseUpstream     *bool    `json:"geosite_use_upstream"`
 	GeoSiteUpdateURL       *string  `json:"geosite_update_url"`
 	GeoSiteUpdateIntervalH *float64 `json:"geosite_update_interval_hours"`
 	GeoSiteUpdateToken     *string  `json:"geosite_update_token"`
