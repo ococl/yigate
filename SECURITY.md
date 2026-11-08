@@ -33,9 +33,16 @@ YiGate 是内网代理网关，默认假设运行环境可信。请务必遵守�
    不要与 `users` 同时配置，也只在受控网络内启用。
 3. 保持 `destination_policy.protect_private: true`；如需自定义白名单，
    记住 `default_action: deny` 下 `allow_ports` 只是附加约束。
+   运行时管理 API 不能关闭私网防护，只有配置文件中显式 `allow_private_targets: true` 才允许。
+   高安全场景可开启 `destination_policy.resolve_before_upstream: true`，
+   让网关在把域名交给上游解析前先校验解析结果。
 4. 凭据通过 `${ENV_VAR}` 注入，环境变量文件权限 0600 且不纳入版本控制；
-   运行目录下不要保留 `*.bak*`、流量明细等明文副本。
-5. 定期执行 `npm audit`、`govulncheck` 与 `scripts/check-release-configs.sh`。
+   运行目录下不要保留 `*.bak*`、流量明细等明文副本。服务端会拒绝占位符与常见弱口令，
+   管理 API 添加用户时执行同样的强度校验。
+5. 非回环监听默认必须有 `users` 或 `allowed_clients`；确需匿名代理时显式声明
+   `allow_anonymous_proxy: true`。开启 `enable_pprof` 时必须配置 `management_auth_token`，
+   即使管理端口只绑回环。
+6. 定期执行 `npm audit`、`govulncheck` 与 `scripts/check-release-configs.sh`。
 
 ## 范围说明
 

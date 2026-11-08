@@ -9,6 +9,19 @@
 
 ### Security
 
+- **第二轮强化 · 启动期基线**：非回环监听强制要求 `users` 或 `allowed_clients`、
+  `enable_pprof` 一律要求管理令牌（即使只绑回环）、占位符与常见弱口令在配置加载
+  和管理 API 添加用户时均被拒绝；新增 `allow_anonymous_proxy` / `allow_private_targets`
+  两个显式风险确认开关，容器默认配置与本地匿名模板已显式声明。
+- **第二轮强化 · SSRF**：内置云元数据服务域名别名拒绝；上游 URL 主机校验；
+  GeoSite 下载重定向逐跳重新校验并在跨主机跳时剥离更新令牌；
+  新增可选 `destination_policy.resolve_before_upstream: true`，在把域名交给上游解析前
+  先由网关预解析并逐个校验 IP。
+- **第二轮强化 · 管理接口**：请求体改用 `http.MaxBytesReader` 并统一返回 413、
+  补 `ReadHeaderTimeout`、安全响应头覆盖全部管理响应且 API 响应 `no-store`、
+  5xx 不再回显内部绝对路径、认证失败与配置写操作均留下带来源 IP 的审计日志。
+- **第二轮强化 · 凭据回显**：`GET /api/v1/config/settings` 回显 GeoSite 更新地址时脱敏；
+  发布配置检查补上此前漏检的 `local-only-token`。`govulncheck` 实测无已知漏洞。
 - 目标访问策略（`destination_policy`）现在在普通 HTTP 请求进入任何转发分支前统一执行，
   覆盖 `final=proxy`、`auto` 的代理路径、`socks5h_redirect` 与 SOCKS5 UDP 级联，修复了策略可被绕过的问题。
 - `default_action: deny` 下 `allow_ports` 改为附加约束，必须与 `allow_cidrs` / `allow_domains` 同时满足；
