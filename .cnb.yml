@@ -66,6 +66,8 @@ main:
         - name: webui-e2e
           image: mcr.microsoft.com/playwright:v1.65.0-noble
           script: |
+            # Chromium 默认不带中文字体，缺失时截图与断言文案会渲染成方框。
+            bash scripts/install-e2e-fonts.sh
             cd web && npm ci
             YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         # main 是分支事件，没有对应的 Release，附件只能挂到 commit 上：
@@ -196,6 +198,8 @@ main:
         - name: webui-e2e
           image: mcr.microsoft.com/playwright:v1.65.0-noble
           script: |
+            # Chromium 默认不带中文字体，缺失时截图与断言文案会渲染成方框。
+            bash scripts/install-e2e-fonts.sh
             cd web && npm ci
             YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         - name: verify-release

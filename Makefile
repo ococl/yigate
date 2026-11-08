@@ -74,6 +74,7 @@ web-e2e-install:
 
 web-e2e: web-embed
 	@mkdir -p $(BUILD_DIR)
+	@bash $(SCRIPTS_DIR)/install-e2e-fonts.sh
 	cd $(SRC_DIR) && CGO_ENABLED=$(CGO_ENABLED) GOPROXY=$(GOPROXY) go build $(GO_BUILD_FLAGS) -o ../$(BUILD_DIR)/yigate-e2e .
 	cd $(WEB_DIR) && npm run test:e2e
 

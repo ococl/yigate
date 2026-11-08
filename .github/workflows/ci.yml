@@ -135,8 +135,15 @@ jobs:
       - name: Install Playwright Chromium
         run: make web-e2e-install
 
+      # Chromium 默认不带中文字体，缺失时截图与断言文案会渲染成方框。
+      - name: Install CJK fonts for E2E
+        run: bash scripts/install-e2e-fonts.sh
+
       - name: Playwright browser E2E
         run: make web-e2e
+
+      - name: Management API regression
+        run: bash scripts/run-management-api-e2e.sh
 
       - name: Upload Playwright report
         if: failure()
