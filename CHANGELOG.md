@@ -3,7 +3,7 @@
 本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
 
-## [Unreleased]
+## [0.3.0] - 2026-11-08
 
 本次为安全与工程质量治理版本，行为变化集中在使用了目标访问白名单与运行时部署的场景。
 
