@@ -56,7 +56,7 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 .
 ├── data/
 │   ├── config.yml      # 运行配置（默认路径；首次启动自动从示例生成）
-│   └── geosite.dat     # GeoSite 数据（routing.geosite.path 默认 ../data/geosite.dat）
+│   └── geosite.dat     # GeoSite 数据（系统托管，固定为配置文件同目录）
 └── logs/
     └── yigate.log      # 滚动日志（log.file 默认 logs/yigate.log）
 ```

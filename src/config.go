@@ -49,10 +49,10 @@ type ListenerConfig struct {
 
 // Config 代理服务器配置
 type Config struct {
-	Listeners           []ListenerConfig              `yaml:"listeners"`
-	Listen              string                        `yaml:"listen"`
-	Management          string                        `yaml:"management"`
-	ManagementAuthToken string                        `yaml:"management_auth_token"`
+	Listeners           []ListenerConfig `yaml:"listeners"`
+	Listen              string           `yaml:"listen"`
+	Management          string           `yaml:"management"`
+	ManagementAuthToken string           `yaml:"management_auth_token"`
 	// 下面两个开关是显式的风险确认：默认关闭，只有确实需要匿名代理或访问私网目标时才打开。
 	AllowAnonymousProxy bool                          `yaml:"allow_anonymous_proxy"`
 	AllowPrivateTargets bool                          `yaml:"allow_private_targets"`
@@ -105,10 +105,11 @@ func defaultConfig() *Config {
 				CacheTTL:      proxy.Duration(time.Hour),
 			},
 			GeoSite: proxy.GeoSiteConfig{
-				Path:           "../data/geosite.dat",
+				// 路径由系统托管：未显式配置时解析为配置文件同目录下的 geosite.dat。
 				AutoUpdate:     true,
 				UpdateURL:      "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
 				UpdateInterval: proxy.Duration(24 * time.Hour),
+				UseUpstream:    true,
 			},
 			Socks5HRedirect: proxy.Socks5HConfig{Enabled: true},
 		},
@@ -138,7 +139,19 @@ func defaultConfig() *Config {
 }
 
 // LoadConfig 加载并校验 YAML 配置文件。
+// 启动阶段对未展开的环境变量保持严格：缺失即失败，避免带着半份凭据上线。
 func LoadConfig(path string) (*Config, error) {
+	return loadConfig(path, nil)
+}
+
+// LoadConfigForReload 用于热加载：当某个密钥字段引用的环境变量已不可用时，
+// 沿用当前运行时已经生效的值，避免管理接口保存或 GeoSite 更新后因为无关字段整体失败。
+// previous 为空时行为与 LoadConfig 完全一致。
+func LoadConfigForReload(path string, previous *Config) (*Config, error) {
+	return loadConfig(path, previous)
+}
+
+func loadConfig(path string, previous *Config) (*Config, error) {
 	cfg := defaultConfig()
 
 	f, err := os.Open(path)
@@ -158,11 +171,12 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Upstreams == nil {
 		cfg.Upstreams = []proxy.UpstreamConfig{}
 	}
-	if err := expandConfigEnv(cfg); err != nil {
+	if err := expandConfigEnv(cfg, previous); err != nil {
 		return nil, err
 	}
 	baseDir := filepath.Dir(path)
 	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
+	proxy.ResolveGeoSiteDataPath(&cfg.Routing.GeoSite, baseDir)
 	resolveTLSPaths(&cfg.TLS, baseDir)
 	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
 	proxy.NormalizeLogConfig(&cfg.Log)
@@ -226,13 +240,17 @@ func isZeroAccessControl(cfg proxy.AccessControlConfig) bool {
 		cfg.MaxConnsPerUser == 0
 }
 
-func expandConfigEnv(cfg *Config) error {
+func expandConfigEnv(cfg *Config, previous *Config) error {
 	if cfg.ManagementAuthToken != "" {
-		expanded, err := expandEnvStrict("management_auth_token", cfg.ManagementAuthToken)
+		fallback := ""
+		if previous != nil {
+			fallback = previous.ManagementAuthToken
+		}
+		expanded, err := expandSecretEnv("management_auth_token", cfg.ManagementAuthToken, fallback)
 		if err != nil {
 			return err
 		}
-		cfg.ManagementAuthToken = strings.TrimSpace(expanded)
+		cfg.ManagementAuthToken = expanded
 		if cfg.ManagementAuthToken == "" {
 			return fmt.Errorf("management_auth_token must not be empty")
 		}
@@ -241,64 +259,139 @@ func expandConfigEnv(cfg *Config) error {
 		if strings.TrimSpace(user) == "" {
 			return fmt.Errorf("users contains empty username")
 		}
-		expanded, err := expandEnvStrict(fmt.Sprintf("users[%q]", user), pass)
+		fallback := ""
+		if previous != nil {
+			fallback = previous.Users[user]
+		}
+		expanded, err := expandSecretEnv(fmt.Sprintf("users[%q]", user), pass, fallback)
 		if err != nil {
 			return err
 		}
-		expanded = strings.TrimSpace(expanded)
 		if expanded == "" {
 			return fmt.Errorf("users[%q] password must not be empty", user)
 		}
 		cfg.Users[user] = expanded
 	}
 	for i := range cfg.Upstreams {
-		expanded, err := expandEnvStrict(fmt.Sprintf("upstreams[%d].url", i), cfg.Upstreams[i].URL)
+		fallback := previousUpstreamURL(previous, i, cfg.Upstreams[i].Name)
+		expanded, err := expandSecretEnv(fmt.Sprintf("upstreams[%d].url", i), cfg.Upstreams[i].URL, fallback)
 		if err != nil {
 			return err
 		}
-		cfg.Upstreams[i].URL = strings.TrimSpace(expanded)
+		cfg.Upstreams[i].URL = expanded
 	}
 	// GeoSite 同步令牌支持 ${ENV} 注入，避免在配置文件中保存明文。
 	for _, item := range []struct {
-		name  string
-		value *string
+		name     string
+		value    *string
+		fallback string
 	}{
-		{"routing.geosite.update_token", &cfg.Routing.GeoSite.UpdateToken},
-		{"routing.geosite.sync_token", &cfg.Routing.GeoSite.SyncToken},
+		{"routing.geosite.update_token", &cfg.Routing.GeoSite.UpdateToken, previousGeoSiteToken(previous, "update")},
+		{"routing.geosite.sync_token", &cfg.Routing.GeoSite.SyncToken, previousGeoSiteToken(previous, "sync")},
 	} {
 		if strings.TrimSpace(*item.value) == "" {
 			continue
 		}
-		expanded, err := expandEnvStrict(item.name, *item.value)
+		expanded, err := expandSecretEnv(item.name, *item.value, item.fallback)
 		if err != nil {
 			return err
 		}
-		*item.value = strings.TrimSpace(expanded)
+		*item.value = expanded
 	}
-	if err := expandTLSConfigEnv(&cfg.TLS); err != nil {
+	if err := expandTLSConfigEnv(&cfg.TLS, previousTLS(previous)); err != nil {
 		return err
 	}
 	for i := range cfg.Listeners {
-		if err := expandListenerUsersEnv(&cfg.Listeners[i], i); err != nil {
+		if err := expandListenerUsersEnv(&cfg.Listeners[i], i, previousListener(previous, i)); err != nil {
 			return err
 		}
-		if err := expandTLSConfigEnv(&cfg.Listeners[i].TLS); err != nil {
+		if err := expandTLSConfigEnv(&cfg.Listeners[i].TLS, previousListenerTLS(previous, i)); err != nil {
 			return fmt.Errorf("listeners[%d].tls: %w", i, err)
 		}
 	}
 	return nil
 }
 
-func expandListenerUsersEnv(lc *ListenerConfig, idx int) error {
+func previousTLS(previous *Config) *TLSConfig {
+	if previous == nil {
+		return nil
+	}
+	return &previous.TLS
+}
+
+func previousListener(previous *Config, idx int) *ListenerConfig {
+	if previous == nil || idx < 0 || idx >= len(previous.Listeners) {
+		return nil
+	}
+	return &previous.Listeners[idx]
+}
+
+func previousListenerTLS(previous *Config, idx int) *TLSConfig {
+	if lc := previousListener(previous, idx); lc != nil {
+		return &lc.TLS
+	}
+	return nil
+}
+
+func previousUpstreamURL(previous *Config, idx int, name string) string {
+	if previous == nil {
+		return ""
+	}
+	name = strings.TrimSpace(name)
+	if name != "" {
+		for _, up := range previous.Upstreams {
+			if strings.TrimSpace(up.Name) == name {
+				return up.URL
+			}
+		}
+	}
+	if idx >= 0 && idx < len(previous.Upstreams) {
+		return previous.Upstreams[idx].URL
+	}
+	return ""
+}
+
+func previousGeoSiteToken(previous *Config, kind string) string {
+	if previous == nil {
+		return ""
+	}
+	if kind == "update" {
+		return previous.Routing.GeoSite.UpdateToken
+	}
+	return previous.Routing.GeoSite.SyncToken
+}
+
+// expandSecretEnv 展开密钥字段；热加载时若环境变量缺失则沿用上次生效值。
+// 启动阶段没有 previous，缺失仍然直接报错。
+func expandSecretEnv(field, value, fallback string) (string, error) {
+	expanded, err := expandEnvStrict(field, value)
+	if err == nil {
+		return strings.TrimSpace(expanded), nil
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return "", err
+	}
+	proxy.Logger().Warnw(
+		"environment variable unavailable during config reload, keeping previous value",
+		"field", field, "error", err,
+	)
+	return fallback, nil
+}
+
+func expandListenerUsersEnv(lc *ListenerConfig, idx int, previous *ListenerConfig) error {
 	for user, pass := range lc.Users {
 		if strings.TrimSpace(user) == "" {
 			return fmt.Errorf("listeners[%d].users contains empty username", idx)
 		}
-		expanded, err := expandEnvStrict(fmt.Sprintf("listeners[%d].users[%q]", idx, user), pass)
+		fallback := ""
+		if previous != nil {
+			fallback = previous.Users[user]
+		}
+		expanded, err := expandSecretEnv(fmt.Sprintf("listeners[%d].users[%q]", idx, user), pass, fallback)
 		if err != nil {
 			return err
 		}
-		expanded = strings.TrimSpace(expanded)
 		if expanded == "" {
 			return fmt.Errorf("listeners[%d].users[%q] password must not be empty", idx, user)
 		}
@@ -307,23 +400,33 @@ func expandListenerUsersEnv(lc *ListenerConfig, idx int) error {
 	return nil
 }
 
-func expandTLSConfigEnv(tlsCfg *TLSConfig) error {
-	fields := map[string]*string{
-		"tls.cert_file":      &tlsCfg.CertFile,
-		"tls.key_file":       &tlsCfg.KeyFile,
-		"tls.client_ca_file": &tlsCfg.ClientCAFile,
+func expandTLSConfigEnv(tlsCfg *TLSConfig, previous *TLSConfig) error {
+	type fieldRef struct {
+		name  string
+		value *string
+		prev  string
 	}
-	for field, ptr := range fields {
-		if *ptr == "" {
+	refs := []fieldRef{
+		{"tls.cert_file", &tlsCfg.CertFile, ""},
+		{"tls.key_file", &tlsCfg.KeyFile, ""},
+		{"tls.client_ca_file", &tlsCfg.ClientCAFile, ""},
+	}
+	if previous != nil {
+		refs[0].prev = previous.CertFile
+		refs[1].prev = previous.KeyFile
+		refs[2].prev = previous.ClientCAFile
+	}
+	for _, ref := range refs {
+		if *ref.value == "" {
 			continue
 		}
-		expanded, err := expandEnvStrict(field, *ptr)
+		expanded, err := expandSecretEnv(ref.name, *ref.value, ref.prev)
 		if err != nil {
 			return err
 		}
-		*ptr = strings.TrimSpace(expanded)
-		if *ptr == "" {
-			return fmt.Errorf("%s must not be empty", field)
+		*ref.value = expanded
+		if *ref.value == "" {
+			return fmt.Errorf("%s must not be empty", ref.name)
 		}
 	}
 	return nil

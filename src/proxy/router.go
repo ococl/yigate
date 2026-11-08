@@ -83,10 +83,14 @@ type RoutingConfig struct {
 }
 
 type GeoSiteConfig struct {
-	Path           string   `yaml:"path"`
+	// Path 为空时由系统解析为配置文件同目录下的 geosite.dat，管理界面不再暴露该字段。
+	Path           string   `yaml:"path,omitempty"`
 	AutoUpdate     bool     `yaml:"auto_update"`
 	UpdateURL      string   `yaml:"update_url"`
 	UpdateInterval Duration `yaml:"update_interval"`
+	// UseUpstream 为 true 时优先通过已配置且可用的上游代理下载数据，
+	// 全部上游失败后再回退直连；网络受限环境下可显式关闭。
+	UseUpstream bool `yaml:"use_upstream"`
 	// UpdateToken 非空时以 Bearer 令牌向下游/上游请求 GeoSite 数据，
 	// 用于从启用了只读同步的 YiGate 节点拉取数据。
 	UpdateToken string `yaml:"update_token"`
@@ -152,6 +156,21 @@ func ResolveRoutingPaths(cfg *RoutingConfig, baseDir string) {
 		return
 	}
 	cfg.GeoSite.Path = filepath.Join(baseDir, cfg.GeoSite.Path)
+}
+
+// ManagedGeoSitePath 返回系统托管的 GeoSite 数据文件路径：
+// 与运行配置同目录的 geosite.dat（原生运行与 Docker 布局一致）。
+func ManagedGeoSitePath(configDir string) string {
+	return filepath.Join(configDir, "geosite.dat")
+}
+
+// ResolveGeoSiteDataPath 在未配置路径时填充系统托管路径，
+// 数据文件位置不再由管理界面或用户输入决定。
+func ResolveGeoSiteDataPath(cfg *GeoSiteConfig, configDir string) {
+	if cfg == nil || strings.TrimSpace(cfg.Path) != "" {
+		return
+	}
+	cfg.Path = ManagedGeoSitePath(configDir)
 }
 
 func NewRouter(cfg RoutingConfig, dnsCfg DNSConfig) (*Router, error) {

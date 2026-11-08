@@ -100,19 +100,21 @@ upstreams:
 routing:
   # final 为未命中任何规则时的兜底动作：direct / proxy / auto / deny（默认 auto）。
   final: auto
-  # geosite_path 为空时跳过 geosite 规则；auto_update 需要可访问的 update_url。
+  # 数据文件路径由系统托管：固定为配置文件同目录的 geosite.dat，无需配置。
   geosite:
-    path: "../data/geosite.dat"
     auto_update: true
     update_url: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
     update_interval: 24h
+    # 优先使用已配置且可用的上游代理下载，全部失败后回退直连（默认 true）。
+    use_upstream: true
     # 从上游下载时携带的 Bearer 令牌，用于从另一台启用了同步的 YiGate 节点拉取数据。
     # update_token: "${GEOSITE_UPDATE_TOKEN}"
     # 允许下游节点从本节点只读同步 GeoSite 数据：
     #   GET /api/v1/geosite/dat   （支持 ETag 条件请求，未变化时返回 304）
-    # 下游只需把 update_url 指向该地址并填写这里的 sync_token 作为 update_token。
+    # update_token 使用下游 WebUI 中「重新生成」得到的同步令牌。
     # sync_enabled: true
-    # sync_token: "${GEOSITE_SYNC_TOKEN}"  # 至少 8 位，仅用于读取 GeoSite 数据
+    # sync_token 由系统生成并自动写回；也可通过 POST /api/v1/geosite/sync-token 轮换。
+    # sync_token: "${GEOSITE_SYNC_TOKEN}"
   auto:
     # mode: direct_first（先直连，超时后回退代理）或 proxy_first（先代理，失败后回退直连）
     mode: direct_first

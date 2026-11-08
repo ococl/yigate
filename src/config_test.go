@@ -496,6 +496,72 @@ management_auth_token: "${EMPTY_TOKEN}"
 	}
 }
 
+// TestLoadConfigForReloadKeepsPreviousSecrets 热加载时环境变量不可用应沿用上次生效值，
+// 启动期仍然严格报错；这正是管理接口保存与 GeoSite 更新触发 reload 失败的根因。
+func TestLoadConfigForReloadKeepsPreviousSecrets(t *testing.T) {
+	t.Setenv("YIGATE_MANAGEMENT_TOKEN", "old-token")
+	t.Setenv("YIGATE_PROXY_PASSWORD", "old-pass")
+	t.Setenv("YIGATE_UPSTREAM_URL", "socks5h://127.0.0.1:1080")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	content := `listen: 127.0.0.1:0
+management: 127.0.0.1:0
+management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"
+users:
+  alice: "${YIGATE_PROXY_PASSWORD}"
+upstreams:
+  - name: default
+    url: "${YIGATE_UPSTREAM_URL}"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	// 进程环境里不再提供这些变量（例如容器以旧环境启动后配置被模板覆盖）。
+	t.Setenv("YIGATE_MANAGEMENT_TOKEN", "")
+	t.Setenv("YIGATE_PROXY_PASSWORD", "")
+	t.Setenv("YIGATE_UPSTREAM_URL", "")
+
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("startup load must stay strict when env is missing")
+	}
+	reloaded, err := LoadConfigForReload(path, previous)
+	if err != nil {
+		t.Fatalf("LoadConfigForReload: %v", err)
+	}
+	if reloaded.ManagementAuthToken != "old-token" {
+		t.Fatalf("management token = %q", reloaded.ManagementAuthToken)
+	}
+	if reloaded.Users["alice"] != "old-pass" {
+		t.Fatalf("user password = %q", reloaded.Users["alice"])
+	}
+	if reloaded.Upstreams[0].URL != "socks5h://127.0.0.1:1080" {
+		t.Fatalf("upstream url = %q", reloaded.Upstreams[0].URL)
+	}
+}
+
+// TestLoadConfigResolvesManagedGeoSitePath 未配置路径时由系统解析为配置同目录的 geosite.dat。
+func TestLoadConfigResolvesManagedGeoSitePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	if err := os.WriteFile(path, []byte("listen: 127.0.0.1:0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	want := proxy.ManagedGeoSitePath(dir)
+	if cfg.Routing.GeoSite.Path != want {
+		t.Fatalf("geosite path = %q, want %q", cfg.Routing.GeoSite.Path, want)
+	}
+}
+
 func TestLoadConfigRejectsUnknownField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")

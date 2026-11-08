@@ -41,24 +41,24 @@ type listenerContext struct {
 
 // Server 统一代理服务器，支持配置热加载
 type Server struct {
-	cfgPath     string
-	runtime     atomic.Pointer[runtimeState]
-	mgmt        *proxy.ManagementServer
-	mgmtAddr    string
-	stateMu     sync.RWMutex
-	applyMu     sync.Mutex
-	listenersMu sync.Mutex
-	listeners   map[string]net.Listener
-	quit        chan struct{}
-	stopOnce    sync.Once
-	shutdownErr error
-	activeConns sync.WaitGroup
-	activeMu    sync.Mutex
-	connections map[net.Conn]struct{}
-	stopping    bool
-	watcherMu   sync.Mutex
-	watcher     *fsnotify.Watcher
-	watcherWG   sync.WaitGroup
+	cfgPath            string
+	runtime            atomic.Pointer[runtimeState]
+	mgmt               *proxy.ManagementServer
+	mgmtAddr           string
+	stateMu            sync.RWMutex
+	applyMu            sync.Mutex
+	listenersMu        sync.Mutex
+	listeners          map[string]net.Listener
+	quit               chan struct{}
+	stopOnce           sync.Once
+	shutdownErr        error
+	activeConns        sync.WaitGroup
+	activeMu           sync.Mutex
+	connections        map[net.Conn]struct{}
+	stopping           bool
+	watcherMu          sync.Mutex
+	watcher            *fsnotify.Watcher
+	watcherWG          sync.WaitGroup
 	connCount          atomic.Int64
 	maxConns           atomic.Int64
 	listenerConnCounts sync.Map // map[string]*atomic.Int64，每个监听地址独立计算并发上限
@@ -198,7 +198,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 			proxy.Logger().Warnw("geosite dat not found or invalid, geosite rules disabled; will retry periodically",
 				"path", cfg.Routing.GeoSite.Path)
 			updater.StartMissingFileRecovery(func() {
-				loaded, err := LoadConfig(s.cfgPath)
+				loaded, err := LoadConfigForReload(s.cfgPath, s.Config())
 				if err != nil {
 					proxy.Logger().Warnw("load config after geosite recovery failed", "error", err)
 					return
@@ -363,7 +363,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		}
 	}
 	updater.Start(func() {
-		loaded, err := LoadConfig(s.cfgPath)
+		loaded, err := LoadConfigForReload(s.cfgPath, s.Config())
 		if err != nil {
 			proxy.Logger().Warnw("load config after geosite update failed", "error", err)
 			return
@@ -461,9 +461,10 @@ func (s *Server) newManagementServer(cfg *Config) *proxy.ManagementServer {
 	return mgmt
 }
 
-// LoadAndApply 从磁盘重新加载并应用配置
+// LoadAndApply 从磁盘重新加载并应用配置。
+// 热加载时允许密钥类环境变量缺失（沿用当前生效值），避免管理接口保存后整体回滚。
 func (s *Server) LoadAndApply() error {
-	cfg, err := LoadConfig(s.cfgPath)
+	cfg, err := LoadConfigForReload(s.cfgPath, s.Config())
 	if err != nil {
 		return err
 	}
