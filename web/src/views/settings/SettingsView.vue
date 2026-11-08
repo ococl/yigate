@@ -5,6 +5,7 @@ import { message } from 'antdv-next'
 import { reloadConfig } from '@/api/system'
 import { getSettings, updateSettings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
+import { copyText } from '@/utils/clipboard'
 import type { SettingsView, SettingsPatch } from '@/types/api'
 
 interface SettingsSection {
@@ -112,6 +113,7 @@ function defaultSettings(): SettingsView {
     auto_cache_ttl_seconds: 3600,
     geosite_path: '',
     geosite_auto_update: false,
+    geosite_use_upstream: true,
     geosite_update_url: '',
     geosite_update_interval_hours: 24,
     geosite_update_token_set: false,
@@ -387,6 +389,18 @@ async function handleSave() {
   }
 }
 
+// 生成随机管理令牌：由系统生成，保存后需用新令牌重新登录。
+async function handleGenerateToken() {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  tokenInput.value = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  if (await copyText(tokenInput.value)) {
+    message.success('已生成并复制新令牌，请妥善保存后点击保存')
+    return
+  }
+  message.success('已生成新令牌，请点击输入框右侧眼睛图标查看并复制后保存')
+}
+
 // 清除管理令牌：仅回环管理地址允许（非回环时后端会拒绝）
 async function handleClearToken() {
   clearingToken.value = true
@@ -543,11 +557,14 @@ onMounted(fetchAll)
                         label="管理令牌"
                         :tooltip="`对应 management_auth_token；当前${settings?.management_token_set ? '已设置' : '未设置'}。留空表示保持不变。`"
                       >
-                        <a-input-password
-                          v-model:value="tokenInput"
-                          placeholder="留空则不修改，修改后需重新登录"
-                          autocomplete="new-password"
-                        />
+                        <div class="token-input-row">
+                          <a-input-password
+                            v-model:value="tokenInput"
+                            placeholder="留空则不修改，修改后需重新登录"
+                            autocomplete="new-password"
+                          />
+                          <a-button @click="handleGenerateToken">生成</a-button>
+                        </div>
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -571,7 +588,7 @@ onMounted(fetchAll)
                   type="warning"
                   show-icon
                   message="管理面板安全提示"
-                  description="管理端口绑定非回环地址时必须配置管理令牌。建议通过环境变量或配置文件注入令牌，避免在浏览器中频繁轮换。"
+                  description="管理端口绑定非回环地址时必须配置管理令牌。可直接点击「生成」由系统创建强随机令牌；令牌修改后当前会话会立即失效。"
                 />
               </div>
 
@@ -832,6 +849,15 @@ onMounted(fetchAll)
   flex-direction: column;
   height: 100%;
   width: 100%;
+}
+
+.token-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.token-input-row :deep(.ant-input-affix-wrapper) {
+  flex: 1 1 auto;
 }
 
 .settings-header {

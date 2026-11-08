@@ -4,6 +4,7 @@ import { message, theme } from 'antdv-next'
 import { getHealth, getStatus, getTraffic } from '@/api/system'
 import { formatDateTime, formatTimeOnly } from '@/utils/datetime'
 import { formatBytes, formatUptime } from '@/utils/format'
+import { copyText } from '@/utils/clipboard'
 import type { HealthStatus, ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
 
 const health = ref<HealthStatus | null>(null)
@@ -243,34 +244,13 @@ function validateProxyCredentials(): boolean {
   return true
 }
 
-function fallbackCopy(text: string) {
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  document.body.removeChild(textarea)
-  if (!copied) throw new Error('copy failed')
-}
-
-async function copyText(text: string) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-    } else {
-      fallbackCopy(text)
-    }
-    message.success('已复制')
-  } catch {
-    message.error('复制失败，请手动选择链接复制')
-  }
-}
-
 async function copyProxyLink(target: ProxyEndpoint) {
   if (!validateProxyCredentials()) return
-  await copyText(buildProxyUrl(target))
+  if (await copyText(buildProxyUrl(target))) {
+    message.success('已复制')
+    return
+  }
+  message.error('复制失败，请手动选择链接复制')
 }
 
 async function copyAllProxyLinks() {
@@ -279,7 +259,11 @@ async function copyAllProxyLinks() {
     return
   }
   if (!validateProxyCredentials()) return
-  await copyText(proxyTargets.value.map((target) => buildProxyUrl(target)).join('\n'))
+  if (await copyText(proxyTargets.value.map((target) => buildProxyUrl(target)).join('\n'))) {
+    message.success('已复制')
+    return
+  }
+  message.error('复制失败，请手动选择链接复制')
 }
 
 function persistExtraProxyHosts() {

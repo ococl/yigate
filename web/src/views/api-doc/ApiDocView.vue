@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { message } from 'antdv-next'
 import { apiGroups } from '@/data/api-docs'
+import { copyText } from '@/utils/clipboard'
 
 const route = useRoute()
 const router = useRouter()
@@ -89,11 +91,12 @@ const totalEndpoints = computed(() =>
   apiGroups.reduce((sum, g) => sum + g.endpoints.length, 0),
 )
 
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text).then(() => {
-    // 使用 antdv-next message 提示
-    window.dispatchEvent(new CustomEvent('copy-success'))
-  })
+async function copyToClipboard(text: string) {
+  if (await copyText(text)) {
+    message.success('已复制')
+    return
+  }
+  message.error('复制失败，请手动选择内容复制')
 }
 </script>
 

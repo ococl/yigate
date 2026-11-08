@@ -947,10 +947,10 @@ yigate_connections_total 12345
   "traffic_audit_enabled": true,
   "traffic_retention_days": 30,
   "geosite_auto_update": true,
+  "geosite_use_upstream": true,
   "geosite_update_url": "http://node-a:8892/api/v1/geosite/dat",
   "geosite_update_token": "<上游同步令牌>",
   "geosite_sync_enabled": true,
-  "geosite_sync_token": "至少 8 位只读令牌",
   "webui_enabled": false,
   "management_auth_token": "new-strong-token",
   "log_level": "debug"
@@ -986,7 +986,7 @@ yigate_connections_total 12345
         path: '/api/v1/geosite',
         summary: '查看 GeoSite 版本与同步配置',
         description:
-          '返回数据文件路径、是否存在、大小、SHA-256 与短版本号、数据更新时间、来源地址、上次检查时间、最近一次更新错误，以及自动更新与下游同步配置。令牌只回显是否已设置，不返回明文。',
+          '返回数据文件路径、是否存在、大小、SHA-256 与短版本号、数据更新时间、来源地址、上次检查时间、最近一次更新错误，以及自动更新、上游代理与下游同步配置。数据路径由系统托管（配置文件同目录的 geosite.dat），不可通过管理接口修改。令牌在本响应中只回显是否已设置；同步令牌明文可通过 GET /api/v1/geosite/sync-token 读取（仅管理令牌）。',
         auth: true,
         authNote: '需要管理令牌；开启 sync_enabled 后也可使用只读同步令牌',
         params: [],
@@ -1001,6 +1001,7 @@ yigate_connections_total 12345
   "source_url": "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
   "last_checked_at": "2026-11-07T02:10:11Z",
   "auto_update": true,
+  "use_upstream": true,
   "update_url": "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
   "update_interval_seconds": 86400,
   "update_token_set": false,
@@ -1058,6 +1059,72 @@ yigate_connections_total 12345
           { code: 200, description: '更新完成（changed 表示内容是否变化）' },
           { code: 401, description: '未认证' },
           { code: 500, description: '下载或热重载失败' },
+        ],
+      },
+      {
+        id: 'geosite-sync-token-get',
+        method: 'GET',
+        path: '/api/v1/geosite/sync-token',
+        summary: '读取下游同步令牌',
+        description:
+          '返回当前只读同步令牌明文，供 WebUI 默认掩码展示与复制。响应带 Cache-Control: no-store；该操作不能被只读同步令牌调用。',
+        auth: true,
+        authNote: '始终要求管理令牌',
+        params: [],
+        responseBody: `{
+  "status": "ok",
+  "token": "64 位十六进制随机串",
+  "info": {
+    "path": "/var/lib/yigate/data/geosite.dat",
+    "exists": true,
+    "sync_token_set": true
+  }
+}`,
+        example: {
+          request: `curl http://127.0.0.1:8892/api/v1/geosite/sync-token \\
+  -H "Authorization: Bearer <token>"`,
+          response: `{
+  "status": "ok",
+  "token": "9f2c..."
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '返回当前令牌（可能为空字符串）' },
+          { code: 401, description: '未认证或使用只读同步令牌' },
+        ],
+      },
+      {
+        id: 'geosite-sync-token',
+        method: 'POST',
+        path: '/api/v1/geosite/sync-token',
+        summary: '重新生成下游同步令牌',
+        description:
+          '由系统生成新的强随机只读同步令牌并立即写回配置热加载，响应返回新令牌明文。WebUI 的「重新生成」按钮即调用该接口。该操作不能被只读同步令牌调用。',
+        auth: true,
+        authNote: '始终要求管理令牌',
+        params: [],
+        responseBody: `{
+  "status": "ok",
+  "token": "64 位十六进制随机串",
+  "info": {
+    "path": "/var/lib/yigate/data/geosite.dat",
+    "exists": true,
+    "sync_token_set": true
+  }
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8892/api/v1/geosite/sync-token \\
+  -H "Authorization: Bearer <token>"`,
+          response: `{
+  "status": "ok",
+  "token": "9f2c...",
+  "info": { "sync_token_set": true }
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '生成成功，返回新令牌明文' },
+          { code: 401, description: '未认证或使用只读同步令牌' },
+          { code: 500, description: '写入配置或热加载失败' },
         ],
       },
       {

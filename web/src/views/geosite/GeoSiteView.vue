@@ -2,8 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { message } from 'antdv-next'
 import axios from 'axios'
-import { getGeoSiteInfo, updateGeoSite } from '@/api/geosite'
+import { generateGeoSiteSyncToken, getGeoSiteInfo, getGeoSiteSyncToken, updateGeoSite } from '@/api/geosite'
 import { updateSettings } from '@/api/settings'
+import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/datetime'
 import { formatBytes } from '@/utils/format'
 import type { GeoSiteInfo, SettingsPatch } from '@/types/api'
@@ -15,17 +16,22 @@ const loading = ref(false)
 const updating = ref(false)
 const savingSource = ref(false)
 const savingSync = ref(false)
+// rotating 表示正在请求系统重新生成同步令牌。
+const rotating = ref(false)
 
 const sourceForm = ref({
-  path: '',
   update_url: '',
   update_interval_hours: 24,
   auto_update: false,
+  use_upstream: true,
   update_token: '',
 })
+// restoredDefaults 标记表单来自「恢复默认」，保存时一并清除已设置的更新令牌。
+const restoredDefaults = ref(false)
 
 const syncForm = ref({
   enabled: false,
+  // token 始终由系统管理，这里只用于掩码展示与复制，不提交修改。
   token: '',
 })
 
@@ -38,7 +44,6 @@ const syncSnippet = computed(() => {
   const lines = [
     'routing:',
     '  geosite:',
-    '    path: "../data/geosite.dat"',
     '    auto_update: true',
     `    update_url: "${downloadURL.value}"`,
     '    update_interval: 24h',
@@ -50,15 +55,27 @@ const syncSnippet = computed(() => {
 function applyInfo(data: GeoSiteInfo) {
   info.value = data
   sourceForm.value = {
-    path: data.path,
     update_url: data.update_url,
     update_interval_hours: Math.max(1, Math.round(data.update_interval_seconds / 3600) || 24),
     auto_update: data.auto_update,
+    // 旧后端不返回该字段，默认按开启处理，与后端默认值一致。
+    use_upstream: data.use_upstream ?? true,
     update_token: '',
   }
   syncForm.value = {
     enabled: data.sync_enabled,
-    token: '',
+    // 令牌未设置时清空，设置时保留已加载的明文，等待 fetchInfo 刷新。
+    token: data.sync_token_set ? syncForm.value.token : '',
+  }
+  restoredDefaults.value = false
+}
+
+// loadSyncToken 仅在管理令牌下可用，用于把系统生成的令牌以掩码形式回显。
+async function loadSyncToken() {
+  try {
+    syncForm.value.token = (await getGeoSiteSyncToken({ silent: true })).token
+  } catch {
+    // 旧后端没有该接口时保持为空，不影响其余功能
   }
 }
 
@@ -69,8 +86,12 @@ function errorStatus(error: unknown): number | undefined {
 async function fetchInfo() {
   loading.value = true
   try {
-    applyInfo(await getGeoSiteInfo({ silent: true }))
+    const data = await getGeoSiteInfo({ silent: true })
+    applyInfo(data)
     unsupported.value = false
+    if (data.sync_token_set) {
+      await loadSyncToken()
+    }
   } catch (error) {
     // 404 说明后端尚未注册 /api/v1/geosite（版本较旧），直接给出可操作的提示，
     // 而不是弹一个含义不明的「请求错误 (404)」。
@@ -91,11 +112,7 @@ async function fetchInfo() {
 }
 
 async function handleUpdate() {
-  // 数据路径/更新地址属于必要条件，先做前置校验，避免落到服务端 4xx/5xx。
-  if (!info.value?.path) {
-    message.warning('请先在「更新来源」中填写数据路径并保存，再执行更新')
-    return
-  }
+  // 更新地址是必要条件，先做前置校验，避免落到服务端 4xx/5xx。
   if (!info.value?.update_url) {
     message.warning('请先在「更新来源」中填写更新地址并保存，再执行更新')
     return
@@ -123,16 +140,34 @@ function buildSourcePatch(): SettingsPatch | null {
     return null
   }
   const patch: SettingsPatch = {
-    geosite_path: form.path.trim(),
     geosite_update_url: form.update_url.trim(),
     geosite_update_interval_hours: form.update_interval_hours,
     geosite_auto_update: form.auto_update,
+    geosite_use_upstream: form.use_upstream,
   }
   const token = form.update_token.trim()
   if (token) {
     patch.geosite_update_token = token
+  } else if (restoredDefaults.value) {
+    // 空字符串表示清除已设置的更新令牌，与「恢复默认」语义一致。
+    patch.geosite_update_token = ''
   }
   return patch
+}
+
+// handleRestoreDefaults 把「更新来源」表单恢复为系统默认值。
+// 只填充表单，仍需点击「保存」才会写回配置，避免意外开启自动更新。
+function handleRestoreDefaults() {
+  const seconds = info.value?.default_update_interval_seconds || 24 * 3600
+  sourceForm.value = {
+    update_url: info.value?.default_update_url || info.value?.update_url || '',
+    update_interval_hours: Math.max(1, Math.round(seconds / 3600)),
+    auto_update: true,
+    use_upstream: true,
+    update_token: '',
+  }
+  restoredDefaults.value = true
+  message.info('已填入默认值，点击「保存」后生效')
 }
 
 async function handleSaveSource() {
@@ -151,23 +186,14 @@ async function handleSaveSource() {
 }
 
 async function handleSaveSync() {
-  const form = syncForm.value
-  if (form.enabled && !form.token.trim() && !info.value?.sync_token_set) {
-    message.warning('开启下游同步前请设置同步令牌')
-    return
-  }
   const patch: SettingsPatch = {
-    geosite_sync_enabled: form.enabled,
-  }
-  const token = form.token.trim()
-  if (token) {
-    patch.geosite_sync_token = token
+    geosite_sync_enabled: syncForm.value.enabled,
   }
   savingSync.value = true
   try {
     await updateSettings(patch)
-    message.success('下游同步设置已保存')
     await fetchInfo()
+    message.success(syncForm.value.enabled ? '下游同步已开启' : '下游同步已关闭')
   } catch {
     // 错误已统一提示
   } finally {
@@ -175,17 +201,37 @@ async function handleSaveSync() {
   }
 }
 
-async function copyText(text: string, tip: string) {
+async function handleRotateToken() {
+  // 刷新 info 会重置表单，先记下用户当前的勾选状态。
+  const enabled = syncForm.value.enabled
+  rotating.value = true
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      message.success(tip)
-      return
-    }
-    throw new Error('clipboard unavailable')
+    const result = await generateGeoSiteSyncToken()
+    applyInfo(result.info)
+    syncForm.value.token = result.token
+    syncForm.value.enabled = enabled
+    message.success('已生成新的同步令牌，可直接复制')
   } catch {
-    message.warning('当前浏览器不支持自动复制，请手动选择复制')
+    // 错误已统一提示
+  } finally {
+    rotating.value = false
   }
+}
+
+// 勾选「允许下游同步」且尚无可用的同步令牌时，立即由系统生成，无需等保存。
+async function handleSyncToggle(checked: boolean) {
+  if (!checked || syncForm.value.token || rotating.value) {
+    return
+  }
+  await handleRotateToken()
+}
+
+async function copyValue(text: string, tip: string) {
+  if (await copyText(text)) {
+    message.success(tip)
+    return
+  }
+  message.warning('复制失败，请手动选择复制')
 }
 
 onMounted(fetchInfo)
@@ -250,7 +296,7 @@ onMounted(fetchInfo)
             size="small"
             type="link"
             :disabled="!info?.sha256"
-            @click="copyText(info?.sha256 || '', '完整校验值已复制')"
+            @click="copyValue(info?.sha256 || '', '完整校验值已复制')"
           >
             复制完整 SHA-256
           </a-button>
@@ -285,16 +331,19 @@ onMounted(fetchInfo)
             </template>
             <div class="column-scroll">
               <a-form layout="vertical">
-                <a-form-item label="数据路径" tooltip="相对路径基于配置文件所在目录解析">
-                  <a-input v-model:value="sourceForm.path" placeholder="../data/geosite.dat" />
-                </a-form-item>
                 <a-form-item label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
                   <a-input v-model:value="sourceForm.update_url" placeholder="https://..." />
                 </a-form-item>
                 <a-form-item label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
                   <a-input-password
                     v-model:value="sourceForm.update_token"
-                    :placeholder="info?.update_token_set ? '已设置，留空保持不变' : '可选，Bearer 令牌'"
+                    :placeholder="
+                      restoredDefaults && info?.update_token_set
+                        ? '保存后将清除已设置的令牌'
+                        : info?.update_token_set
+                          ? '已设置，留空保持不变'
+                          : '可选，Bearer 令牌'
+                    "
                     autocomplete="new-password"
                   />
                 </a-form-item>
@@ -316,12 +365,23 @@ onMounted(fetchInfo)
                     </a-form-item>
                   </div>
                 </div>
+
+                <a-form-item
+                  label="通过上游代理下载"
+                  tooltip="优先使用已配置且可用的上游代理，全部失败后回退直连；网络正常时可关闭"
+                >
+                  <a-switch v-model:checked="sourceForm.use_upstream" />
+                  <a-typography-text type="secondary" class="foot-hint" style="margin-left: 8px;">
+                    {{ sourceForm.use_upstream ? '优先走上游' : '始终直连' }}
+                  </a-typography-text>
+                </a-form-item>
               </a-form>
             </div>
             <div class="column-foot">
               <a-typography-text type="secondary" class="foot-hint">保存后立即热加载</a-typography-text>
               <a-space>
                 <a-button :disabled="loading" @click="fetchInfo">还原</a-button>
+                <a-button @click="handleRestoreDefaults">恢复默认</a-button>
                 <a-button type="primary" :loading="savingSource" @click="handleSaveSource">保存</a-button>
               </a-space>
             </div>
@@ -345,29 +405,37 @@ onMounted(fetchInfo)
               />
 
               <a-form layout="vertical">
-                <div class="field-row">
-                  <div class="field-block">
-                    <a-form-item label="允许下游同步">
-                      <a-switch v-model:checked="syncForm.enabled" />
-                    </a-form-item>
+                <a-form-item label="允许下游同步">
+                  <a-switch v-model:checked="syncForm.enabled" @change="handleSyncToggle" />
+                </a-form-item>
+                <a-form-item
+                  label="同步令牌"
+                  tooltip="由系统随机生成，仅授予读取 GeoSite 数据的权限；默认掩码显示，可复制后填入下游配置"
+                >
+                  <div class="token-row">
+                    <a-input-password
+                      :value="syncForm.token"
+                      readonly
+                      :placeholder="loading && info?.sync_token_set ? '正在加载…' : '尚未生成'"
+                    />
+                    <a-button
+                      :disabled="!syncForm.token"
+                      @click="copyValue(syncForm.token, '同步令牌已复制')"
+                    >
+                      复制
+                    </a-button>
+                    <a-button :loading="rotating" @click="handleRotateToken">
+                      重新生成
+                    </a-button>
                   </div>
-                  <div class="field-block">
-                    <a-form-item label="同步令牌" tooltip="至少 8 位，仅授予读取 GeoSite 数据的权限">
-                      <a-input-password
-                        v-model:value="syncForm.token"
-                        :placeholder="info?.sync_token_set ? '已设置，留空保持不变' : '至少 8 位'"
-                        autocomplete="new-password"
-                      />
-                    </a-form-item>
-                  </div>
-                </div>
+                </a-form-item>
               </a-form>
 
               <a-descriptions :column="1" size="small" bordered class="sync-endpoint">
                 <a-descriptions-item label="下载地址">
                   <div class="copy-line">
                     <span class="mono ellipsis" :title="downloadURL">{{ downloadURL }}</span>
-                    <a-button type="link" size="small" @click="copyText(downloadURL, '下载地址已复制')">复制</a-button>
+                    <a-button type="link" size="small" @click="copyValue(downloadURL, '下载地址已复制')">复制</a-button>
                   </div>
                 </a-descriptions-item>
                 <a-descriptions-item label="当前版本">
@@ -377,7 +445,7 @@ onMounted(fetchInfo)
 
               <div class="snippet-title">
                 <a-typography-text strong>下游接入配置</a-typography-text>
-                <a-button type="link" size="small" @click="copyText(syncSnippet, '下游配置片段已复制')">复制</a-button>
+                <a-button type="link" size="small" @click="copyValue(syncSnippet, '下游配置片段已复制')">复制</a-button>
               </div>
               <pre class="snippet">{{ syncSnippet }}</pre>
             </div>
@@ -493,6 +561,18 @@ onMounted(fetchInfo)
 
 .sync-endpoint {
   margin-bottom: 12px;
+}
+
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.token-row :deep(.ant-input-affix-wrapper) {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .copy-line {

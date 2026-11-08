@@ -192,6 +192,7 @@ export interface SettingsView {
   auto_cache_ttl_seconds: number
   geosite_path: string
   geosite_auto_update: boolean
+  geosite_use_upstream: boolean
   geosite_update_url: string
   geosite_update_interval_hours: number
   geosite_update_token_set: boolean
@@ -263,8 +264,11 @@ export interface GeoSiteInfo {
   last_checked_at?: string
   last_error?: string
   auto_update: boolean
+  use_upstream: boolean
   update_url: string
   update_interval_seconds: number
+  default_update_url: string
+  default_update_interval_seconds: number
   update_token_set: boolean
   sync_enabled: boolean
   sync_token_set: boolean
@@ -273,5 +277,12 @@ export interface GeoSiteInfo {
 export interface GeoSiteUpdateResult {
   status: string
   changed: boolean
+  info: GeoSiteInfo
+}
+
+// GeoSiteSyncTokenResult 携带当前令牌明文，供界面默认掩码展示与复制。
+export interface GeoSiteSyncTokenResult {
+  status: string
+  token: string
   info: GeoSiteInfo
 }
