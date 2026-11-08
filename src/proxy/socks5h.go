@@ -15,6 +15,9 @@ func (r *Router) DialSocks5H(target string, mgr *UpstreamManager, sourceIP ...st
 	if r == nil || !r.socks5h.Enabled {
 		return nil, fmt.Errorf("socks5h redirect is disabled")
 	}
+	if err := r.CheckTarget(target); err != nil {
+		return nil, err
+	}
 	key := socks5hRoutePrefix + routeCacheKey(target)
 	if entry, ok := r.cache.Get(key); ok && entry.Action == ActionProxy && entry.UpstreamName != "" {
 		if up := mgr.Socks5ByName(entry.UpstreamName); up != nil {

@@ -1,11 +1,20 @@
 package proxy
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
 	"strings"
 )
+
+// secureTokenEqual 先计算定长摘要再做常量时间比较。
+// 直接对原文使用 ConstantTimeCompare 会因长度不同提前返回，泄露令牌长度。
+func secureTokenEqual(provided, expected string) bool {
+	a := sha256.Sum256([]byte(provided))
+	b := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
+}
 
 // AuthRequired 是否配置了认证
 func AuthRequired(users map[string]string) bool {
@@ -21,7 +30,7 @@ func Authenticate(username, password string, users map[string]string) bool {
 	if !ok {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1
+	return secureTokenEqual(password, pass)
 }
 
 // HTTPAuthOK 检查 HTTP 代理 Basic 认证，返回认证通过的用户名。

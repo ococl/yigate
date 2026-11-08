@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -75,10 +76,11 @@ type DNSResolver struct {
 	httpClient *http.Client
 	tlsConfig  *tls.Config
 
-	cache    map[string]*dnsCacheEntry
-	cacheMu  sync.RWMutex
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	cache     map[string]*dnsCacheEntry
+	cacheMu   sync.RWMutex
+	stopCh    chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 // defaultDNSTimeout 是 DNS 查询的默认超时时间。
@@ -136,7 +138,7 @@ func NewDNSResolver(cfg DNSConfig) *DNSResolver {
 
 // startCacheCleanup 启动后台 goroutine 定期清理过期 DNS 缓存条目。
 func (r *DNSResolver) startCacheCleanup() {
-	r.stopOnce.Do(func() {
+	r.startOnce.Do(func() {
 		go r.cacheCleanupLoop()
 	})
 }
@@ -425,7 +427,14 @@ func buildDNSQuery(domain string, qtype uint16) []byte {
 	var buf bytes.Buffer
 
 	// Header (12 bytes)
-	id := uint16(time.Now().UnixNano() & 0xFFFF)
+	// 事务 ID 使用加密安全随机数，避免可预测 ID 带来的缓存投毒风险。
+	var idBytes [2]byte
+	var id uint16
+	if _, err := rand.Read(idBytes[:]); err == nil {
+		id = binary.BigEndian.Uint16(idBytes[:])
+	} else {
+		id = uint16(time.Now().UnixNano() & 0xFFFF)
+	}
 	_ = binary.Write(&buf, binary.BigEndian, id)             // ID
 	_ = binary.Write(&buf, binary.BigEndian, uint16(0x0100)) // Flags: RD=1
 	_ = binary.Write(&buf, binary.BigEndian, uint16(1))      // QDCOUNT
@@ -521,6 +530,10 @@ func skipDNSName(msg []byte, pos int) (string, int, error) {
 	var name strings.Builder
 	jumped := false
 	nextPos := pos
+	// 自引用压缩指针会让 pos 原地不动，必须记录访问过的跳转目标并设置上限，
+	// 否则畸形 DoH/DoT 响应可以把解析协程挂死。
+	seenPointers := make(map[int]struct{})
+	jumps := 0
 
 	for {
 		if pos >= len(msg) {
@@ -543,8 +556,20 @@ func skipDNSName(msg []byte, pos int) (string, int, error) {
 				nextPos = pos + 2
 				jumped = true
 			}
-			pos = int(b&0x3F)<<8 | int(msg[pos+1])
+			target := int(b&0x3F)<<8 | int(msg[pos+1])
+			jumps++
+			if jumps > 128 {
+				return "", 0, fmt.Errorf("DNS compression pointer loop")
+			}
+			if _, ok := seenPointers[target]; ok {
+				return "", 0, fmt.Errorf("DNS compression pointer loop")
+			}
+			seenPointers[target] = struct{}{}
+			pos = target
 			continue
+		}
+		if b&0xC0 != 0 {
+			return "", 0, fmt.Errorf("invalid DNS label length")
 		}
 		// 标签
 		pos++

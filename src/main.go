@@ -78,11 +78,8 @@ func runForeground(cfgPath string) {
 	} else if generated {
 		fmt.Fprintf(os.Stderr, "config not found, generated default config at %s\n", cfgPath)
 		if token != "" {
-			fmt.Fprintf(os.Stderr, "======================================================================\n")
-			fmt.Fprintf(os.Stderr, " 首次启动已生成 WebUI 登录密码（management_auth_token）：\n")
-			fmt.Fprintf(os.Stderr, "   %s\n", token)
-			fmt.Fprintf(os.Stderr, " 该密码已写入配置文件，请妥善保存；重启后请从配置文件读取，日志将不再显示。\n")
-			fmt.Fprintf(os.Stderr, "======================================================================\n")
+			// 明文令牌只落在 0600 的配置文件里，绝不写入 stderr（systemd 下会进入 journal）。
+			fmt.Fprintf(os.Stderr, "首次启动已生成管理令牌，请从 %s 读取并妥善保存（配置文件权限 0600）。\n", cfgPath)
 		}
 	}
 	cfg, err := LoadConfig(cfgPath)
@@ -137,11 +134,8 @@ func runService(cfgPath string) {
 	} else if generated {
 		fmt.Fprintf(os.Stderr, "config not found, generated default config at %s\n", cfgPath)
 		if token != "" {
-			fmt.Fprintf(os.Stderr, "======================================================================\n")
-			fmt.Fprintf(os.Stderr, " 首次启动已生成 WebUI 登录密码（management_auth_token）：\n")
-			fmt.Fprintf(os.Stderr, "   %s\n", token)
-			fmt.Fprintf(os.Stderr, " 该密码已写入配置文件，请妥善保存；重启后请从配置文件读取，日志将不再显示。\n")
-			fmt.Fprintf(os.Stderr, "======================================================================\n")
+			// 明文令牌只落在 0600 的配置文件里，绝不写入 stderr（systemd 下会进入 journal）。
+			fmt.Fprintf(os.Stderr, "首次启动已生成管理令牌，请从 %s 读取并妥善保存（配置文件权限 0600）。\n", cfgPath)
 		}
 	}
 	s := newService(cfgPath)

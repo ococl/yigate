@@ -1147,13 +1147,15 @@ func TestIntegrationDestinationPolicy(t *testing.T) {
 		Timeout:   2 * time.Second,
 	}
 
-	// 尝试访问 127.0.0.1 应被目标策略拒绝
+	// 尝试访问 127.0.0.1 应被目标策略拒绝；传输层错误也必须视为失败，
+	// 避免网络异常时静默跳过全部断言。
 	resp, err := client.Get("http://127.0.0.1:9999/")
-	if err == nil {
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			t.Fatal("expected destination policy to deny 127.0.0.1")
-		}
+	if err != nil {
+		t.Fatalf("expected an explicit proxy rejection, got transport error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected destination policy to deny 127.0.0.1 with 403, got %d", resp.StatusCode)
 	}
 }
 

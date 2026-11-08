@@ -142,6 +142,13 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 		data := buf[dataOff:n]
 
 		if r.useUpstream && r.upPacketConn != nil {
+			// 级联模式由上游解析并转发，同样不能绕过目标访问策略。
+			if r.policy != nil {
+				if err := r.policy.CheckTarget(target); err != nil {
+					Logger().Warnw("udp relay upstream target denied by policy", "target", target, "error", err)
+					continue
+				}
+			}
 			packet := append(buf[:dataOff], data...)
 			if _, err := r.upPacketConn.Write(packet); err != nil {
 				Logger().Warnw("udp relay write to upstream failed", "error", err)

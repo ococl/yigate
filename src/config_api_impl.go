@@ -136,10 +136,9 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 	}
 
 	original, readErr := os.ReadFile(e.cfgPath)
-	mode := os.FileMode(0o644)
-	if info, statErr := os.Stat(e.cfgPath); statErr == nil {
-		mode = info.Mode().Perm()
-	}
+	// 运行配置可能含凭据、上游地址与流量明细，写回与回滚一律收紧为 0600，
+	// 不沿用原文件权限（默认 0644 会让本机任意用户读取）。
+	const mode = os.FileMode(0o600)
 
 	dir := filepath.Dir(e.cfgPath)
 	tmp, err := os.CreateTemp(dir, ".yigate-config-*.tmp")
@@ -168,7 +167,11 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 			if readErr == nil {
 				// 回滚配置内容并尽力恢复运行时状态
 				if writeErr := os.WriteFile(e.cfgPath, original, mode); writeErr == nil {
-					_ = e.apply()
+					if rollbackErr := e.apply(); rollbackErr != nil {
+						proxy.Logger().Errorw("config rollback apply failed", "error", rollbackErr)
+					}
+				} else {
+					proxy.Logger().Errorw("config rollback write failed", "error", writeErr)
 				}
 			}
 			return fmt.Errorf("apply config: %w", err)
@@ -738,13 +741,21 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 		cfg.Routing.Auto.CacheTTL = durationFromSeconds(*patch.AutoCacheTTLSec)
 	}
 	if patch.GeoSitePath != nil {
-		cfg.Routing.GeoSite.Path = strings.TrimSpace(*patch.GeoSitePath)
+		value := strings.TrimSpace(*patch.GeoSitePath)
+		if err := proxy.ValidateGeoSiteDataPath(e.cfgPath, value); err != nil {
+			return err
+		}
+		cfg.Routing.GeoSite.Path = value
 	}
 	if patch.GeoSiteAutoUpdate != nil {
 		cfg.Routing.GeoSite.AutoUpdate = *patch.GeoSiteAutoUpdate
 	}
 	if patch.GeoSiteUpdateURL != nil {
-		cfg.Routing.GeoSite.UpdateURL = strings.TrimSpace(*patch.GeoSiteUpdateURL)
+		value := strings.TrimSpace(*patch.GeoSiteUpdateURL)
+		if err := proxy.ValidateGeoSiteUpdateURL(value); err != nil {
+			return err
+		}
+		cfg.Routing.GeoSite.UpdateURL = value
 	}
 	if patch.GeoSiteUpdateIntervalH != nil {
 		cfg.Routing.GeoSite.UpdateInterval = durationFromSeconds(*patch.GeoSiteUpdateIntervalH * 3600)

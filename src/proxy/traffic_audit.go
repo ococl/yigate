@@ -354,7 +354,7 @@ func (a *TrafficAccounter) recordAggregates(k TrafficKey, bytesIn, bytesOut, tot
 		}
 		ub.Add(total)
 		if perUserQuota > 0 && ub.Load() > perUserQuota {
-			return fmt.Errorf("user %q quota exceeded: %d > %d", k.User, ub.Load(), perUserQuota)
+			return fmt.Errorf("%w: user %q: %d > %d", ErrQuotaExceeded, k.User, ub.Load(), perUserQuota)
 		}
 	}
 
@@ -374,7 +374,7 @@ func (a *TrafficAccounter) recordAggregates(k TrafficKey, bytesIn, bytesOut, tot
 		}
 		ub.Add(total)
 		if perUpstreamQuota > 0 && ub.Load() > perUpstreamQuota {
-			return fmt.Errorf("upstream %q quota exceeded: %d > %d", k.Upstream, ub.Load(), perUpstreamQuota)
+			return fmt.Errorf("%w: upstream %q: %d > %d", ErrQuotaExceeded, k.Upstream, ub.Load(), perUpstreamQuota)
 		}
 	}
 

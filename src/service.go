@@ -104,16 +104,17 @@ func platformServiceOptions() map[string]interface{} {
 
 // systemdUnitTemplate 是 Linux systemd 单元模板（传入 kardianos 的 SystemdScript）。
 // 与官方默认模板一致，仅将写死的 RestartSec=120 / StartLimitBurst=10 调整为
-// RestartSec=10 / StartLimitBurst=64，并保留 Restart / SuccessExitStatus 动态注入。
+// RestartSec=10 / StartLimitBurst=5，并把启动限流放进 [Unit] 段（systemd 只在
+// [Unit] 识别 StartLimit*，放在 [Service] 会被忽略）。
 const systemdUnitTemplate = `[Unit]
 Description={{.Description}}
 ConditionFileIsExecutable={{.Path|cmdEscape}}
 {{range $i, $dep := .Dependencies}}
 {{$dep}} {{end}}
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
-StartLimitInterval=5
-StartLimitBurst=64
 ExecStart={{.Path|cmdEscape}}{{range .Arguments}} {{.|cmd}}{{end}}
 {{if .ChRoot}}RootDirectory={{.ChRoot|cmd}}{{end}}
 {{if .WorkingDirectory}}WorkingDirectory={{.WorkingDirectory|cmdEscape}}{{end}}

@@ -15,6 +15,10 @@ const maxBufferedRequestBody = 1 << 20 // 1 MiB
 // handleHTTPRequest 处理单个非 CONNECT 的 HTTP 请求，将响应写回客户端。
 // 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
 func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string, user string) bool {
+	if err := rejectRequestTarget(router, req); err != nil {
+		writePolicyDeniedResponse(client, targetHost(req), err)
+		return false
+	}
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Connection")
 
@@ -121,6 +125,26 @@ func recordHTTPTraffic(user string, req *http.Request, resp *http.Response, reqB
 	}
 }
 
+// rejectRequestTarget 在协议分支之前统一执行目标访问策略。
+// 路由决策只决定走直连还是上游，不能替代访问授权；若只检查 Dial/CONNECT 路径，
+// 普通 HTTP 请求经上游转发时会绕过 deny_* 与 default_action=deny。
+func rejectRequestTarget(router *Router, req *http.Request) error {
+	if router == nil || req == nil {
+		return nil
+	}
+	target := targetHost(req)
+	if target == "" {
+		return nil
+	}
+	return router.CheckTarget(target)
+}
+
+func writePolicyDeniedResponse(client net.Conn, target string, err error) {
+	Logger().Warnw("request target denied by policy", "target", target, "error", err)
+	status := HTTPStatusFromError(err)
+	writeResponse(client, fmt.Sprintf("HTTP/1.1 %d %s\r\n\r\n", status, HTTPStatusText(status)))
+}
+
 func isChunkedRequest(req *http.Request) bool {
 	for _, enc := range req.TransferEncoding {
 		if strings.EqualFold(enc, "chunked") {
@@ -133,6 +157,10 @@ func isChunkedRequest(req *http.Request) bool {
 // handleStreamedRequest 处理无法缓冲重试的流式请求（chunked 或超大请求体）。
 // 返回 true 表示可保持连接（keep-alive），false 表示应关闭连接。
 func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamManager, router *Router, sourceIP string, user string) bool {
+	if err := rejectRequestTarget(router, req); err != nil {
+		writePolicyDeniedResponse(client, targetHost(req), err)
+		return false
+	}
 	var resp *http.Response
 	var err error
 	if router.Socks5HEnabled() {

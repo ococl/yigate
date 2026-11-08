@@ -133,8 +133,11 @@ func (u *GeoSiteUpdater) Sync(ctx context.Context) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	url := u.UpdateURLOrDefault()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// url 变量统一保存脱敏地址，用于元数据、错误信息与管理 API 回显；
+	// 实际请求仍使用含凭据的 rawURL，避免把 userinfo/token 写进日志。
+	rawURL := u.UpdateURLOrDefault()
+	url := RedactURL(rawURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		u.setLastError(err)
 		return false, err
@@ -242,9 +245,24 @@ func (u *GeoSiteUpdater) requestViaAutoProxy(req *http.Request) (*http.Response,
 
 func requestViaUpstreamClient(req *http.Request, up *Upstream) (*http.Response, error) {
 	transport := &http.Transport{}
+	// 每次下载都新建 Transport，若不显式关闭空闲连接会一直残留；
+	// CloseIdleConnections 只影响空闲连接，不会打断响应体仍在使用的连接。
+	defer transport.CloseIdleConnections()
 	if up.isSocks5() {
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return up.DialSOCKS5H(addr)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			conn, err := up.DialSOCKS5H(addr)
+			if err != nil {
+				return nil, err
+			}
+			// SOCKS5 握手本身不可取消，拨号后立即复核 ctx，避免把已取消请求继续发出。
+			if err := ctx.Err(); err != nil {
+				_ = conn.Close()
+				return nil, err
+			}
+			return conn, nil
 		}
 	} else {
 		transport.Proxy = http.ProxyURL(up.urlForType(up.primaryProxyType()))

@@ -166,6 +166,8 @@ destination_policy:
   # 域名与端口维度的附加限制（均可选）：
   # deny_domains / allow_domains 支持精确域名与 *.example.com 通配后缀；
   # deny_ports / allow_ports 为 1-65535 的端口白/黑名单，越界端口会在加载时报错。
+  # default_action: deny 时，allow_ports 是附加约束（必须与 allow_cidrs / allow_domains
+  # 同时满足），不能单独作为放行条件；仅配置 allow_ports 会在加载时报错。
   # deny_domains: ["*.internal.example", "metadata.google.internal"]
   # allow_domains: ["*.corp.example"]
   # deny_ports: [25, 445, 3389]

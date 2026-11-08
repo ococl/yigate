@@ -443,6 +443,10 @@ func validateConfig(cfg *Config) error {
 			return fmt.Errorf("listeners[%d].tls: %w", i, err)
 		}
 		if lc.TProxy.Enabled {
+			// 透明代理的客户端不会发送代理认证头，配了 users 只会造成「以为有认证」的开放代理。
+			if len(lc.Users) > 0 {
+				return fmt.Errorf("listeners[%d].tproxy: transparent proxy cannot enforce proxy authentication; remove users or disable tproxy", i)
+			}
 			if !proxy.IsTProxySupported() {
 				return fmt.Errorf("listeners[%d].tproxy: transparent proxy is only supported on Linux", i)
 			}
@@ -647,11 +651,9 @@ func validateRoutingConfig(cfg proxy.RoutingConfig) error {
 		if url == "" {
 			return fmt.Errorf("routing.geosite.update_url must not be empty when auto_update is true")
 		}
-		if !containsEnvPlaceholder(url) {
-			lower := strings.ToLower(url)
-			if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
-				return fmt.Errorf("routing.geosite.update_url must be an HTTP(S) URL, got %q", cfg.GeoSite.UpdateURL)
-			}
+		// 统一走共享校验：限制协议与目标主机，错误信息中不回显可能带凭据的完整 URL。
+		if err := proxy.ValidateGeoSiteUpdateURL(url); err != nil {
+			return err
 		}
 	}
 	// 对外提供 GeoSite 同步时必须配置只读令牌，避免数据端点变成匿名可读。

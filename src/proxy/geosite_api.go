@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"crypto/subtle"
 	"net/http"
 	"os"
 	"strings"
@@ -51,6 +50,11 @@ func (m *ManagementServer) geoSiteAccessSafe() GeoSiteAccess {
 //	GET  /api/v1/geosite/dat    下载数据文件（供下游节点同步，支持条件请求）
 func (m *ManagementServer) handleGeoSiteAPI(w http.ResponseWriter, r *http.Request) {
 	MetricInc("yigate_management_requests_total", "path="+geoSiteAPIPrefix)
+	// 未注入 GeoSiteAccess 时各 handler 会提前返回 501；此处仍先完成鉴权，
+	// 保证任何分支都不会在未认证的情况下响应请求。
+	if m.geoSiteAccessSafe() == nil && !m.requireAuth(w, r) {
+		return
+	}
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, geoSiteAPIPrefix), "/")
 	switch rest {
 	case "":
@@ -181,10 +185,10 @@ func headerTokenMatches(r *http.Request, token string) bool {
 		return false
 	}
 	provided := strings.TrimSpace(strings.TrimPrefix(header, prefix))
-	if provided == "" || len(provided) != len(token) {
+	if provided == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+	return secureTokenEqual(provided, token)
 }
 
 // etagMatches 判断 If-None-Match 是否命中当前 ETag（支持弱校验与列表形式）。

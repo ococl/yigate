@@ -59,8 +59,9 @@ type Server struct {
 	watcherMu   sync.Mutex
 	watcher     *fsnotify.Watcher
 	watcherWG   sync.WaitGroup
-	connCount   atomic.Int64
-	maxConns    atomic.Int64
+	connCount          atomic.Int64
+	maxConns           atomic.Int64
+	listenerConnCounts sync.Map // map[string]*atomic.Int64，每个监听地址独立计算并发上限
 }
 
 // NewServer 创建服务器，cfg 为初始配置
@@ -256,10 +257,12 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 			if cfg.Management != "" {
 				mgmtLn, err := net.Listen("tcp", cfg.Management)
 				if err != nil {
+					router.Stop()
 					return fmt.Errorf("prepare management listener on %s: %w", cfg.Management, err)
 				}
 				if err := newMgmt.StartListener(mgmtLn); err != nil {
 					_ = mgmtLn.Close()
+					router.Stop()
 					return fmt.Errorf("start management server on %s: %w", cfg.Management, err)
 				}
 			}
@@ -300,6 +303,9 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 				for _, l := range newListeners {
 					_ = l.Close()
 				}
+				// 本次已启动的路由缓存/DNS 清理任务必须一并回滚，
+				// 否则热加载失败后仍会残留后台 goroutine。
+				router.Stop()
 				// 复用旧管理服务时不能 Stop，它仍在为现有连接服务。
 				if mgmtChanged && !reuseMgmt && newMgmt != nil {
 					newMgmt.Stop()
@@ -516,13 +522,43 @@ func (s *Server) serveListener(addr string, ln net.Listener) {
 				continue
 			}
 		}
-		if !s.acquireConnSlot(conn, s.maxConnsForListener(addr)) {
+		// 并发上限按监听地址独立计算；全局计数只用于指标与优雅关闭，
+		// 避免一个端口的连接挤占另一个端口的配额。
+		releaseListenerSlot, ok := s.acquireListenerConnSlot(addr, s.maxConnsForListener(addr))
+		if !ok {
+			_ = conn.Close()
+			continue
+		}
+		if !s.acquireConnSlot(conn, 0) {
+			releaseListenerSlot()
 			continue
 		}
 		go func() {
+			defer releaseListenerSlot()
 			defer s.releaseConnSlot(conn)
 			s.handle(conn, addr)
 		}()
+	}
+}
+
+// acquireListenerConnSlot 为单个监听地址独立占用一个并发槽位，返回释放函数。
+// max<=0 时不做限制。
+func (s *Server) acquireListenerConnSlot(addr string, max int64) (func(), bool) {
+	noop := func() {}
+	if max <= 0 {
+		return noop, true
+	}
+	value, _ := s.listenerConnCounts.LoadOrStore(addr, &atomic.Int64{})
+	counter := value.(*atomic.Int64)
+	for {
+		cur := counter.Load()
+		if cur >= max {
+			proxy.Logger().Warnw("listener connection limit reached, closing connection", "address", addr, "active", cur, "max", max)
+			return noop, false
+		}
+		if counter.CompareAndSwap(cur, cur+1) {
+			return func() { counter.Add(-1) }, true
+		}
 	}
 }
 

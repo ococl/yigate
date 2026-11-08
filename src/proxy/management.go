@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net"
@@ -139,7 +138,8 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 			h.ServeHTTP(w, r)
 		}),
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		// pprof 默认 CPU profile 需要 30s，写超时必须留出余量，否则会被提前切断。
+		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 	return m
@@ -162,7 +162,9 @@ func (m *ManagementServer) buildMux(enablePprof bool) http.Handler {
 	// 内置 WebUI：非 API 路径回退到 SPA 应用，由配置开关控制（默认启用）。
 	if WebUIEnabled() {
 		if h, err := WebUIHandler(); err == nil {
-			mux.Handle("/", h)
+			// SPA 静态资源必须保持匿名可访问，否则登录页无法加载；
+			// 所有数据与配置 API 仍由各自的 requireAuth 保护。
+			mux.Handle("/", withSecurityHeaders(h))
 		} else {
 			Logger().Warnw("webui handler setup failed", "error", err)
 		}
@@ -186,6 +188,17 @@ func (m *ManagementServer) buildMux(enablePprof bool) http.Handler {
 		}
 	}
 	return mux
+}
+
+// withSecurityHeaders 给匿名可访问的 WebUI 静态资源补基础安全响应头。
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Reconfigure 在保持监听端口不变的前提下重建路由表，
@@ -237,11 +250,11 @@ func (m *ManagementServer) checkAuth(r *http.Request) bool {
 		return false
 	}
 	provided := strings.TrimSpace(strings.TrimPrefix(header, prefix))
-	if provided == "" || len(provided) != len(token) {
+	if provided == "" {
 		m.recordAuthFailure(clientIP)
 		return false
 	}
-	ok := subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+	ok := secureTokenEqual(provided, token)
 	if !ok {
 		m.recordAuthFailure(clientIP)
 	} else {

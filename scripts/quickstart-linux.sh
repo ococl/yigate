@@ -3,7 +3,7 @@
 # yigate Linux 原生一键启动脚本（非 Docker）
 #
 # 功能：
-#   1. 若缺失则从显式发布地址下载二进制（已存在 ./ygate 或 /usr/local/bin/yigate 时跳过）
+#   1. 若缺失则从显式发布地址下载二进制（已存在 ./yigate 或 /usr/local/bin/yigate 时跳过）
 #   2. 若缺失则自动生成默认配置文件（data/config.yml）
 #   3. 前台启动 yigate，Ctrl+C 退出
 #   4. 支持 install 子命令注册为 systemd 服务
@@ -155,7 +155,7 @@ install_service() {
   install -d -m 0750 -o yigate -g yigate "$YIGATE_DATA_DIR" "$YIGATE_LOG_DIR" "$(dirname "$YIGATE_CONFIG")"
 
   ensure_config
-  chown yigate:ygate "$YIGATE_CONFIG"
+  chown yigate:yigate "$YIGATE_CONFIG"
   chmod 0600 "$YIGATE_CONFIG"
 
   local unit="/etc/systemd/system/yigate.service"
@@ -165,6 +165,8 @@ install_service() {
 Description=YiGate Unified Proxy Gateway
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -172,12 +174,21 @@ ExecStart=$YIGATE_BIN -config $YIGATE_CONFIG run
 WorkingDirectory=$(dirname "$YIGATE_CONFIG")
 Restart=on-failure
 RestartSec=5
-User=ygate
-Group=ygate
+User=yigate
+Group=yigate
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ReadWritePaths=$YIGATE_DATA_DIR $YIGATE_LOG_DIR $(dirname "$YIGATE_CONFIG")
+RuntimeDirectory=yigate
 
 [Install]
 WantedBy=multi-user.target

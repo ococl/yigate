@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -143,9 +144,14 @@ func (r *deadlineReader) Read(p []byte) (int, error) {
 			recordErr = r.accounter.Record(r.trafficKey, 0, int64(n))
 		}
 		if recordErr != nil {
-			Logger().Warnw("traffic quota exceeded, terminating tunnel",
-				"user", r.trafficKey.User, "upstream", r.trafficKey.Upstream,
-				"target", r.trafficKey.Target, "direction", r.auditDirection, "error", recordErr)
+			if errors.Is(recordErr, ErrQuotaExceeded) {
+				Logger().Warnw("traffic quota exceeded, terminating tunnel",
+					"user", r.trafficKey.User, "upstream", r.trafficKey.Upstream,
+					"target", r.trafficKey.Target, "direction", r.auditDirection, "error", recordErr)
+			} else {
+				Logger().Warnw("traffic audit record failed",
+					"user", r.trafficKey.User, "error", recordErr)
+			}
 			return n, recordErr
 		}
 	}

@@ -153,7 +153,7 @@ func (u *GeoSiteUpdater) Info() GeoSiteInfo {
 		Path:                  u.cfg.Path,
 		DownloadPath:          GeoSiteDatDownloadPath,
 		AutoUpdate:            u.cfg.AutoUpdate,
-		UpdateURL:             u.UpdateURLOrDefault(),
+		UpdateURL:             RedactURL(u.UpdateURLOrDefault()),
 		UpdateIntervalSeconds: int64(time.Duration(u.cfg.UpdateInterval).Seconds()),
 		UpdateTokenSet:        strings.TrimSpace(u.cfg.UpdateToken) != "",
 		SyncEnabled:           u.cfg.SyncEnabled,

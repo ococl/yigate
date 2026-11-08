@@ -93,7 +93,7 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[Unit]", "After=network.target", "Type=simple", "ExecStart=/usr/local/bin/yigate -config /var/lib/yigate/data/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=64", "User=yigate", "Group=yigate", "WantedBy=multi-user.target"} {
+	for _, want := range []string{"[Unit]", "After=network-online.target", "Type=simple", "ExecStart=/usr/local/bin/yigate -config /var/lib/yigate/data/config.yml", "Restart=always", "RestartSec=10", "StartLimitBurst=5", "User=yigate", "Group=yigate", "WantedBy=multi-user.target"} {
 		if !bytes.Contains(serviceUnit, []byte(want)) {
 			t.Fatalf("yigate.service missing %q", want)
 		}
@@ -238,7 +238,7 @@ func TestReleaseSecurityContracts(t *testing.T) {
 	}
 
 	quickstart := read("scripts", "quickstart-linux.sh")
-	for _, want := range []string{"YIGATE_RELEASE_URL", "SHA256SUMS", "User=ygate"} {
+	for _, want := range []string{"YIGATE_RELEASE_URL", "SHA256SUMS", "User=yigate", "Group=yigate", "chown yigate:yigate"} {
 		if !bytes.Contains(quickstart, []byte(want)) {
 			t.Fatalf("quickstart-linux.sh missing %q", want)
 		}

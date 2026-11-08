@@ -66,8 +66,11 @@ func TestPlatformServiceOptions(t *testing.T) {
 		if !strings.Contains(tmpl, "RestartSec=10") {
 			t.Error("SystemdScript template missing RestartSec=10")
 		}
-		if !strings.Contains(tmpl, "StartLimitBurst=64") {
-			t.Error("SystemdScript template missing StartLimitBurst=64")
+		if !strings.Contains(tmpl, "StartLimitBurst=5") {
+			t.Error("SystemdScript template missing StartLimitBurst=5")
+		}
+		if !strings.Contains(tmpl, "[Unit]\n") || !strings.Contains(tmpl, "StartLimitIntervalSec=600") {
+			t.Error("systemd start limits must live in the [Unit] section")
 		}
 		if !strings.Contains(tmpl, "{{.Restart}}") || !strings.Contains(tmpl, "{{.SuccessExitStatus}}") {
 			t.Error("SystemdScript template should keep dynamic Restart/SuccessExitStatus")

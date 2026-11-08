@@ -159,6 +159,12 @@ func InitLogger(cfg LogConfig) error {
 	logWriter = closer
 	if oldWriter != nil {
 		retiredWriter = append(retiredWriter, oldWriter)
+		// 只保留最近一个 writer 给可能仍在写旧 logger 的并发协程，
+		// 更早的立即关闭，避免长期热加载持续累积 fd 与清理 goroutine。
+		for len(retiredWriter) > 1 {
+			_ = retiredWriter[0].Close()
+			retiredWriter = retiredWriter[1:]
+		}
 	}
 	logMu.Unlock()
 

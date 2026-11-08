@@ -284,6 +284,16 @@ func (r *Router) Decide(target string) RouteDecision {
 	return r.final
 }
 
+// CheckTarget 对所有需要访问目标地址的路径执行统一的目标访问策略检查。
+// 路由决策（Decide）只决定走直连还是上游，不能替代访问授权；协议层在
+// 建立任何连接之前都应调用本方法，避免经上游转发时绕过策略。
+func (r *Router) CheckTarget(target string) error {
+	if r == nil || r.policy == nil {
+		return nil
+	}
+	return r.policy.CheckTarget(target)
+}
+
 func (r *Router) Dial(target string, mgr *UpstreamManager, sourceIP ...string) (net.Conn, error) {
 	decision := r.Decide(target)
 	if decision.Action == ActionDeny {
@@ -352,6 +362,11 @@ func (r *Router) Stop() {
 	}
 	if r.cache != nil {
 		r.cache.Stop()
+	}
+	// DNS 解析器在非 system 模式下持有后台缓存清理 goroutine，
+	// 热加载替换路由器时必须一并停止，否则每次重载都会泄漏一个 goroutine。
+	if r.resolver != nil {
+		r.resolver.Stop()
 	}
 }
 
