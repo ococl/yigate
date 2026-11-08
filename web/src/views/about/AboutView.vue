@@ -2,19 +2,10 @@
 import { ref, onMounted } from 'vue'
 import { getVersion } from '@/api/system'
 import type { VersionInfo } from '@/types/api'
+import { formatUptime } from '@/utils/format'
 
 const info = ref<VersionInfo | null>(null)
 const error = ref('')
-
-function formatUptime(seconds: number): string {
-  if (!seconds || seconds < 0) return '—'
-  const d = Math.floor(seconds / 86400)
-  const h = Math.floor((seconds % 86400) / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (d > 0) return `${d} 天 ${h} 小时 ${m} 分钟`
-  if (h > 0) return `${h} 小时 ${m} 分钟`
-  return `${m} 分钟`
-}
 
 onMounted(async () => {
   try {

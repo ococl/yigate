@@ -25,25 +25,25 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 
 > 注：`main` 分支每次提交均触发 Beta 构建，推送覆盖式 `:main` Docker 镜像。正式镜像 `:latest` / `:X.Y.Z` 统一由 `v*` 标签流水线发布。
 
-> 二进制产物每次发布前通过 `cnbcool/attachments` 的 `type: DELETE` 清空旧附件，避免累积。
+> 正式版产物按版本号归档并挂载到对应 Release；日常 Beta 构件挂在 commit 上，不创建 Release。
 
 ## Docker 镜像标签
 
 - `main` 分支：`registry/...:main`（Beta 构建，覆盖式）
 - `v*` 标签：`registry/...:latest` 与 `registry/...:X.Y.Z`
 
-镜像基于 `golang:1.27.3` 多阶段构建，运行阶段为 `alpine:3.24`，使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
+镜像基于 `golang:1.27.3` 多阶段构建，运行阶段为 `alpine:3.24.4`，使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
 
 ## 发布流程
 
 ### 正式版（手动打标签触发）
 
 1. 在 `main` 上完成功能与回归测试（`go test ./...`、`make web-e2e`）。
-2. 更新 `CHANGELOG`（CI 通过 `cnbcool/changelog` 自动生成 `LATEST_CHANGELOG.md`）。
+2. 更新 `CHANGELOG.md`（CI 另通过 `cnbcool/changelog` 生成 `LATEST_CHANGELOG.md` 作为 Release 说明）。
 3. 打标签并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。
-4. CI 执行 lint → golangci-lint → test → race → govulncheck → 前端单测/审计 → 配置安全检查 → 构建（含 WebUI 嵌入和 SBOM）→ 浏览器 E2E → 产物校验 → 构建并推送镜像 → 上传附件 → 创建 Release（`latest: true`）。
+4. CI 执行发布门禁（版本格式 / 工作区干净 / tag 指向 HEAD）→ lint → golangci-lint → test → race → govulncheck → 前端类型检查/单测/审计 → 配置安全检查 → 构建（含 WebUI 嵌入和 SBOM）→ 浏览器 E2E → 产物校验 → 构建并推送镜像 → 创建 Release（`latest: true`）→ 上传附件。
 
-正式流水线在 `upload-artifacts` 成功后才创建 Release；附件上传失败会直接使流水线失败，不会产生空发布。
+正式流水线先创建 Release 再上传附件（`cnbcool/attachments` 依赖已存在的 Release）；附件上传失败会直接使流水线失败，不会产生空发布。
 
 ### Beta 构建（main 分支自动触发）
 

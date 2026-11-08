@@ -56,8 +56,11 @@
 ├── web/                  # 前端（Vue3 + Vite + TS + antdv-next），独立构建
 ├── deploy/               # Docker / systemd / 配置模板
 ├── scripts/              # 构建 / 发布 / 平台清单 / TPROXY 示例
-├── docker-compose.yml    # 一键本地部署
+├── docs/screenshots/     # 界面截图
 ├── test/e2e/             # 联调与基准脚本
+├── .cnb.yml              # CNB 主发布通道
+├── .github/workflows/    # GitHub Actions（CI 与 Release 镜像验证通道）
+├── docker-compose.yml    # 一键本地部署
 └── Makefile
 ```
 
@@ -243,9 +246,9 @@ make web-e2e
 
 ## 安全与合规
 
-YiGate 仅用于合法、合规的代理场景。项目明确 **不支持任何混淆协议、隧道伪装或非合规传输**，不接受相关功能请求。管理接口与 pprof 属于敏感入口，应通过 Token 与网络隔离保护。
+YiGate 仅用于合法、合规的代理场景。项目明确 **不支持任何混淆协议、隧道伪装或非合规传输**，不接受相关功能请求。管理接口与 pprof 属于敏感入口，应通过 Token 与网络隔离保护。部署安全基线见 [SECURITY.md](SECURITY.md)；发现漏洞请走私有披露渠道，不要在公开 Issue 中提交。
 
-详见 [FEATURES.md](FEATURES.md)、[VERSIONING.md](VERSIONING.md)、[CONTRIBUTING.md](CONTRIBUTING.md)。
+详见 [FEATURES.md](FEATURES.md)、[VERSIONING.md](VERSIONING.md)、[CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 与 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

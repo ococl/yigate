@@ -5,6 +5,7 @@ import axios from 'axios'
 import { getGeoSiteInfo, updateGeoSite } from '@/api/geosite'
 import { updateSettings } from '@/api/settings'
 import { formatDateTime } from '@/utils/datetime'
+import { formatBytes } from '@/utils/format'
 import type { GeoSiteInfo, SettingsPatch } from '@/types/api'
 
 const info = ref<GeoSiteInfo | null>(null)
@@ -174,18 +175,6 @@ async function handleSaveSync() {
   }
 }
 
-function formatBytes(value: number): string {
-  if (!value || value <= 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit++
-  }
-  return `${size.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`
-}
-
 async function copyText(text: string, tip: string) {
   try {
     if (navigator.clipboard?.writeText) {
@@ -245,7 +234,7 @@ onMounted(fetchInfo)
           <a-descriptions-item label="版本">
             <span class="mono">{{ info?.version || '—' }}</span>
           </a-descriptions-item>
-          <a-descriptions-item label="文件大小">{{ formatBytes(info?.size || 0) }}</a-descriptions-item>
+          <a-descriptions-item label="文件大小">{{ formatBytes(info?.size || 0, '—') }}</a-descriptions-item>
           <a-descriptions-item label="数据更新时间">{{ formatDateTime(info?.updated_at) }}</a-descriptions-item>
           <a-descriptions-item label="上次检查">{{ formatDateTime(info?.last_checked_at) }}</a-descriptions-item>
           <a-descriptions-item label="自动更新">{{ info?.auto_update ? '已启用' : '已关闭' }}</a-descriptions-item>

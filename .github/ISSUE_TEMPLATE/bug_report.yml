@@ -1,0 +1,47 @@
+name: 缺陷报告
+description: 报告 YiGate 的功能异常或回归问题
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请确认：**不要粘贴任何真实令牌、口令、私有上游地址或流量明细**。
+        安全漏洞请走 [SECURITY.md](../../../SECURITY.md) 的私有渠道，不要公开发布。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 二进制版本号或 commit SHA
+      placeholder: v0.2.0 / abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署形态
+      options:
+        - 裸二进制 / systemd
+        - Docker / compose
+        - 源码构建
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 最小配置（脱敏）与操作步骤
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 相关日志片段，请删除凭据
+      render: shell

@@ -1,0 +1,51 @@
+# Changelog
+
+本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
+版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
+
+## [Unreleased]
+
+本次为安全与工程质量治理版本，行为变化集中在使用了目标访问白名单与运行时部署的场景。
+
+### Security
+
+- 目标访问策略（`destination_policy`）现在在普通 HTTP 请求进入任何转发分支前统一执行，
+  覆盖 `final=proxy`、`auto` 的代理路径、`socks5h_redirect` 与 SOCKS5 UDP 级联，修复了策略可被绕过的问题。
+- `default_action: deny` 下 `allow_ports` 改为附加约束，必须与 `allow_cidrs` / `allow_domains` 同时满足；
+  仅配置 `allow_ports` 会在配置加载时报错，不再静默放行或拒绝全部流量。
+- 补全受保护网段（CGNAT、IPv6 过渡地址、保留与文档地址），并识别非标准 IPv4 字面量，
+  避免其被当作域名放行；已解析 IP 时域名白名单仍参与判断。
+- 运行配置文件写回与回滚一律收紧为 0600；首次启动不再把管理令牌明文写入 stderr/journal。
+- 管理接口与 GeoSite 同步接口的令牌比较改为定长摘要后常量时间比较，不再泄露令牌长度。
+- GeoSite 数据路径限制在运行数据目录内、更新地址禁止回环与链路本地目标，
+  错误信息与管理 API 回显统一脱敏；WebUI 静态资源补充安全响应头并明确匿名只读边界。
+- TPROXY 与代理用户认证不再允许共存（透明代理无法执行认证），配置加载时直接报错。
+- 拒绝 SOCKS5 域名中的控制字符；DNS 压缩指针增加环检测、事务 ID 改用加密安全随机数。
+- 部署实例恢复安全默认值：代理端口只绑回环、启用认证与私网防护、凭据改由 0600 环境变量文件注入。
+
+### Fixed
+
+- 修复 `quickstart-linux.sh install` 生成 `User=ygate` 导致服务无法启动的问题，并补齐 systemd 加固项。
+- 修复 DNS 解析器 `Stop()` 因复用同一个 `sync.Once` 而从不关闭清理 goroutine 的问题；
+  热加载替换路由器时一并停止解析器。
+- 修复多监听端口共用全局连接计数导致的配额挤占，改为按监听地址独立计算。
+- 热加载创建监听/管理端口失败时回滚已启动的后台组件；日志退休 writer 不再无限累积；
+  GeoSite 下载关闭空闲连接并响应请求取消。
+- 配置回滚失败不再被静默丢弃；配额错误可被 `errors.Is(err, ErrQuotaExceeded)` 识别。
+- 管理 `WriteTimeout` 调整为 120s，避免 pprof CPU profile 被提前切断。
+
+### Changed
+
+- `make build` 不再污染被跟踪的 `webui_dist/index.html`；该占位页被移除，仅保留
+  `PLACEHOLDER.md`，所有构建产物被忽略。
+- 开发代理默认端口统一为 8890；Go / Node 版本要求在文档、`go.mod` 与 `engines` 间对齐。
+- CNB 与 GitHub Actions 复用同一套发布门禁、配置检查与平台清单一致性检查；
+  PR 门禁补齐类型检查、源码规范检查与静态检查。
+- 前端新增统一 API 错误契约、403 分支、事件驱动的登出（不再硬刷新）、统一格式化函数与源码规范检查。
+
+## [0.2.0] - 2026-11-07
+
+- 单端口 HTTP / HTTPS CONNECT / SOCKS5 / SOCKS5h / TPROXY 统一网关。
+- 上游优先级与权重、健康检查、故障转移、GeoSite 分流与数据同步。
+- 内置 WebUI（12 个视图）、管理 API、指标、流量审计与配额。
+- 26 平台交叉编译、Docker / systemd / compose 部署、SBOM 与校验和。

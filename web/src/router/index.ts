@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import { getToken } from '@/api/request'
+import { AUTH_EXPIRED_EVENT, getToken } from '@/api/request'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -100,5 +100,15 @@ router.beforeEach((to) => {
   }
   return true
 })
+
+// API 层收到 401 后清除凭据并广播事件；这里完成 SPA 内跳转，
+// 避免拦截器中硬刷新（window.location.href）造成状态丢失与无限循环。
+if (typeof window !== 'undefined') {
+  window.addEventListener(AUTH_EXPIRED_EVENT, () => {
+    if (router.currentRoute.value.name !== 'login') {
+      void router.replace('/login')
+    }
+  })
+}
 
 export default router

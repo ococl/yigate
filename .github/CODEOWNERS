@@ -1,0 +1,9 @@
+# 代码所有权：新增维护者后请同步更新此文件。
+# 若仓库由单人维护，把 @yigate/maintainers 换成实际账号即可。
+*                       @yigate/maintainers
+
+/src/proxy/             @yigate/maintainers
+/web/                   @yigate/maintainers
+/.github/workflows/     @yigate/maintainers
+/.cnb.yml               @yigate/maintainers
+/scripts/               @yigate/maintainers

@@ -1,0 +1,37 @@
+name: 功能建议
+description: 提出新能力或改进建议
+title: '[Feature]: '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 说明实际场景与当前方案的不足
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 代理协议 / 路由
+        - 上游与健康检查
+        - 管理 API / WebUI
+        - 构建 / 部署 / CI
+        - 文档
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 范围确认
+      options:
+        - label: 该需求符合项目「合规的内网代理网关」定位，不涉及混淆或规避类协议
+          required: true

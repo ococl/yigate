@@ -1,7 +1,11 @@
 import axios from 'axios'
 import { message } from 'antdv-next'
+import { parseApiError } from './types'
 
 const TOKEN_KEY = 'yigate_token'
+
+/** API 层在收到 401 后广播该事件，由路由层执行登出跳转，避免循环依赖与硬刷新。 */
+export const AUTH_EXPIRED_EVENT = 'yigate:auth-expired'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -46,24 +50,26 @@ request.interceptors.response.use(
     if (error.config?._skipErrorHandler) {
       return Promise.reject(error)
     }
+    // 主动取消（AbortController / 组件卸载）属于正常流程，不应弹出错误提示
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
 
-    if (error.response) {
-      const { status } = error.response
-
-      if (status === 401) {
+    const apiError = parseApiError(error)
+    if (apiError) {
+      if (apiError.status === 401) {
         clearToken()
-        message.error('认证失败，请重新登录')
-        // 避免在登录页重复跳转
+        // 登录页的令牌校验失败由登录视图自行提示，不重复广播登出事件
         if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
+          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
         }
-      } else if (status >= 500) {
-        // 后端通常会带上具体原因（例如下载失败），一并展示便于定位
-        const detail = error.response.data?.error
-        message.error(detail ? `服务器错误 (${status})：${detail}` : `服务器错误 (${status})`)
-      } else if (status >= 400) {
-        const msg = error.response.data?.error || error.response.data?.status || `请求错误 (${status})`
-        message.error(msg)
+        message.error('认证失败，请重新登录')
+      } else if (apiError.status === 403) {
+        message.error(apiError.detail || '无权限执行此操作')
+      } else if (apiError.status >= 500) {
+        message.error(`服务器错误 (${apiError.status})：${apiError.detail}`)
+      } else {
+        message.error(apiError.detail)
       }
     } else if (error.code === 'ECONNABORTED') {
       message.error('请求超时')

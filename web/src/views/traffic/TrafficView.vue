@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getTraffic } from '@/api/system'
 import type { TrafficEntrySnapshot } from '@/types/api'
+import { formatBytes } from '@/utils/format'
 
 const dataSource = ref<TrafficEntrySnapshot[]>([])
 const enabled = ref(false)
@@ -18,14 +19,6 @@ const columns = [
   { title: '流出', dataIndex: 'bytes_out', key: 'bytes_out', width: 120 },
   { title: '合计', dataIndex: 'total', key: 'total', width: 120, sorter: (a: TrafficEntrySnapshot, b: TrafficEntrySnapshot) => a.total - b.total },
 ]
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()

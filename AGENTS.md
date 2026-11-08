@@ -14,7 +14,7 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 
 ## 技术栈
 
-- Go 1.26+（CI 与构建镜像使用 Go 1.27.3）
+- Go 1.27.3+（`src/go.mod` 要求 go 1.27.0 / toolchain go1.27.3，CI 与构建镜像固定 1.27.3）
 - `fsnotify`：配置文件热加载。
 - `kardianos/service`：系统服务管理。
 - `zap`：结构化日志。
@@ -137,8 +137,9 @@ node scripts/embed-dist.mjs dist ../src/proxy/webui_dist  # 压缩资源并准�
 npm run preview   # 预览构建产物
 ```
 
-`src/proxy/webui_dist/index.html` 是被跟踪的占位页（保证纯 `go build`/`go vet` 的 `//go:embed` 有文件可嵌入），
-`make build` 会用真实产物覆盖它；构建后可用 `git checkout -- src/proxy/webui_dist/index.html` 还原，保持工作区干净。
+`src/proxy/webui_dist/PLACEHOLDER.md` 是唯一被跟踪的文件（保证纯 `go build`/`go vet` 的 `//go:embed` 有文件可嵌入）。
+`embed-dist.mjs` 只清理构建产物、保留该占位文件，所有产物均被 `.gitignore` 忽略，因此 `make build` 不会弄脏工作区。
+未构建前端时管理界面显示 `webui_fallback.html` 的构建提示页。
 
 或通过 Makefile：
 
@@ -194,7 +195,7 @@ npm run build       # 构建即验证
 - `tls` 配置 TLS 服务端终止（`cert_file`/`key_file`/`client_ca_file`）。
 - `upstreams[].types` 支持 `http`、`https`、`socks5`、`socks5h`。
 - `upstreams[].strategy` 支持 `weighted_round_robin`、`least_connections`、`consistent_hash`、`source_ip_hash`。
-- `upstreams[].health_check` 支持 `tcp`/`http`/`https`/`tls`/`socks5`/`socks5h`；留空时 socks5 上游默认按协议握手探测，其余按 TCP 探测。
+- `upstreams[].health_check` 支持 `tcp`/`http`/`https`/`tls` 四种；留空时 socks5 上游默认按协议握手探测，其余按 TCP 探测。
 - `routing.rules` 按顺序匹配，首个命中规则生效。
 - `routing.final` 支持 `direct`、`proxy`、`auto`、`deny`。
 - `routing.auto.mode` 支持 `direct_first`（默认）、`proxy_first`，非法值加载时报错。

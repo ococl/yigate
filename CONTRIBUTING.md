@@ -8,8 +8,8 @@ YiGate 是 **合规、轻量、可运维** 的统一代理网关。我们 **明�
 
 ## 开发环境
 
-- Go 1.26+（CI 使用 1.27.3；依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
-- Node 26.13（仅前端 `web/`，见 `.nvmrc`；`engines` 仍允许 ^22.18 或 >=24.11）
+- Go 1.27.3+（`src/go.mod` 要求 go 1.27.0 / toolchain go1.27.3；依赖安装优先使用 `GOPROXY=https://goproxy.cn,direct`）
+- Node 26.13.0（仅前端 `web/`，见 `.nvmrc` 与 `web/package.json` 的 `engines`）
 - 推荐在 Linux 下进行透明代理（TPROXY）相关开发
 
 ### 后端
@@ -32,8 +32,8 @@ npm run build    # 输出到 web/dist/
 
 前端改动若要进入二进制，执行 `make web-embed`：它会构建前端、通过
 `web/scripts/embed-dist.mjs` 生成 gzip 资源到 `src/proxy/webui_dist/`，再供 `go:embed` 使用。
-`make build` 已包含这两步。构建后如需保持工作区干净，执行
-`git checkout -- src/proxy/webui_dist/index.html` 还原占位页。
+`make build` 已包含这两步。`webui_dist/` 下只有 `PLACEHOLDER.md` 被跟踪，构建产物全部被忽略，
+工作区保持干净，无需手工还原占位页。
 
 ## 代码约定
 
@@ -64,7 +64,7 @@ npm run build    # 输出到 web/dist/
 
 ## 提交规范
 
-采用 Conventional Commits，消息使用 **中文** 类型前缀便于团队阅读：
+采用 Conventional Commits，消息使用 **英文** 类型前缀，描述正文可用中文：
 
 - `feat:` 新功能
 - `fix:` 缺陷修复
@@ -82,6 +82,26 @@ refactor: 将默认配置路径从 config/ 迁移到 data/config.yml
 ```
 
 提交信息应说明 **为什么** 改，而非仅描述改了什么。
+
+## CI 通道与门禁
+
+CNB（`.cnb.yml`）是唯一发布通道，GitHub Actions（`.github/workflows/ci.yml`）是等价的镜像验证通道，
+两者都通过 `scripts/check-release-gates.sh`、`scripts/check-release-configs.sh` 和
+`scripts/check-platforms-sync.sh` 复用同一套检查，避免两套门禁漂移。
+
+| 门禁 | CNB PR | GitHub CI | CNB Beta / 正式 |
+| --- | --- | --- | --- |
+| `go vet` / `go test` / `-race` | 是 | 是 | 是 |
+| `golangci-lint` / `govulncheck` | lint（漏洞扫描由 GitHub CI 承担） | 是 | 是 |
+| 前端 `type-check` / `npm audit` / `vitest` | 是 | 是 | 是 |
+| Playwright E2E | 否（构建流水线承担） | 是 | 是 |
+| 发布门禁（版本/工作区/tag） | 否 | 否 | 是 |
+| 配置安全 / 平台清单 / SBOM | 前两者 | 前两者 | 全量 |
+
+正式发布执行 `scripts/release.sh` 或 `.cnb.yml` 的 `v*` 流水线，二者共用发布门禁：
+版本号格式、工作区干净、以及正式版 `v<version>` tag 必须指向 HEAD。
+平台清单的唯一权威来源是 `scripts/platforms.sh`，`ci.yml` 与 `build.ps1` 由
+`check-platforms-sync.sh` 校验一致性，新增平台时三处需同步修改。
 
 ## PR 流程
 

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { message, theme } from 'antdv-next'
 import { getHealth, getStatus, getTraffic } from '@/api/system'
 import { formatDateTime, formatTimeOnly } from '@/utils/datetime'
+import { formatBytes, formatUptime } from '@/utils/format'
 import type { HealthStatus, ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
 
 const health = ref<HealthStatus | null>(null)
@@ -31,24 +32,6 @@ async function fetchData(silent = false) {
   } finally {
     if (!silent) loading.value = false
   }
-}
-
-function formatBytes(bytes: number): string {
-  if (!bytes) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-function formatUptime(seconds: number): string {
-  if (!seconds || seconds < 0) return '—'
-  const d = Math.floor(seconds / 86400)
-  const h = Math.floor((seconds % 86400) / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  if (d > 0) return `${d} 天 ${h} 小时`
-  if (h > 0) return `${h} 小时 ${m} 分钟`
-  return `${m} 分钟`
 }
 
 function formatTime(value?: string): string {

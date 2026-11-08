@@ -8,7 +8,7 @@ import { AntdvNextResolver } from '@antdv-next/auto-import-resolver'
 export default defineConfig(({ mode }) => {
   // 开发服务器 API 代理目标，可在 .env.development.local 中通过 VITE_API_TARGET 覆盖
   const env = loadEnv(mode, process.cwd(), '')
-  const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8892'
+  const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8890'
 
   return {
     plugins: [
