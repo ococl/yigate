@@ -249,6 +249,42 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
   overflow-y: auto;
 }
 
+@media (max-width: 768px) {
+  .auth-doc-title {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-bottom: 12px;
+  }
+
+  .auth-doc-body {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .auth-doc-aside {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    max-height: 168px;
+  }
+
+  .section-card {
+    height: auto;
+    max-height: 168px;
+  }
+
+  .auth-doc-detail {
+    height: auto;
+  }
+
+  .auth-doc-detail-scroll {
+    height: auto;
+    overflow-y: visible;
+  }
+}
+
+
 .auth-doc-detail-scroll {
   height: 100%;
   overflow-x: hidden;

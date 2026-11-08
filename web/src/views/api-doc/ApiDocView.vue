@@ -423,4 +423,42 @@ async function copyToClipboard(text: string) {
 .code-block code {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
+
+@media (max-width: 768px) {
+  .api-docs-title {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .api-docs-search {
+    margin-bottom: 12px;
+  }
+
+  .api-docs-body {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .api-docs-aside {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    max-height: 168px;
+  }
+
+  .group-card {
+    height: auto;
+    max-height: 168px;
+  }
+
+  .api-docs-detail {
+    height: auto;
+  }
+
+  .api-docs-detail-scroll {
+    height: auto;
+    overflow-y: visible;
+  }
+}
 </style>

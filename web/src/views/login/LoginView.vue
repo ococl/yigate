@@ -65,7 +65,7 @@ async function handleLogin() {
 
 <style scoped>
 .login-card {
-  width: 400px;
+  width: min(400px, calc(100vw - 32px));
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
   border-radius: 8px;
 }

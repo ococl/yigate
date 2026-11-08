@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'antdv-next'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { listRules, addRule, updateRule, moveRule, deleteRule } from '@/api/rules'
 import { listUpstreams } from '@/api/upstreams'
 import type { RuleInfo, RuleRequest } from '@/types/api'
 
+const isMobile = useIsMobile()
 const dataSource = ref<RuleInfo[]>([])
 const upstreamOptions = ref<{ label: string; value: string }[]>([])
 const loading = ref(false)
@@ -182,14 +184,72 @@ onMounted(fetchData)
     </div>
 
     <a-card class="fill-card">
-      <div class="fill-table">
+      <div v-if="isMobile" class="mobile-list">
+        <a-empty v-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理" />
+        <a-card v-for="record in dataSource" :key="record.index" size="small" class="mobile-card">
+          <div class="mobile-card-head">
+            <a-space size="small">
+              <a-tag>{{ record.index + 1 }}</a-tag>
+              <a-typography-text strong>{{ record.type }}</a-typography-text>
+            </a-space>
+            <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">匹配值</span>
+            <span class="mobile-value">
+              <a-space wrap size="small">
+                <a-tag v-for="v in record.values" :key="v">{{ v }}</a-tag>
+                <span v-if="!record.values || record.values.length === 0" class="muted">—</span>
+              </a-space>
+            </span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">上游</span>
+            <span class="mobile-value">
+              <a-space wrap size="small">
+                <a-tag v-for="u in record.upstreams" :key="u" color="purple">{{ u }}</a-tag>
+                <span v-if="!record.upstreams || record.upstreams.length === 0" class="muted">—</span>
+              </a-space>
+            </span>
+          </div>
+          <div class="mobile-card-actions">
+            <a-button
+              size="small"
+              :disabled="record.index === 0"
+              :loading="movingIndex === record.index"
+              @click="handleMove(record.index, 'up')"
+            >
+              上移
+            </a-button>
+            <a-button
+              size="small"
+              :disabled="record.index === dataSource.length - 1"
+              :loading="movingIndex === record.index"
+              @click="handleMove(record.index, 'down')"
+            >
+              下移
+            </a-button>
+            <a-button size="small" @click="openEditModal(record)">编辑</a-button>
+            <a-popconfirm
+              title="确定删除这条规则？"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="handleDelete(record.index)"
+            >
+              <a-button size="small" danger>删除</a-button>
+            </a-popconfirm>
+          </div>
+        </a-card>
+      </div>
+
+      <div v-else class="fill-table">
         <a-table
           :data-source="dataSource"
           :columns="columns"
           :loading="loading"
           row-key="index"
           :pagination="{ pageSize: 20, hideOnSinglePage: true }"
-          :scroll="{ y: 1 }"
+          :scroll="{ x: 900, y: 1 }"
         >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'index'">
@@ -256,12 +316,12 @@ onMounted(fetchData)
   >
     <a-form layout="vertical">
       <a-row :gutter="16">
-        <a-col :span="12">
+        <a-col :xs="24" :sm="12">
           <a-form-item label="类型" required>
             <a-select v-model:value="form.type" :options="typeOptions" />
           </a-form-item>
         </a-col>
-        <a-col :span="12">
+        <a-col :xs="24" :sm="12">
           <a-form-item label="动作" required>
             <a-radio-group v-model:value="form.action" :options="actionOptions" />
           </a-form-item>

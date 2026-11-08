@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { getTraffic } from '@/api/system'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { TrafficEntrySnapshot } from '@/types/api'
 import { formatBytes } from '@/utils/format'
 
+const isMobile = useIsMobile()
+const mobilePage = ref(1)
 const dataSource = ref<TrafficEntrySnapshot[]>([])
 const enabled = ref(false)
 const retentionDays = ref(30)
@@ -29,6 +32,15 @@ const filtered = computed(() => {
       e.upstream.toLowerCase().includes(kw) ||
       e.target.toLowerCase().includes(kw),
   )
+})
+
+const mobilePageSize = 20
+const mobileItems = computed(() =>
+  filtered.value.slice((mobilePage.value - 1) * mobilePageSize, mobilePage.value * mobilePageSize),
+)
+
+watch(keyword, () => {
+  mobilePage.value = 1
 })
 
 const summary = computed(() => {
@@ -82,8 +94,13 @@ onUnmounted(() => {
           按用户 / 上游 / 目标聚合最近 {{ retentionDays }} 天的流量，每 15 秒自动刷新。
         </a-typography-text>
       </div>
-      <a-space>
-        <a-input-search v-model:value="keyword" placeholder="搜索用户、上游或目标" allow-clear style="width: 240px;" />
+      <a-space wrap class="traffic-actions">
+        <a-input-search
+          v-model:value="keyword"
+          class="traffic-search"
+          placeholder="搜索用户、上游或目标"
+          allow-clear
+        />
         <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
       </a-space>
     </div>
@@ -127,14 +144,47 @@ onUnmounted(() => {
         </a-col>
       </a-row>
 
-      <div class="fill-table">
+      <div v-if="isMobile" class="mobile-list">
+        <a-empty v-if="mobileItems.length === 0" :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
+        <a-card v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`" size="small" class="mobile-card">
+          <div class="mobile-card-head">
+            <a-space size="small" wrap>
+              <a-tag v-if="record.user">{{ record.user }}</a-tag>
+              <span v-else class="muted">匿名</span>
+              <a-tag color="purple">{{ record.upstream || '—' }}</a-tag>
+            </a-space>
+            <a-typography-text strong>{{ formatBytes(record.total) }}</a-typography-text>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">目标</span>
+            <span class="mobile-value">{{ record.target }}</span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">流入/流出</span>
+            <span class="mobile-value">
+              {{ formatBytes(record.bytes_in) }} / {{ formatBytes(record.bytes_out) }}
+            </span>
+          </div>
+        </a-card>
+        <a-pagination
+          v-if="filtered.length > mobilePageSize"
+          v-model:current="mobilePage"
+          :total="filtered.length"
+          :page-size="mobilePageSize"
+          size="small"
+          show-less-items
+          class="mobile-pagination"
+        />
+      </div>
+
+      <div v-else class="fill-table">
         <a-table
           :data-source="filtered"
           :columns="columns"
           :loading="loading"
           :row-key="(r: TrafficEntrySnapshot) => `${r.user}|${r.upstream}|${r.target}`"
           :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
-          :scroll="{ y: 1 }"
+          :scroll="{ x: 760, y: 1 }"
         >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'user'">
@@ -162,3 +212,24 @@ onUnmounted(() => {
     </a-card>
   </div>
 </template>
+
+<style scoped>
+.traffic-search {
+  width: 240px;
+}
+
+@media (max-width: 768px) {
+  .traffic-actions {
+    width: 100%;
+  }
+
+  .traffic-search {
+    width: 100%;
+  }
+}
+
+.mobile-pagination {
+  justify-content: center;
+  margin-top: 4px;
+}
+</style>

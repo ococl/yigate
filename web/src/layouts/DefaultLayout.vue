@@ -1,21 +1,42 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { theme } from 'antdv-next'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
+import SidebarContent from './SidebarContent.vue'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const router = useRouter()
 const { token } = theme.useToken()
 
-const selectedKeys = computed(() => {
-  const name = router.currentRoute.value.name as string
-  return [name || '']
+const isMobile = ref(false)
+const mobileNavOpen = ref(false)
+let mediaQuery: MediaQueryList | null = null
+
+function syncViewport(event: MediaQueryList | MediaQueryListEvent) {
+  isMobile.value = event.matches
+  if (!event.matches) mobileNavOpen.value = false
+}
+
+onMounted(() => {
+  mediaQuery = window.matchMedia('(max-width: 768px)')
+  syncViewport(mediaQuery)
+  mediaQuery.addEventListener('change', syncViewport)
 })
 
-const openKeys = ref<string[]>(['manage', 'system', 'help'])
+onUnmounted(() => {
+  mediaQuery?.removeEventListener('change', syncViewport)
+})
+
+// 移动端点击菜单跳转后自动收起抽屉
+watch(
+  () => router.currentRoute.value.fullPath,
+  () => {
+    mobileNavOpen.value = false
+  },
+)
 
 const siderStyle = computed(() => ({
   background: token.value.colorBgContainer,
@@ -33,6 +54,14 @@ const contentStyle = computed(() => ({
   color: token.value.colorText,
 }))
 
+function toggleNavigation() {
+  if (isMobile.value) {
+    mobileNavOpen.value = !mobileNavOpen.value
+    return
+  }
+  appStore.toggleSidebar()
+}
+
 function handleLogout() {
   authStore.logout()
   router.push('/login')
@@ -42,6 +71,7 @@ function handleLogout() {
 <template>
   <a-layout class="app-layout">
     <a-layout-sider
+      v-if="!isMobile"
       v-model:collapsed="appStore.sidebarCollapsed"
       :trigger="null"
       collapsible
@@ -49,72 +79,42 @@ function handleLogout() {
       class="app-sider"
       :style="siderStyle"
     >
-      <div class="logo">
-        <span class="logo-text" :style="{ color: token.colorText }">
-          {{ appStore.sidebarCollapsed ? 'Y' : 'YiGate' }}
-        </span>
-        <span v-if="!appStore.sidebarCollapsed" class="logo-sub" :style="{ color: token.colorTextTertiary }">
-          管理后台
-        </span>
-      </div>
-      <div class="nav-scroll">
-        <a-menu :selected-keys="selectedKeys" v-model:open-keys="openKeys" mode="inline" class="nav-menu">
-          <a-menu-item key="dashboard">
-            <RouterLink to="/dashboard">仪表盘</RouterLink>
-          </a-menu-item>
-
-          <a-sub-menu key="manage">
-            <template #title>管理</template>
-            <a-menu-item key="upstreams">
-              <RouterLink to="/upstreams">上游管理</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="rules">
-              <RouterLink to="/rules">路由规则</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="users">
-              <RouterLink to="/users">用户管理</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="traffic">
-              <RouterLink to="/traffic">流量审计</RouterLink>
-            </a-menu-item>
-          </a-sub-menu>
-
-          <a-sub-menu key="system">
-            <template #title>系统</template>
-            <a-menu-item key="settings">
-              <RouterLink to="/settings">系统设置</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="geosite">
-              <RouterLink to="/geosite">GeoSite 数据</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="pprof">
-              <RouterLink to="/pprof">pprof 性能分析</RouterLink>
-            </a-menu-item>
-          </a-sub-menu>
-
-          <a-sub-menu key="help">
-            <template #title>帮助</template>
-            <a-menu-item key="docs-auth">
-              <RouterLink to="/docs/auth">认证机制</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="docs-api">
-              <RouterLink to="/docs/api">API 文档</RouterLink>
-            </a-menu-item>
-            <a-menu-item key="about">
-              <RouterLink to="/about">关于</RouterLink>
-            </a-menu-item>
-          </a-sub-menu>
-        </a-menu>
-      </div>
+      <SidebarContent :collapsed="appStore.sidebarCollapsed" />
     </a-layout-sider>
+
+    <a-drawer
+      v-else
+      :open="mobileNavOpen"
+      placement="left"
+      :width="216"
+      :closable="false"
+      :body-style="{ padding: 0, height: '100%' }"
+      root-class-name="mobile-nav-drawer"
+      @close="mobileNavOpen = false"
+    >
+      <SidebarContent />
+    </a-drawer>
 
     <a-layout class="main-layout">
       <a-layout-header class="header" :style="headerStyle">
-        <a-button type="text" @click="appStore.toggleSidebar">☰</a-button>
+        <div class="header-left">
+          <a-button
+            type="text"
+            :aria-label="isMobile ? '打开导航菜单' : '收起或展开侧栏'"
+            @click="toggleNavigation"
+          >
+            ☰
+          </a-button>
+          <span v-if="isMobile" class="mobile-brand">YiGate</span>
+        </div>
 
         <div class="header-right">
           <a-tooltip :title="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'">
-            <a-button type="text" @click="appStore.toggleTheme">
+            <a-button
+              type="text"
+              :aria-label="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
+              @click="appStore.toggleTheme"
+            >
               {{ appStore.isDark ? '☀️' : '🌙' }}
             </a-button>
           </a-tooltip>
@@ -143,48 +143,6 @@ function handleLogout() {
   height: 100%;
 }
 
-.app-sider :deep(.ant-layout-sider-children) {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-
-.logo {
-  flex: 0 0 56px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.18);
-}
-
-.logo-text {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.logo-sub {
-  font-size: 12px;
-}
-
-/* 菜单区域独立滚动，logo 固定在顶部 */
-.nav-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 8px 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.nav-menu {
-  border-inline-end: none !important;
-  background: transparent;
-}
-
 .main-layout {
   height: 100%;
   min-width: 0;
@@ -200,6 +158,20 @@ function handleLogout() {
   justify-content: space-between;
   height: 56px;
   line-height: 56px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mobile-brand {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
 .header-right {
@@ -220,4 +192,19 @@ function handleLogout() {
   overscroll-behavior: contain;
 }
 
+@media (max-width: 768px) {
+  .header {
+    padding: 0 8px;
+  }
+
+  .header-right {
+    gap: 4px;
+  }
+
+  .content {
+    margin: 8px;
+    padding: 12px;
+    border-radius: 6px;
+  }
+}
 </style>

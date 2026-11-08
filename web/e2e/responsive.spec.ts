@@ -1,0 +1,51 @@
+import { expect, test, type Page } from '@playwright/test'
+
+const token = process.env.YIGATE_E2E_TOKEN ?? 'yigate-webui-e2e-token'
+
+test.use({ viewport: { width: 390, height: 844 } })
+
+async function login(page: Page): Promise<void> {
+  await page.goto('/login')
+  await page.getByPlaceholder('请输入 management_auth_token').fill(token)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
+}
+
+test('mobile layout uses drawer navigation and keeps content usable', async ({ page }) => {
+  await login(page)
+
+  // 窄屏不再渲染固定侧栏，内容区占满视口宽度
+  await expect(page.locator('.app-sider')).toHaveCount(0)
+  const contentWidth = await page.locator('.content').evaluate((el) => el.getBoundingClientRect().width)
+  expect(contentWidth).toBeGreaterThan(340)
+
+  const viewportOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  )
+  expect(viewportOverflow).toBeLessThanOrEqual(1)
+
+  // 顶部菜单按钮打开抽屉，选择菜单后自动关闭
+  await page.getByRole('button', { name: '打开导航菜单' }).click()
+  const drawer = page.getByRole('dialog')
+  await expect(drawer).toBeVisible()
+  await drawer.getByText('上游管理').click()
+  await expect(page).toHaveURL(/\/upstreams$/)
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+})
+
+test('settings switches to a section picker on mobile', async ({ page }) => {
+  await login(page)
+  await page.goto('/settings')
+
+  const picker = page.getByRole('combobox', { name: '设置分类' })
+  await expect(picker).toBeVisible()
+  await expect(page.locator('.settings-aside')).toBeHidden()
+
+  await picker.click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: '流量审计与配额' })
+    .click()
+  await expect(page.getByRole('heading', { name: '流量审计与配额' })).toBeVisible()
+})

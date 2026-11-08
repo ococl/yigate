@@ -83,6 +83,12 @@ const groupedSections = computed(() => {
   return groups
 })
 
+// 移动端用下拉框代替左侧分类菜单，避免固定 220px 侧栏挤压表单
+const sectionOptions = sections.map((section) => ({
+  label: section.title,
+  value: section.key,
+}))
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -426,8 +432,18 @@ onMounted(fetchAll)
         <a-typography-text type="secondary">
           修改后立即写入配置文件并热加载；WebUI、pprof 与管理令牌即时生效，监听地址等启动参数需重启。
         </a-typography-text>
+        <div class="settings-section-field">
+          <label class="settings-section-label" for="settings-section-select">设置分类</label>
+          <a-select
+            id="settings-section-select"
+            class="settings-section-select"
+            :value="activeSection"
+            :options="sectionOptions"
+            @change="(value) => selectSection(String(value))"
+          />
+        </div>
       </div>
-      <a-space wrap>
+      <a-space wrap class="settings-actions">
         <a-button @click="fetchAll" :loading="loading">刷新</a-button>
         <a-popconfirm
           title="重新读取 YAML 配置文件？未保存的表单修改会丢失。"
@@ -480,7 +496,7 @@ onMounted(fetchAll)
               <!-- 基础设置 -->
               <div v-show="activeSection === 'basic'">
                 <a-card size="small" title="当前生效配置" style="margin-bottom: 16px;">
-                  <a-descriptions size="small" bordered :column="3">
+                  <a-descriptions size="small" bordered :column="{ xs: 1, sm: 2, lg: 3 }">
                     <a-descriptions-item label="生效监听地址">
                       <a-typography-text code>{{ settings?.listen || '—' }}</a-typography-text>
                     </a-descriptions-item>
@@ -928,4 +944,55 @@ onMounted(fetchAll)
   overscroll-behavior: contain;
 }
 
+.settings-section-field {
+  display: none;
+}
+
+.settings-section-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: rgba(128, 128, 128, 0.9);
+}
+
+@media (max-width: 768px) {
+  .settings-header {
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+
+  .settings-actions {
+    width: 100%;
+  }
+
+  .settings-actions :deep(.ant-space-item) {
+    flex: 1 1 auto;
+  }
+
+  .settings-actions :deep(.ant-btn) {
+    width: 100%;
+  }
+
+  .settings-section-field {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .settings-section-select {
+    width: 100%;
+  }
+
+  .settings-aside {
+    display: none;
+  }
+
+  .settings-body {
+    display: block;
+  }
+
+  .settings-detail {
+    height: 100%;
+  }
+}
 </style>

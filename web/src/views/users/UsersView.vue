@@ -131,7 +131,7 @@ onMounted(fetchData)
           :loading="loading"
           row-key="username"
           :pagination="{ pageSize: 20, hideOnSinglePage: true }"
-          :scroll="{ y: 1 }"
+          :scroll="{ x: 480, y: 1 }"
         >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'action'">

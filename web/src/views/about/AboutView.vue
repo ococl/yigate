@@ -26,7 +26,7 @@ onMounted(async () => {
 
   <a-alert v-if="error" type="warning" show-icon :message="error" style="margin-bottom: 16px;" />
 
-  <a-descriptions title="运行版本" :column="2" bordered size="small">
+  <a-descriptions title="运行版本" :column="{ xs: 1, sm: 2 }" bordered size="small">
     <a-descriptions-item label="版本">{{ info?.version || '—' }}</a-descriptions-item>
     <a-descriptions-item label="提交">{{ info?.commit || '—' }}</a-descriptions-item>
     <a-descriptions-item label="构建时间">{{ info?.build_time || '—' }}</a-descriptions-item>

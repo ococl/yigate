@@ -195,3 +195,79 @@ html:has(body.app-dark) {
 .ant-table-wrapper {
   width: 100%;
 }
+
+/* 移动端导航抽屉：内容由 SidebarContent 自行铺满 */
+.mobile-nav-drawer .ant-drawer-body {
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 移动端卡片列表：替代宽表格，避免横向滚动才能看到关键信息 */
+.mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px;
+}
+
+.mobile-card {
+  border-radius: 8px;
+}
+
+.mobile-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mobile-card-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  border-bottom: 1px dashed rgba(128, 128, 128, 0.18);
+}
+
+.mobile-card-row:last-of-type {
+  border-bottom: none;
+}
+
+.mobile-label {
+  flex: 0 0 80px;
+  color: rgba(128, 128, 128, 0.95);
+}
+
+.mobile-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mobile-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* 窄屏下压缩页面留白，避免内容区被挤占 */
+@media (max-width: 768px) {
+  .page-header {
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+
+  .fill-card > .ant-card-body {
+    padding: 12px;
+  }
+
+  .fill-card-toolbar {
+    margin-bottom: 12px !important;
+  }
+}
+

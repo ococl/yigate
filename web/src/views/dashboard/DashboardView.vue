@@ -349,7 +349,7 @@ onUnmounted(() => {
           <span v-if="lastRefreshed"> · 最近更新 {{ formatTimeOnly(lastRefreshed) }}</span>
         </a-typography-text>
       </div>
-      <a-space>
+      <a-space wrap>
         <a-tag color="blue">{{ status?.version || 'dev' }}</a-tag>
         <a-button @click="proxyModalOpen = true">代理链接</a-button>
         <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
@@ -841,6 +841,26 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+  .traffic-charts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .donut-wrap {
+    width: 112px;
+    height: 112px;
+  }
+
+  .proxy-auth {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .proxy-modal {
+    max-height: calc(100dvh - 180px);
+  }
 }
 
 .proxy-hint {

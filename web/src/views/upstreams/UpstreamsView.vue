@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { message } from 'antdv-next'
+import { useIsMobile } from '@/composables/useIsMobile'
 import {
   listUpstreams,
   addUpstream,
@@ -20,6 +21,7 @@ import type {
   HealthCheckConfig,
 } from '@/types/api'
 
+const isMobile = useIsMobile()
 const dataSource = ref<UpstreamInfo[]>([])
 const loading = ref(false)
 const checking = ref<string | null>(null)
@@ -394,7 +396,73 @@ onUnmounted(() => {
     </div>
 
     <a-card class="fill-card">
-      <div class="fill-table">
+      <div v-if="isMobile" class="mobile-list">
+        <a-empty v-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理" />
+        <a-card v-for="record in dataSource" :key="record.name" size="small" class="mobile-card">
+          <div class="mobile-card-head">
+            <a-typography-text strong>{{ record.name }}</a-typography-text>
+            <a-switch
+              :checked="record.enabled !== false"
+              :loading="toggling === record.name"
+              size="small"
+              @change="(checked: boolean) => handleToggle(record, checked)"
+            />
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">URL</span>
+            <span class="mobile-value">{{ record.url }}</span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">类型</span>
+            <span class="mobile-value">
+              <a-space wrap size="small">
+                <a-tag v-for="t in record.types" :key="t" color="blue">{{ t }}</a-tag>
+                <span v-if="!record.types || record.types.length === 0" class="muted">—</span>
+              </a-space>
+            </span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">优先级/权重</span>
+            <span class="mobile-value">{{ record.priority ?? 0 }} / {{ record.weight ?? 0 }}</span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">策略</span>
+            <span class="mobile-value">{{ record.strategy || '—' }}</span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">健康</span>
+            <span class="mobile-value">
+              <a-tag>{{ healthCheckText(record) }}</a-tag>
+              <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
+            </span>
+          </div>
+          <div class="mobile-card-row">
+            <span class="mobile-label">最后检查</span>
+            <span class="mobile-value">{{ lastCheckText(record) }}</span>
+          </div>
+          <div class="mobile-card-actions">
+            <a-button
+              size="small"
+              :disabled="record.enabled === false"
+              :loading="checking === record.name"
+              @click="handleCheck(record.name)"
+            >
+              检查
+            </a-button>
+            <a-button size="small" @click="showEditModal(record)">编辑</a-button>
+            <a-popconfirm
+              title="删除后相关路由规则对该上游的引用也会被移除，确定删除？"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="handleDelete(record.name)"
+            >
+              <a-button size="small" danger>删除</a-button>
+            </a-popconfirm>
+          </div>
+        </a-card>
+      </div>
+
+      <div v-else class="fill-table">
         <a-table
           :data-source="dataSource"
           :columns="columns"
@@ -478,12 +546,12 @@ onUnmounted(() => {
       </a-form-item>
 
       <a-row :gutter="16">
-        <a-col :span="12">
+        <a-col :xs="24" :sm="12">
           <a-form-item label="名称" required tooltip="上游唯一标识。编辑时可修改，修改后会同步更新路由规则中对该上游的引用。">
             <a-input v-model:value="form.name" placeholder="如 default、proxy-hk" />
           </a-form-item>
         </a-col>
-        <a-col :span="12">
+        <a-col :xs="24" :sm="12">
           <a-form-item label="URL" required tooltip="上游代理地址，支持 http://、https://、socks5://、socks5h:// 协议。">
             <a-input v-model:value="form.url" placeholder="如 socks5://127.0.0.1:1080" />
           </a-form-item>
@@ -515,12 +583,12 @@ onUnmounted(() => {
       <a-divider style="margin: 4px 0 16px;">健康检查</a-divider>
 
       <a-row :gutter="16">
-        <a-col :span="12">
+        <a-col :xs="24" :sm="12">
           <a-form-item label="探测方式" :tooltip="healthCheckHelp">
             <a-select v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
           </a-form-item>
         </a-col>
-        <a-col :span="12">
+        <a-col :xs="24" :sm="12">
           <a-form-item label="探测路径" :tooltip="'仅 http/https 探测方式需要，如 /health。'">
             <a-input
               v-model:value="form.health_check.path"
@@ -532,22 +600,22 @@ onUnmounted(() => {
       </a-row>
 
       <a-row :gutter="16">
-        <a-col :span="6">
+        <a-col :xs="24" :sm="12" :md="6">
           <a-form-item label="间隔（秒）" tooltip="0 表示使用全局默认间隔">
             <a-input-number v-model:value="form.health_check.interval_seconds" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
-        <a-col :span="6">
+        <a-col :xs="24" :sm="12" :md="6">
           <a-form-item label="超时（秒）" tooltip="0 表示使用全局默认超时">
             <a-input-number v-model:value="form.health_check.timeout_seconds" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
-        <a-col :span="6">
+        <a-col :xs="24" :sm="12" :md="6">
           <a-form-item label="失败阈值" tooltip="连续失败多少次后标记为不可用，0 表示使用全局默认值">
             <a-input-number v-model:value="form.health_check.failure_threshold" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
-        <a-col :span="6">
+        <a-col :xs="24" :sm="12" :md="6">
           <a-form-item label="恢复阈值" tooltip="连续成功多少次后恢复可用，0 表示使用全局默认值">
             <a-input-number v-model:value="form.health_check.success_threshold" :min="0" style="width: 100%;" />
           </a-form-item>

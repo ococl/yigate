@@ -629,5 +629,15 @@ onMounted(fetchInfo)
   .column-scroll {
     overflow-y: visible;
   }
+
+  .field-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .summary-foot,
+  .column-foot {
+    flex-wrap: wrap;
+  }
 }
 </style>
