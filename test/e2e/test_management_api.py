@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -105,6 +106,20 @@ def main() -> int:
           resp.headers.get("x-frame-options"))
     check("webui: HTML 不允许缓存", "no-cache" in resp.headers.get("cache-control", ""),
           resp.headers.get("cache-control"))
+
+    hashed_assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', resp.text)
+    check("webui: HTML 引用带哈希的静态资源", len(hashed_assets) > 0, len(hashed_assets))
+    if hashed_assets:
+        asset = get(hashed_assets[0])
+        cache_control = asset.headers.get("cache-control", "")
+        check(
+            "webui: 哈希资源长期 immutable 缓存",
+            asset.status_code == 200
+            and "immutable" in cache_control
+            and "max-age=31536000" in cache_control,
+            (asset.status_code, cache_control),
+        )
+
     resp = get("/assets/not-exist.js")
     check("webui: 缺失静态资源返回 404", resp.status_code == 404, resp.status_code)
 
