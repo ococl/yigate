@@ -34,6 +34,33 @@ test('mobile layout uses drawer navigation and keeps content usable', async ({ p
   await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
 })
 
+test('every management page fits the mobile viewport', async ({ page }) => {
+  await login(page)
+
+  const routes = [
+    ['/upstreams', '上游管理'],
+    ['/rules', '路由规则'],
+    ['/users', '用户管理'],
+    ['/traffic', '流量审计'],
+    ['/settings', '系统设置'],
+    ['/geosite', 'GeoSite 数据'],
+    ['/pprof', 'pprof 性能分析'],
+    ['/docs/auth', '认证机制'],
+    ['/docs/api', 'API 文档'],
+    ['/about', '关于'],
+  ] as const
+
+  for (const [path, heading] of routes) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+    // 页面本身不应横向滚动；宽表格/代码块应在容器内部滚动。
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    )
+    expect(overflow, `${path} 出现横向滚动`).toBeLessThanOrEqual(1)
+  }
+})
+
 test('settings switches to a section picker on mobile', async ({ page }) => {
   await login(page)
   await page.goto('/settings')
