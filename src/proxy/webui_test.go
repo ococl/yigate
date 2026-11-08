@@ -95,6 +95,51 @@ func TestServeWebUIFileFallsBackToRawAsset(t *testing.T) {
 	}
 }
 
+func TestServeWebUIFileCachesHashedAssetImmutably(t *testing.T) {
+	const content = "console.log('hashed')"
+	fsys := fstest.MapFS{
+		"assets/index-IQLevEbW.js.gz": {Data: gzipAsset(t, content)},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/assets/index-IQLevEbW.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	serveWebUIFile(fsys, "/assets/index-IQLevEbW.js", rec, req)
+
+	want := "public, max-age=31536000, immutable"
+	if got := rec.Header().Get("Cache-Control"); got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+}
+
+func TestServeWebUIFileRevalidatesUnhashedAsset(t *testing.T) {
+	fsys := fstest.MapFS{
+		"favicon.svg": {Data: []byte("<svg/>")},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/favicon.svg", nil)
+	rec := httptest.NewRecorder()
+
+	serveWebUIFile(fsys, "/favicon.svg", rec, req)
+
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", got)
+	}
+}
+
+func TestServeIndexDisablesCaching(t *testing.T) {
+	fsys := fstest.MapFS{
+		"index.html": {Data: []byte("<html></html>")},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	serveIndex(fsys, rec, req)
+
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", got)
+	}
+}
+
 func TestHasWebUIAssetsAcceptsCompressedAssets(t *testing.T) {
 	fsys := fstest.MapFS{
 		"assets/app.js.gz": {Data: gzipAsset(t, "console.log('ok')")},

@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -130,6 +131,7 @@ func serveWebUIFile(sub fs.FS, name string, w http.ResponseWriter, r *http.Reque
 	if compressed, err := fs.ReadFile(sub, name+".gz"); err == nil {
 		w.Header().Set("Vary", "Accept-Encoding")
 		setWebUIContentType(w, name)
+		setWebUICacheControl(w, name)
 		if acceptsGzip(r) {
 			w.Header().Set("Content-Encoding", "gzip")
 			http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(compressed))
@@ -156,7 +158,22 @@ func serveWebUIFile(sub fs.FS, name string, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	setWebUIContentType(w, name)
+	setWebUICacheControl(w, name)
 	http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(data))
+}
+
+// immutableAssetPattern 匹配 Vite 构建产物中带内容哈希的文件名，
+// 例如 assets/index-IQLevEbW.js。这类资源内容随哈希变化，可安全长期缓存。
+var immutableAssetPattern = regexp.MustCompile(`^assets/.+-[A-Za-z0-9_-]{8,}\.(js|css|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico|map)$`)
+
+// setWebUICacheControl 为静态资源设置缓存策略：
+// 带哈希的产物长期 immutable，其余文件（favicon 等）使用 no-cache 以便升级后及时更新。
+func setWebUICacheControl(w http.ResponseWriter, name string) {
+	if immutableAssetPattern.MatchString(name) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
 }
 
 func setWebUIContentType(w http.ResponseWriter, name string) {
