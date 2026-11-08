@@ -152,6 +152,11 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 		tmp.Close()
 		return fmt.Errorf("write temp file: %w", err)
 	}
+	// rename 前落盘，避免掉电后留下已改名但内容为空的配置。
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}
