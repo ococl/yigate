@@ -53,6 +53,9 @@ type Config struct {
 	Listen              string                        `yaml:"listen"`
 	Management          string                        `yaml:"management"`
 	ManagementAuthToken string                        `yaml:"management_auth_token"`
+	// 下面两个开关是显式的风险确认：默认关闭，只有确实需要匿名代理或访问私网目标时才打开。
+	AllowAnonymousProxy bool                          `yaml:"allow_anonymous_proxy"`
+	AllowPrivateTargets bool                          `yaml:"allow_private_targets"`
 	Users               map[string]string             `yaml:"users"`
 	Upstreams           []proxy.UpstreamConfig        `yaml:"upstreams"`
 	Routing             proxy.RoutingConfig           `yaml:"routing"`
@@ -379,6 +382,30 @@ func isPlaceholderCredential(value string) bool {
 	return false
 }
 
+// weakCredentialValues 是常见的弱口令/示例令牌。占位符前缀由 isPlaceholderCredential 覆盖。
+var weakCredentialValues = map[string]struct{}{
+	"admin": {}, "admin123": {}, "password": {}, "pass": {}, "123456": {},
+	"12345678": {}, "123456789": {}, "111111": {}, "abc123": {}, "qwerty": {},
+	"letmein": {}, "changeme": {}, "secret": {}, "token": {}, "default": {},
+	"root": {}, "guest": {}, "test": {}, "test123": {}, "yigate": {},
+}
+
+// validateCredentialStrength 拒绝占位符与常见弱口令。
+// 空值与尚未展开的 ${ENV} 占位符交给加载阶段处理，这里不重复报错。
+func validateCredentialStrength(field, value string) error {
+	v := strings.TrimSpace(value)
+	if v == "" || containsEnvPlaceholder(v) {
+		return nil
+	}
+	if isPlaceholderCredential(v) {
+		return fmt.Errorf("%s still uses a placeholder; replace it with a strong random value", field)
+	}
+	if _, weak := weakCredentialValues[strings.ToLower(v)]; weak {
+		return fmt.Errorf("%s is a commonly used weak credential", field)
+	}
+	return nil
+}
+
 func validateTLSConfig(tlsCfg *TLSConfig) error {
 	hasCert := strings.TrimSpace(tlsCfg.CertFile) != ""
 	hasKey := strings.TrimSpace(tlsCfg.KeyFile) != ""
@@ -442,6 +469,15 @@ func validateConfig(cfg *Config) error {
 		if err := validateTLSConfig(&cfg.Listeners[i].TLS); err != nil {
 			return fmt.Errorf("listeners[%d].tls: %w", i, err)
 		}
+		// 非回环监听且既无认证也无客户端白名单时，等于对外开放匿名代理。
+		// 显式设置 allow_anonymous_proxy: true 才能绕过这道基线（例如容器内监听 0.0.0.0
+		// 但宿主机仅映射回环地址的本地开发模板）。
+		if !cfg.AllowAnonymousProxy && !containsEnvPlaceholder(lc.Listen) &&
+			!isLoopbackListen(lc.Listen) && len(lc.Users) == 0 && len(cfg.Users) == 0 &&
+			len(lc.AccessControl.AllowedClients) == 0 && len(cfg.AccessControl.AllowedClients) == 0 &&
+			!lc.TProxy.Enabled {
+			return fmt.Errorf("listeners[%d].listen %q is reachable from the network without authentication or a client allowlist; configure users/allowed_clients, bind to loopback, or set allow_anonymous_proxy: true", i, lc.Listen)
+		}
 		if lc.TProxy.Enabled {
 			// 透明代理的客户端不会发送代理认证头，配了 users 只会造成「以为有认证」的开放代理。
 			if len(lc.Users) > 0 {
@@ -477,6 +513,12 @@ func validateConfig(cfg *Config) error {
 	if err := proxy.ValidateTimeoutConfig(cfg.Timeouts); err != nil {
 		return fmt.Errorf("timeouts: %w", err)
 	}
+	// 显式关闭私网防护属于高风险决策：保留启动期可观测告警，但不阻断
+	// 本地测试与特殊部署；运行时配置 API 另有严格拦截，防止被静默关闭。
+	if !cfg.DestinationPolicy.ProtectPrivate {
+		proxy.Logger().Warnw("SSRF protection disabled: destination_policy.protect_private is false",
+			"allow_private_targets", cfg.AllowPrivateTargets)
+	}
 	if _, err := proxy.NewDestinationPolicy(cfg.DestinationPolicy); err != nil {
 		return fmt.Errorf("destination_policy: %w", err)
 	}
@@ -492,23 +534,21 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("management_auth_token is required when management listens on a non-loopback address")
 	}
 	if cfg.EnablePprof && cfg.ManagementAuthToken == "" {
-		// pprof 端点会暴露堆栈、内存与 goroutine 等敏感信息，免认证时仅允许绑定回环地址。
-		if cfg.Management != "" && !isLoopbackListen(cfg.Management) {
-			return fmt.Errorf("management_auth_token is required when enable_pprof is true and management listens on a non-loopback address")
-		}
+		// pprof 暴露堆栈、内存与 goroutine，即使只绑回环也不允许匿名读取。
+		return fmt.Errorf("management_auth_token is required when enable_pprof is true")
 	}
-	if isPlaceholderCredential(cfg.ManagementAuthToken) {
-		return fmt.Errorf("management_auth_token still uses a placeholder; replace it with a strong random token")
+	if err := validateCredentialStrength("management_auth_token", cfg.ManagementAuthToken); err != nil {
+		return err
 	}
 	for username, password := range cfg.Users {
-		if isPlaceholderCredential(password) {
-			return fmt.Errorf("proxy user %q still uses a placeholder password", username)
+		if err := validateCredentialStrength(fmt.Sprintf("proxy user %q password", username), password); err != nil {
+			return err
 		}
 	}
 	for i, lc := range cfg.Listeners {
 		for username, password := range lc.Users {
-			if isPlaceholderCredential(password) {
-				return fmt.Errorf("listeners[%d] user %q still uses a placeholder password", i, username)
+			if err := validateCredentialStrength(fmt.Sprintf("listeners[%d] user %q password", i, username), password); err != nil {
+				return err
 			}
 		}
 	}
@@ -665,6 +705,14 @@ func validateRoutingConfig(cfg proxy.RoutingConfig) error {
 		if len(token) < 8 {
 			return fmt.Errorf("routing.geosite.sync_token must be at least 8 characters")
 		}
+		if err := validateCredentialStrength("routing.geosite.sync_token", token); err != nil {
+			return err
+		}
+	}
+	if token := strings.TrimSpace(cfg.GeoSite.UpdateToken); token != "" {
+		if err := validateCredentialStrength("routing.geosite.update_token", token); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -717,6 +765,11 @@ func validateUpstreamConfig(up proxy.UpstreamConfig) error {
 		if parsed.Host == "" {
 			return fmt.Errorf("url must include host:port")
 		}
+		// 管理 API 可改上游地址，必须拒绝元数据别名与链路本地目标，
+		// 否则上游配置就成了访问内网/云元数据的跳板。
+		if err := proxy.ValidateUpstreamHost(parsed.Hostname()); err != nil {
+			return fmt.Errorf("url host: %w", err)
+		}
 		if port := parsed.Port(); port != "" {
 			n, err := strconv.Atoi(port)
 			if err != nil || n < 1 || n > 65535 {
@@ -764,6 +817,11 @@ func DefaultConfigYAML(generateToken bool) (string, error) {
 	}
 	if management := strings.TrimSpace(os.Getenv("YIGATE_DEFAULT_MANAGEMENT")); management != "" {
 		cfg.Management = management
+	}
+	// 容器内必须监听所有接口，而 Compose 默认只把端口映射到宿主机回环。
+	// 默认生成器据此显式声明匿名代理风险确认；手写配置仍受启动期基线约束。
+	if !isLoopbackListen(cfg.Listen) {
+		cfg.AllowAnonymousProxy = true
 	}
 	if generateToken {
 		token, err := generateManagementToken()

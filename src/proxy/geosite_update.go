@@ -211,11 +211,26 @@ func (u *GeoSiteUpdater) Sync(ctx context.Context) (bool, error) {
 	return sum != previous, nil
 }
 
+// geoSiteRedirectPolicy 限制 GeoSite 下载的重定向：每一跳都要重新通过主机校验
+// （只校验初始 URL 挡不住 302 到元数据地址），跨主机跳转时移除更新令牌。
+func geoSiteRedirectPolicy(req *http.Request, via []*http.Request) error {
+	if len(via) > 3 {
+		return fmt.Errorf("too many geosite download redirects")
+	}
+	if err := ValidateGeoSiteUpdateURL(req.URL.String()); err != nil {
+		return fmt.Errorf("geosite download redirect rejected: %w", err)
+	}
+	if len(via) > 0 && !strings.EqualFold(via[0].URL.Host, req.URL.Host) {
+		req.Header.Del("Authorization")
+	}
+	return nil
+}
+
 func (u *GeoSiteUpdater) doRequest(req *http.Request) (*http.Response, error) {
 	if u.mgr != nil && u.mgr.AttemptCount(nil) > 0 {
 		return u.requestViaAutoProxy(req)
 	}
-	client := &http.Client{Timeout: geoSiteDownloadTimeout}
+	client := &http.Client{Timeout: geoSiteDownloadTimeout, CheckRedirect: geoSiteRedirectPolicy}
 	return client.Do(req)
 }
 
@@ -267,7 +282,7 @@ func requestViaUpstreamClient(req *http.Request, up *Upstream) (*http.Response, 
 	} else {
 		transport.Proxy = http.ProxyURL(up.urlForType(up.primaryProxyType()))
 	}
-	client := &http.Client{Transport: transport, Timeout: geoSiteDownloadTimeout}
+	client := &http.Client{Transport: transport, Timeout: geoSiteDownloadTimeout, CheckRedirect: geoSiteRedirectPolicy}
 	return client.Do(req)
 }
 

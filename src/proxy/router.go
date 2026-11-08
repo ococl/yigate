@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -291,7 +292,35 @@ func (r *Router) CheckTarget(target string) error {
 	if r == nil || r.policy == nil {
 		return nil
 	}
-	return r.policy.CheckTarget(target)
+	if err := r.policy.CheckTarget(target); err != nil {
+		return err
+	}
+	if !r.policy.ShouldResolveBeforeUpstream() {
+		return nil
+	}
+	host, portStr, err := net.SplitHostPort(strings.TrimSpace(target))
+	if err != nil || parseIPLiteral(host) != nil {
+		// 无端口或字面 IP：策略层已完成校验，不需要再解析。
+		return nil
+	}
+	port := 0
+	if parsed, ok := parsePort(portStr); ok {
+		port = parsed
+	}
+	// 经上游转发时目标由上游解析，网关默认看不到最终 IP；开启严格模式后
+	// 在网关侧预解析并逐个校验，防止域名指向内网或云元数据。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	addrs, err := r.lookupIPAddr(ctx, host)
+	if err != nil {
+		return deniedErr("upstream target %q could not be resolved for policy checks", host)
+	}
+	for _, addr := range addrs {
+		if err := r.policy.Check(host, port, addr.IP); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Router) Dial(target string, mgr *UpstreamManager, sourceIP ...string) (net.Conn, error) {
@@ -299,10 +328,8 @@ func (r *Router) Dial(target string, mgr *UpstreamManager, sourceIP ...string) (
 	if decision.Action == ActionDeny {
 		return nil, NewError(CodeDestinationDenied, "destination denied by route rule: "+target)
 	}
-	if r.policy != nil {
-		if err := r.policy.CheckTarget(target); err != nil {
-			return nil, err
-		}
+	if err := r.CheckTarget(target); err != nil {
+		return nil, err
 	}
 	sip := ""
 	if len(sourceIP) > 0 {

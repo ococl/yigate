@@ -713,7 +713,7 @@ func TestConfigAPIBodySizeLimit(t *testing.T) {
 		URL:  "socks5://host:1080",
 	}, "")
 	defer resp.Body.Close()
-	if resp.StatusCode != 400 {
-		t.Fatalf("status = %d, want 400 for oversized body", resp.StatusCode)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 for oversized body", resp.StatusCode)
 	}
 }

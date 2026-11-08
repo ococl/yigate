@@ -1,3 +1,11 @@
+# 安全基线（默认开启，下面两个开关仅用于显式确认风险）：
+# - 非回环监听若既无 users 也无 allowed_clients，启动会被拒绝；容器内监听
+#   0.0.0.0 但宿主机端口仅映射回环时，可设置 allow_anonymous_proxy: true。
+# - 运行时管理 API 不允许关闭 protect_private；确需让网关访问私网目标时，
+#   在配置文件中显式设置 allow_private_targets: true。
+# allow_anonymous_proxy: false
+# allow_private_targets: false
+#
 # 多监听端口策略：每个 listener 可独立配置监听地址、TLS、用户认证、访问控制、SOCKS5 命令与最大连接数。
 # 当 listeners 非空时，实际代理入口由 listeners 定义，顶层的 listen/socks5/tls 被忽略；
 # 顶层 users/access_control 作为默认值被未显式配置的 listener 继承（显式写 users: {} 表示该端口匿名），
@@ -168,6 +176,10 @@ destination_policy:
   # deny_ports / allow_ports 为 1-65535 的端口白/黑名单，越界端口会在加载时报错。
   # default_action: deny 时，allow_ports 是附加约束（必须与 allow_cidrs / allow_domains
   # 同时满足），不能单独作为放行条件；仅配置 allow_ports 会在加载时报错。
+  # 严格模式：经上游转发前先在网关侧解析域名并逐个校验 IP（默认 false）。
+  # 开启可阻断域名指向内网/元数据的 SSRF，但会削弱 socks5h 的远端解析语义。
+  # resolve_before_upstream: false
+  # 云元数据服务别名在 protect_private=true 时始终被拒绝，无需手工配置。
   # deny_domains: ["*.internal.example", "metadata.google.internal"]
   # allow_domains: ["*.corp.example"]
   # deny_ports: [25, 445, 3389]

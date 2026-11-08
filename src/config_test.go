@@ -547,7 +547,7 @@ func TestLoadConfigBackwardCompatibleSingleListen(t *testing.T) {
 	path := filepath.Join(dir, "config.yml")
 	os.WriteFile(path, []byte(`listen: 127.0.0.1:8891
 users:
-  alice: pass
+  alice: Str0ng-Pass-2026
 access_control:
   allowed_clients:
     - 127.0.0.1/32
@@ -563,7 +563,7 @@ max_connections: 512
 	if cfg.Listeners[0].Listen != "127.0.0.1:8891" {
 		t.Fatalf("listener address = %q", cfg.Listeners[0].Listen)
 	}
-	if cfg.Listeners[0].Users["alice"] != "pass" {
+	if cfg.Listeners[0].Users["alice"] != "Str0ng-Pass-2026" {
 		t.Fatalf("listener user not propagated")
 	}
 	if cfg.Listeners[0].MaxConnections != 512 {

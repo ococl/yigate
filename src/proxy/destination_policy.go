@@ -32,18 +32,22 @@ type DestinationPolicyConfig struct {
 	DenyPorts []int `yaml:"deny_ports"`
 	// AllowPorts 当 DefaultAction=deny 时额外要求的端口白名单（必须与地址白名单同时满足）。
 	AllowPorts []int `yaml:"allow_ports"`
+	// ResolveBeforeUpstream 开启后，经上游转发的目标域名先在网关侧解析并逐个校验 IP，
+	// 防止域名指向内网/元数据的 SSRF。默认 false：socks5h 等场景刻意让上游解析域名。
+	ResolveBeforeUpstream bool `yaml:"resolve_before_upstream"`
 }
 
 // DestinationPolicy 是编译后的目标访问策略。
 type DestinationPolicy struct {
-	protectPrivate bool
-	defaultAction  string
-	denyCIDRs      []*net.IPNet
-	allowCIDRs     []*net.IPNet
-	denyDomains    []string
-	allowDomains   []string
-	denyPorts      map[int]struct{}
-	allowPorts     map[int]struct{}
+	protectPrivate       bool
+	defaultAction        string
+	resolveBeforeUpstream bool
+	denyCIDRs            []*net.IPNet
+	allowCIDRs           []*net.IPNet
+	denyDomains          []string
+	allowDomains         []string
+	denyPorts            map[int]struct{}
+	allowPorts           map[int]struct{}
 }
 
 // protectedRanges 是无论配置如何都默认拒绝的地址段。
@@ -163,13 +167,19 @@ func NewDestinationPolicy(cfg DestinationPolicyConfig) (*DestinationPolicy, erro
 	if defaultAction == ActionDeny && len(allowPorts) > 0 && len(cfg.AllowCIDRs) == 0 && len(cfg.AllowDomains) == 0 {
 		return nil, fmt.Errorf("destination_policy.allow_ports requires allow_cidrs or allow_domains when default_action=deny")
 	}
+	denyDomains := normalizeDomains(cfg.DenyDomains)
+	if cfg.ProtectPrivate {
+		// 经上游解析时网关看不到最终 IP，元数据服务别名必须在域名层就并入拒绝列表。
+		denyDomains = append(denyDomains, metadataDomainSuffixes...)
+	}
 	p := &DestinationPolicy{
-		protectPrivate: cfg.ProtectPrivate,
-		defaultAction:  defaultAction,
-		denyPorts:      denyPorts,
-		allowPorts:     allowPorts,
-		denyDomains:    normalizeDomains(cfg.DenyDomains),
-		allowDomains:   normalizeDomains(cfg.AllowDomains),
+		protectPrivate:        cfg.ProtectPrivate,
+		defaultAction:         defaultAction,
+		resolveBeforeUpstream: cfg.ResolveBeforeUpstream,
+		denyPorts:             denyPorts,
+		allowPorts:            allowPorts,
+		denyDomains:           denyDomains,
+		allowDomains:          normalizeDomains(cfg.AllowDomains),
 	}
 	for _, c := range cfg.DenyCIDRs {
 		_, n, err := net.ParseCIDR(strings.TrimSpace(c))
@@ -296,6 +306,11 @@ func (p *DestinationPolicy) Check(host string, port int, ip net.IP) error {
 		return deniedErr("target %s is not in allow list", host)
 	}
 	return nil
+}
+
+// ShouldResolveBeforeUpstream 表示经上游转发前是否需要网关侧预解析并校验目标 IP。
+func (p *DestinationPolicy) ShouldResolveBeforeUpstream() bool {
+	return p != nil && p.resolveBeforeUpstream
 }
 
 // CheckTarget 校验 host:port 形式的目标；未携带端口时按裸 host 校验，不再静默放行。

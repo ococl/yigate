@@ -127,7 +127,7 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 	m.handler = m.buildMux(enablePprof)
 	m.srv = &http.Server{
 		// 通过间接层读取路由表，使 Reconfigure 可以在不重建监听的情况下热替换。
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Handler: withSecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			m.handlerMu.RLock()
 			h := m.handler
 			m.handlerMu.RUnlock()
@@ -136,8 +136,9 @@ func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authTo
 				return
 			}
 			h.ServeHTTP(w, r)
-		}),
-		ReadTimeout:  10 * time.Second,
+		})),
+		ReadTimeout:       10 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
 		// pprof 默认 CPU profile 需要 30s，写超时必须留出余量，否则会被提前切断。
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -197,6 +198,10 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
+		// 管理数据与指标响应不得被浏览器或中间代理缓存。
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" || r.URL.Path == "/metrics" {
+			h.Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -342,8 +347,15 @@ func clientIPFromRequest(r *http.Request) string {
 
 func (m *ManagementServer) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	if m.checkAuth(r) {
+		// 审计：所有通过认证的配置写操作都留下来源与方法，便于追溯误配置或恶意变更。
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			Logger().Infow("management write request",
+				"ip", clientIPFromRequest(r), "method", r.Method, "path", r.URL.Path)
+		}
 		return true
 	}
+	Logger().Warnw("management authentication rejected",
+		"ip", clientIPFromRequest(r), "method", r.Method, "path", r.URL.Path)
 	w.Header().Set("WWW-Authenticate", `Bearer realm="yigate-management"`)
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "unauthorized"})

@@ -21,6 +21,13 @@ check_config() {
     status=1
   fi
 
+  # local-only-token 仅允许出现在「宿主只绑回环」的本地匿名代理模板中，
+  # 防止它扩散到 LAN / 生产模板；其他地方一律视为固定凭据。
+  if [[ "$cfg" != *"/deploy/docker/config.local.yml" ]] && grep -Eqi 'local-only-token' "$cfg"; then
+    echo "error: ${cfg} 使用了仅限本地回环模板的固定令牌" >&2
+    status=1
+  fi
+
   # 产品模板中的本机模式必须绑定回环地址
   if [[ "$name" == "config.local.yml" && "$cfg" == *"/deploy/config/"* ]]; then
     if grep -Eq 'listen:[[:space:]]*.*(0\.0\.0\.0|\[::\])' "$cfg"; then

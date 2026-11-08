@@ -515,6 +515,11 @@ func (e *configEditor) AddUser(username, password string) error {
 	if strings.TrimSpace(password) == "" {
 		return errors.New("password must not be empty")
 	}
+	// 运行时添加/修改用户同样要拒绝占位符与常见弱口令，
+	// 与启动期 validateConfig 的基线保持一致。
+	if err := validateCredentialStrength("proxy password", password); err != nil {
+		return err
+	}
 	cfg, err := e.loadRawConfig()
 	if err != nil {
 		return err
@@ -540,6 +545,11 @@ func (e *configEditor) UpdateUser(username, password string) error {
 	username = strings.TrimSpace(username)
 	if strings.TrimSpace(password) == "" {
 		return errors.New("password must not be empty")
+	}
+	// 运行时添加/修改用户同样要拒绝占位符与常见弱口令，
+	// 与启动期 validateConfig 的基线保持一致。
+	if err := validateCredentialStrength("proxy password", password); err != nil {
+		return err
 	}
 	cfg, err := e.loadRawConfig()
 	if err != nil {
@@ -641,7 +651,7 @@ func (e *configEditor) GetSettings() (proxy.SettingsView, error) {
 		AutoCacheTTLSec:        time.Duration(cfg.Routing.Auto.CacheTTL).Seconds(),
 		GeoSitePath:            cfg.Routing.GeoSite.Path,
 		GeoSiteAutoUpdate:      cfg.Routing.GeoSite.AutoUpdate,
-		GeoSiteUpdateURL:       cfg.Routing.GeoSite.UpdateURL,
+		GeoSiteUpdateURL:       proxy.RedactURL(cfg.Routing.GeoSite.UpdateURL),
 		GeoSiteUpdateIntervalH: time.Duration(cfg.Routing.GeoSite.UpdateInterval).Hours(),
 		Socks5HRedirectEnabled: cfg.Routing.Socks5HRedirect.Enabled,
 
@@ -803,6 +813,11 @@ func (e *configEditor) UpdateSettings(patch proxy.SettingsPatch) error {
 		cfg.Timeouts.TunnelIdle = durationFromSeconds(*patch.TunnelIdleTimeoutSec)
 	}
 	if patch.ProtectPrivate != nil {
+		// 运行时关闭私网防护等于解除 SSRF 防线，除非配置文件里已显式确认风险，
+		// 否则不允许通过管理 API 静默关闭。
+		if !*patch.ProtectPrivate && !cfg.AllowPrivateTargets {
+			return fmt.Errorf("disabling destination_policy.protect_private via the management API is not allowed; set allow_private_targets: true in the config file first")
+		}
 		cfg.DestinationPolicy.ProtectPrivate = *patch.ProtectPrivate
 	}
 	if patch.DefaultAction != nil {

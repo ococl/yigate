@@ -12,6 +12,7 @@
 # - destination_policy: 关闭私网保护，以便测试脚本使用 127.0.0.1 本地服务器
 # - socks5: 开启 BIND / UDP ASSOCIATE（无 SOCKS5 上游时自动走本地回退路径）
 
+allow_private_targets: true
 listen: "127.0.0.1:4479"
 management: "127.0.0.1:8892"
 management_auth_token: ""

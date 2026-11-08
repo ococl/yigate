@@ -1,6 +1,7 @@
 # WebUI Playwright E2E 专用配置。
 # 固定测试 Token 仅用于本地/CI 隔离实例，不得用于生产环境。
 
+allow_private_targets: true
 listen: "127.0.0.1:4480"
 management: "127.0.0.1:8894"
 management_auth_token: "yigate-webui-e2e-token"

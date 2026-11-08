@@ -267,7 +267,7 @@ routing:
 func TestLoadConfigInheritsGlobalDefaultsIntoListeners(t *testing.T) {
 	cfg, err := loadConfigFromYAML(t, `listen: "127.0.0.1:0"
 users:
-  alice: pass
+  alice: Str0ng-Pass-2026
 access_control:
   allowed_clients: ["10.0.0.0/8"]
   rate_limit:
@@ -282,7 +282,7 @@ listeners:
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.Listeners[0].Users["alice"] != "pass" {
+	if cfg.Listeners[0].Users["alice"] != "Str0ng-Pass-2026" {
 		t.Fatal("listener without users should inherit global users")
 	}
 	if len(cfg.Listeners[1].Users) != 0 {

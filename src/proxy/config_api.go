@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -634,6 +633,16 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 // writeJSONError 写入 JSON 错误响应。
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
+	// MaxBytesReader 超限使用标准库固定文案，统一映射为 413 并对调用方隐藏内部路径。
+	if strings.Contains(msg, "http: request body too large") {
+		code = http.StatusRequestEntityTooLarge
+		msg = "request body too large"
+	}
+	if code >= http.StatusInternalServerError {
+		// 5xx 详情只写日志，避免把临时文件/配置绝对路径回显给调用者。
+		Logger().Errorw("management request failed", "status", code, "error", msg)
+		msg = "internal server error"
+	}
 	writeJSON(w, code, map[string]string{"status": "error", "error": msg})
 }
 
@@ -642,7 +651,9 @@ const maxManagementBodySize = 1 << 20
 
 // decodeJSON 解码 JSON 请求体，限制最大大小以防止 DoS。
 func decodeJSON(r *http.Request, v any) error {
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxManagementBodySize))
+	// MaxBytesReader 会消费并关闭超限请求体，避免 keep-alive 连接上的残留字节
+	// 被解析成下一个请求；writeJSONError 会把对应错误统一映射为 413。
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxManagementBodySize))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)

@@ -593,6 +593,7 @@ log:
 	}
 
 	_ = writeTestConfig(t, dir, `listen: 0.0.0.0:0
+allow_anonymous_proxy: true
 management: 127.0.0.1:0
 log:
   level: warn
@@ -681,7 +682,7 @@ func TestServerLoadAndApplyManagementPortChange(t *testing.T) {
 	mgmtLn.Close()
 	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
 management: `+mgmtAddr+`
-management_auth_token: token
+management_auth_token: strong-test-token-2026
 log:
   level: warn
   output: stdout
@@ -702,7 +703,7 @@ log:
 
 	_ = writeTestConfig(t, dir, `listen: 127.0.0.1:0
 management: 127.0.0.1:0
-management_auth_token: token
+management_auth_token: strong-test-token-2026
 log:
   level: warn
   output: stdout
@@ -715,7 +716,7 @@ log:
 		t.Fatalf("management addr = %q, old = %q", newAddr, oldAddr)
 	}
 	req, _ := http.NewRequest(http.MethodGet, "http://"+newAddr+"/health", nil)
-	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Authorization", "Bearer strong-test-token-2026")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("new management health: %v", err)
@@ -964,7 +965,7 @@ func TestServerMultiListenerHotReload(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTestConfig(t, dir, `listen: 127.0.0.1:0
 management: 127.0.0.1:0
-management_auth_token: token
+management_auth_token: strong-test-token-2026
 log:
   level: warn
   output: stdout
@@ -990,7 +991,7 @@ log:
   - listen: 127.0.0.1:0
   - listen: 127.0.0.2:0
 management: 127.0.0.1:0
-management_auth_token: token
+management_auth_token: strong-test-token-2026
 log:
   level: warn
   output: stdout
@@ -1035,7 +1036,7 @@ func TestServerMultiListenerPerListenerUsers(t *testing.T) {
     users:
       bob: bob-pass
 management: 127.0.0.1:0
-management_auth_token: token
+management_auth_token: strong-test-token-2026
 log:
   level: warn
   output: stdout
