@@ -66,9 +66,14 @@ jobs:
 
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOPROXY: https://goproxy.cn,direct
         with:
           version: v2.15.0
           working-directory: ./src
+          # 与 CNB 一致：用 setup-go 的 Go 1.27.3 现场编译，避免预编译二进制
+          # 因 Go 版本低于 go.mod 目标版本而无法加载配置。
+          install-mode: goinstall
 
       - name: Vulnerability scan
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
