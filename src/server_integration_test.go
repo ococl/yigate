@@ -571,7 +571,13 @@ func TestIntegrationTrafficPersistsAcrossRestart(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
+	// 隧道流量在连接关闭后由复制协程异步记账，立即快照可能读到空数据。
+	deadline := time.Now().Add(2 * time.Second)
 	before := first.currentRuntime().trafficAccounter.Snapshot()
+	for len(before.Entries) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		before = first.currentRuntime().trafficAccounter.Snapshot()
+	}
 	if len(before.Entries) == 0 {
 		t.Fatal("no traffic recorded before restart")
 	}
