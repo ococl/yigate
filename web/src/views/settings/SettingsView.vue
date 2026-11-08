@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import { reloadConfig } from '@/api/system'
 import { getSettings, updateSettings } from '@/api/settings'
@@ -266,12 +266,54 @@ function parsePorts(text: string): { ports: number[]; invalid: string[] } {
   return { ports, invalid }
 }
 
+function formSnapshot() {
+  return JSON.stringify({
+    form: form.value,
+    deny: denyPortsText.value,
+    allow: allowPortsText.value,
+    token: tokenInput.value.trim(),
+  })
+}
+
+// 保存基线，用于判断表单是否有未保存修改
+const savedSnapshot = ref('')
+
 function applySettingsToForm(view: SettingsView) {
   settings.value = view
   form.value = { ...view }
   denyPortsText.value = (view.deny_ports || []).join(', ')
   allowPortsText.value = (view.allow_ports || []).join(', ')
   tokenInput.value = ''
+  // 等表单控件完成挂载与初值规范化后再记录基线，避免把控件归一化误判为修改
+  void nextTick(() => {
+    savedSnapshot.value = formSnapshot()
+  })
+}
+
+const isDirty = computed(
+  () => savedSnapshot.value !== '' && formSnapshot() !== savedSnapshot.value,
+)
+
+function markSaved() {
+  savedSnapshot.value = formSnapshot()
+}
+
+// 离开设置页前提示未保存修改，避免误切换页面丢失编辑内容
+const leaveConfirmOpen = ref(false)
+let leaveResolve: ((value: boolean) => void) | null = null
+
+onBeforeRouteLeave(() => {
+  if (!isDirty.value) return true
+  leaveConfirmOpen.value = true
+  return new Promise<boolean>((resolve) => {
+    leaveResolve = resolve
+  })
+})
+
+function resolveLeave(leave: boolean) {
+  leaveConfirmOpen.value = false
+  leaveResolve?.(leave)
+  leaveResolve = null
 }
 
 async function fetchAll() {
@@ -382,6 +424,7 @@ async function handleSave() {
       // 令牌已轮换：当前会话的旧令牌立即失效，清理本地状态并回到登录页
       message.success('设置已保存，管理令牌已更新，请使用新令牌重新登录')
       tokenInput.value = ''
+      markSaved()
       authStore.logout()
       router.push('/login')
       return
@@ -454,7 +497,7 @@ onMounted(fetchAll)
           <a-button :loading="reloading">重新加载配置</a-button>
         </a-popconfirm>
         <a-button @click="resetForm">还原</a-button>
-        <a-button type="primary" :loading="saving" @click="handleSave">保存设置</a-button>
+        <a-button type="primary" :loading="saving" :disabled="!isDirty" @click="handleSave">保存设置</a-button>
       </a-space>
     </div>
 
@@ -856,6 +899,18 @@ onMounted(fetchAll)
       </section>
     </div>
   </div>
+
+  <a-modal
+    v-model:open="leaveConfirmOpen"
+    title="有未保存的设置"
+    ok-text="离开"
+    cancel-text="继续编辑"
+    :mask-closable="false"
+    @ok="resolveLeave(true)"
+    @cancel="resolveLeave(false)"
+  >
+    <p>离开后本次修改将丢失，确定离开吗？</p>
+  </a-modal>
 </template>
 
 <style scoped>

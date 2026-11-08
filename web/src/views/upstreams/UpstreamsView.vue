@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import {
   listUpstreams,
   addUpstream,
@@ -22,6 +24,8 @@ import type {
 } from '@/types/api'
 
 const isMobile = useIsMobile()
+const route = useRoute()
+const router = useRouter()
 const dataSource = ref<UpstreamInfo[]>([])
 const loading = ref(false)
 const checking = ref<string | null>(null)
@@ -31,7 +35,6 @@ const toggling = ref<string | null>(null)
 const lastChecks = ref<Map<string, UpstreamCheckResult>>(new Map())
 // 服务端运行时健康状态（进程内存态），刷新页面后仍可读取
 const runtimeStatus = ref<Map<string, UpstreamStatus>>(new Map())
-let statusTimer: number | undefined
 
 const modalVisible = ref(false)
 const modalTitle = ref('')
@@ -363,20 +366,27 @@ function healthCheckText(record: UpstreamInfo) {
   return hc.type
 }
 
+// 分页写入地址栏，刷新或返回列表时保持页码
+const pagination = computed(() => ({
+  current: Number(route.query.page) || 1,
+  pageSize: Number(route.query.size) || 10,
+  pageSizeOptions: ['10', '20', '50'],
+  showSizeChanger: true,
+  showTotal: (total: number) => `共 ${total} 条`,
+  onChange: (page: number, size: number) => {
+    router.replace({ query: { ...route.query, page: String(page), size: String(size) } })
+  },
+}))
+
 const healthCheckType = computed(() => form.value.health_check.type)
 const showHealthCheckPath = computed(() => ['http', 'https'].includes(healthCheckType.value))
 
 onMounted(() => {
   fetchData()
-  // 定期同步服务端健康状态，避免页面长时间停留后展示过期信息
-  statusTimer = window.setInterval(fetchRuntimeStatus, 15000)
 })
 
-onUnmounted(() => {
-  if (statusTimer !== undefined) {
-    window.clearInterval(statusTimer)
-  }
-})
+// 定期同步服务端健康状态，页面隐藏时暂停
+useVisiblePolling(fetchRuntimeStatus, 15000)
 </script>
 
 <template>
@@ -405,6 +415,7 @@ onUnmounted(() => {
               :checked="record.enabled !== false"
               :loading="toggling === record.name"
               size="small"
+              :aria-label="`启用或禁用上游 ${record.name}`"
               @change="(checked: boolean) => handleToggle(record, checked)"
             />
           </div>
@@ -468,7 +479,7 @@ onUnmounted(() => {
           :columns="columns"
           :loading="loading"
           row-key="name"
-          :pagination="{ pageSize: 10, hideOnSinglePage: true }"
+          :pagination="pagination"
           :scroll="{ x: 1280, y: 1 }"
         >
     <template #bodyCell="{ column, record }">

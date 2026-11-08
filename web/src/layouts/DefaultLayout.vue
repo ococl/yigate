@@ -115,7 +115,15 @@ function handleLogout() {
               :aria-label="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
               @click="appStore.toggleTheme"
             >
-              {{ appStore.isDark ? '☀️' : '🌙' }}
+              <span class="theme-icon" aria-hidden="true">
+                <svg v-if="appStore.isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+                </svg>
+              </span>
             </a-button>
           </a-tooltip>
           <a-popconfirm title="确定要退出登录吗？" ok-text="退出" cancel-text="取消" @confirm="handleLogout">
@@ -172,6 +180,17 @@ function handleLogout() {
   font-weight: 700;
   letter-spacing: 0.3px;
   white-space: nowrap;
+}
+
+.theme-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.theme-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .header-right {

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getTraffic } from '@/api/system'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import type { TrafficEntrySnapshot } from '@/types/api'
 import { formatBytes } from '@/utils/format'
 
@@ -11,8 +13,9 @@ const dataSource = ref<TrafficEntrySnapshot[]>([])
 const enabled = ref(false)
 const retentionDays = ref(30)
 const loading = ref(false)
-const keyword = ref('')
-let timer: number | undefined
+const route = useRoute()
+const router = useRouter()
+const keyword = ref(typeof route.query.q === 'string' ? route.query.q : '')
 
 const columns = [
   { title: '用户', dataIndex: 'user', key: 'user', width: 140 },
@@ -39,9 +42,22 @@ const mobileItems = computed(() =>
   filtered.value.slice((mobilePage.value - 1) * mobilePageSize, mobilePage.value * mobilePageSize),
 )
 
-watch(keyword, () => {
+watch(keyword, (value) => {
   mobilePage.value = 1
+  // 搜索词写入地址栏，刷新或返回时保留过滤条件
+  router.replace({ query: { ...route.query, q: value || undefined, page: undefined } })
 })
+
+const tablePagination = computed(() => ({
+  current: Number(route.query.page) || 1,
+  pageSize: Number(route.query.size) || 20,
+  pageSizeOptions: ['20', '50', '100'],
+  showSizeChanger: true,
+  showTotal: (total: number) => `共 ${total} 条`,
+  onChange: (page: number, size: number) => {
+    router.replace({ query: { ...route.query, page: String(page), size: String(size) } })
+  },
+}))
 
 const summary = computed(() => {
   let total = 0
@@ -75,14 +91,8 @@ async function fetchData(showLoading = true) {
   }
 }
 
-onMounted(() => {
-  fetchData()
-  timer = window.setInterval(() => fetchData(false), 15000)
-})
-
-onUnmounted(() => {
-  if (timer !== undefined) window.clearInterval(timer)
-})
+fetchData()
+useVisiblePolling(() => fetchData(false), 15000)
 </script>
 
 <template>
@@ -183,7 +193,7 @@ onUnmounted(() => {
           :columns="columns"
           :loading="loading"
           :row-key="(r: TrafficEntrySnapshot) => `${r.user}|${r.upstream}|${r.target}`"
-          :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+          :pagination="tablePagination"
           :scroll="{ x: 760, y: 1 }"
         >
     <template #bodyCell="{ column, record }">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { message, theme } from 'antdv-next'
+import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import { getHealth, getStatus, getTraffic } from '@/api/system'
 import { formatDateTime, formatTimeOnly } from '@/utils/datetime'
 import { formatBytes, formatUptime } from '@/utils/format'
@@ -14,8 +15,6 @@ const loading = ref(false)
 const lastRefreshed = ref<Date | null>(null)
 
 const { token } = theme.useToken()
-
-let timer: ReturnType<typeof setInterval> | null = null
 
 // silent=true 用于定时刷新：避免每次自动刷新都整页 loading 抖动
 async function fetchData(silent = false) {
@@ -329,14 +328,8 @@ const readyColor = computed(() =>
   health.value?.router_ready && health.value?.manager_ready ? token.value.colorSuccess : token.value.colorError,
 )
 
-onMounted(() => {
-  fetchData()
-  timer = setInterval(() => fetchData(true), 10000)
-})
-
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
+fetchData()
+useVisiblePolling(() => fetchData(true), 10000)
 </script>
 
 <template>

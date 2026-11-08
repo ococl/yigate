@@ -27,6 +27,18 @@ export default defineConfig(({ mode }) => {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // 仅拆分框架内核，组件库继续按路由/组件自然分块，避免首屏加载整包
+          manualChunks(id) {
+            if (/[\\/]node_modules[\\/](@vue|vue|vue-router|pinia)[\\/]/.test(id)) {
+              return 'vendor-vue'
+            }
+          },
+        },
+      },
+    },
     server: {
       port: 5173,
       proxy: {

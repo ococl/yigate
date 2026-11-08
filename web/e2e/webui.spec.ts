@@ -63,3 +63,46 @@ test('unknown route renders a 404 page instead of blank layout', async ({ page }
   await expect(page.getByText('页面不存在或已被移除')).toBeVisible()
   await expect(page.getByRole('button', { name: '返回仪表盘' })).toBeVisible()
 })
+
+test('traffic search is persisted in the URL', async ({ page }) => {
+  await page.goto('/dashboard')
+  await login(page)
+
+  await page.goto('/traffic')
+  await page.getByPlaceholder('搜索用户、上游或目标').fill('127.0.0.1')
+  await expect(page).toHaveURL(/[?&]q=127\.0\.0\.1/)
+
+  await page.reload()
+  await expect(page.getByPlaceholder('搜索用户、上游或目标')).toHaveValue('127.0.0.1')
+})
+
+test('settings warns before leaving with unsaved changes', async ({ page }) => {
+  await page.goto('/dashboard')
+  await login(page)
+
+  await page.goto('/settings')
+  const save = page.getByRole('button', { name: '保存设置' })
+  await expect(save).toBeDisabled()
+
+  await page.locator('.settings-aside').getByText('流量审计与配额').click()
+  const auditSwitch = page.locator('.settings-detail').getByRole('switch').first()
+  const initial = await auditSwitch.getAttribute('aria-checked')
+  await auditSwitch.click()
+  await expect(save).toBeEnabled()
+
+  // 离开时出现确认框，取消后停留在设置页
+  await page.locator('.app-sider').getByText('仪表盘').click()
+  const confirm = page.getByRole('dialog')
+  await expect(confirm).toBeVisible()
+  await expect(confirm.locator('.ant-modal-title')).toHaveText('有未保存的设置')
+  await confirm.getByRole('button', { name: '继续编辑' }).click()
+  await expect(page).toHaveURL(/\/settings/)
+
+  // 还原开关后回到无修改状态，此时应可直接离开且保存按钮再次禁用
+  if ((await auditSwitch.getAttribute('aria-checked')) !== initial) {
+    await auditSwitch.click()
+  }
+  await expect(save).toBeDisabled()
+  await page.locator('.app-sider').getByText('仪表盘').click()
+  await expect(page).toHaveURL(/\/dashboard$/)
+})

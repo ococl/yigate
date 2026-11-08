@@ -92,6 +92,20 @@ const router = createRouter({
   routes,
 })
 
+// 发布新版本后旧页面可能引用已删除的 chunk；自动刷新一次获取最新入口，
+// 并用时间戳避免服务异常时陷入刷新循环。
+router.onError((error, to) => {
+  const text = String((error as Error)?.message || error)
+  if (!/Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk/i.test(text)) {
+    return
+  }
+  const key = 'yigate_chunk_reload_at'
+  const last = Number(sessionStorage.getItem(key) || 0)
+  if (Date.now() - last < 10000) return
+  sessionStorage.setItem(key, String(Date.now()))
+  window.location.assign(to?.fullPath || window.location.href)
+})
+
 // 路由守卫
 router.beforeEach((to) => {
   const token = getToken()
