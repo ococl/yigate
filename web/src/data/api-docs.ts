@@ -463,7 +463,9 @@ yigate_connections_total 12345
         },
         statusCodes: [
           { code: 200, description: '检查完成（无论 alive 与否）' },
-          { code: 400, description: '上游不存在或检查失败' },
+          { code: 400, description: '检查请求无法执行（如目标地址非法）' },
+          { code: 404, description: '上游不存在，错误码 upstream_not_found' },
+          { code: 409, description: '上游已禁用，不会参与检查，错误码 upstream_disabled' },
           { code: 503, description: '上游管理器未就绪' },
           { code: 401, description: '未认证' },
         ],

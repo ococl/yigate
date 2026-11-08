@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -285,6 +286,46 @@ func TestConfigAPIAddUpstream(t *testing.T) {
 	}
 	if editor.upstreams[2].Name != "up3" {
 		t.Fatalf("expected name up3, got %s", editor.upstreams[2].Name)
+	}
+}
+
+func TestConfigAPICheckUpstreamNotFound(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+	m.checkUpstream = func(name string) (UpstreamCheckResult, error) {
+		return UpstreamCheckResult{}, fmt.Errorf("%w: %q", ErrUpstreamNotFound, name)
+	}
+
+	resp := doRequest(t, "POST", addr, "/api/v1/config/upstreams/missing/check", nil, "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	if body["code"] != "upstream_not_found" {
+		t.Fatalf("code = %v, want upstream_not_found", body["code"])
+	}
+}
+
+func TestConfigAPICheckUpstreamDisabled(t *testing.T) {
+	editor := newMockConfigEditor()
+	disabled := false
+	editor.upstreams = append(editor.upstreams, UpstreamConfig{
+		Name: "off", URL: "http://host3:8080", Enabled: &disabled,
+	})
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+	m.checkUpstream = func(name string) (UpstreamCheckResult, error) {
+		return UpstreamCheckResult{}, fmt.Errorf("%w: %q", ErrUpstreamNotFound, name)
+	}
+
+	resp := doRequest(t, "POST", addr, "/api/v1/config/upstreams/off/check", nil, "")
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	body := decodeBody(t, resp)
+	if body["code"] != "upstream_disabled" {
+		t.Fatalf("code = %v, want upstream_disabled", body["code"])
 	}
 }
 

@@ -302,7 +302,15 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			}
 			res, err := m.checkUpstream(rest[0])
 			if err != nil {
-				writeJSONError(w, http.StatusBadRequest, err.Error())
+				switch {
+				case errors.Is(err, ErrUpstreamNotFound) && m.isUpstreamDisabled(rest[0]):
+					writeJSONErrorCode(w, http.StatusConflict, "upstream_disabled",
+						fmt.Sprintf("upstream %q is disabled", rest[0]))
+				case errors.Is(err, ErrUpstreamNotFound):
+					writeJSONErrorCode(w, http.StatusNotFound, "upstream_not_found", err.Error())
+				default:
+					writeJSONError(w, http.StatusBadRequest, err.Error())
+				}
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]any{"result": res})
@@ -633,17 +641,43 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 // writeJSONError 写入 JSON 错误响应。
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
+	writeJSONErrorCode(w, code, "", msg)
+}
+
+// writeJSONErrorCode 写入带机器可读错误码的 JSON 错误响应。
+// 错误码用于前端区分同状态码下的不同语义（例如 404 与 409）。
+func writeJSONErrorCode(w http.ResponseWriter, status int, code string, msg string) {
 	// MaxBytesReader 超限使用标准库固定文案，统一映射为 413 并对调用方隐藏内部路径。
 	if strings.Contains(msg, "http: request body too large") {
-		code = http.StatusRequestEntityTooLarge
+		status = http.StatusRequestEntityTooLarge
 		msg = "request body too large"
+		code = "request_too_large"
 	}
-	if code >= http.StatusInternalServerError {
+	if status >= http.StatusInternalServerError {
 		// 5xx 详情只写日志，避免把临时文件/配置绝对路径回显给调用者。
-		Logger().Errorw("management request failed", "status", code, "error", msg)
+		Logger().Errorw("management request failed", "status", status, "error", msg)
 		msg = "internal server error"
+		code = "internal_error"
 	}
-	writeJSON(w, code, map[string]string{"status": "error", "error": msg})
+	body := map[string]string{"status": "error", "error": msg}
+	if code != "" {
+		body["code"] = code
+	}
+	writeJSON(w, status, body)
+}
+
+// isUpstreamDisabled 判断指定名称的上游是否存在于配置中但已被禁用。
+// 已禁用的上游不会进入运行时调度池，因此 CheckUpstream 会返回 not found。
+func (m *ManagementServer) isUpstreamDisabled(name string) bool {
+	if m.configEditor == nil {
+		return false
+	}
+	for _, up := range m.configEditor.ListUpstreams() {
+		if strings.TrimSpace(up.Name) == name {
+			return !up.IsEnabled()
+		}
+	}
+	return false
 }
 
 // maxManagementBodySize 限制管理 API 请求体大小（1 MiB）。

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,9 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrUpstreamNotFound 表示指定名称的上游不在运行时调度池中（不存在或已禁用）。
+var ErrUpstreamNotFound = errors.New("upstream not found")
 
 // StartHealthCheck 启动定时健康检查。
 // alive 上游按 interval 检查；dead 上游由独立的恢复探测器以更短间隔（2s）
@@ -164,7 +168,7 @@ func (m *UpstreamManager) CheckUpstream(name string) (UpstreamCheckResult, error
 	u := m.byName[name]
 	m.mu.Unlock()
 	if u == nil {
-		return UpstreamCheckResult{}, fmt.Errorf("upstream %q not found", name)
+		return UpstreamCheckResult{}, fmt.Errorf("%w: %q", ErrUpstreamNotFound, name)
 	}
 
 	alive := m.check(u)
