@@ -1,4 +1,4 @@
-.PHONY: all build test cross clean release lint web web-build web-embed web-dev web-install web-test web-e2e web-e2e-install
+.PHONY: all build test cross clean release lint web web-build web-embed web-dev web-install web-test web-e2e web-e2e-install api-e2e
 
 GO ?= go
 GOPROXY ?= https://goproxy.cn,direct
@@ -76,5 +76,11 @@ web-e2e: web-embed
 	@mkdir -p $(BUILD_DIR)
 	cd $(SRC_DIR) && CGO_ENABLED=$(CGO_ENABLED) GOPROXY=$(GOPROXY) go build $(GO_BUILD_FLAGS) -o ../$(BUILD_DIR)/yigate-e2e .
 	cd $(WEB_DIR) && npm run test:e2e
+
+# 管理 API 回归：在临时目录启动隔离实例后逐端点验证状态码与鉴权。
+api-e2e: web-embed
+	@mkdir -p $(BUILD_DIR)
+	cd $(SRC_DIR) && CGO_ENABLED=$(CGO_ENABLED) GOPROXY=$(GOPROXY) go build $(GO_BUILD_FLAGS) -o ../$(BUILD_DIR)/yigate-e2e .
+	@bash $(SCRIPTS_DIR)/run-management-api-e2e.sh
 
 web: web-build
