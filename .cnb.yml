@@ -4,7 +4,7 @@
 # 流水线概览:
 #   main 分支 push   → 完整 CI → Beta 构件 + Docker 镜像 :main（覆盖式）
 #   v* tag push      → 完整 CI → 正式版（release, latest）+ Docker 镜像
-#   PR to main|dev   → lint + test + 前端校验（不发布）
+#   PR to main|dev   → lint / test / race / 前端校验 / 静态检查 / 配置与平台清单校验（不发布）
 #
 # 二进制产物（跨平台归档）与 Docker 镜像同时发布，互为补充。
 # 版本方案详见 VERSIONING.md
@@ -30,14 +30,16 @@ main:
         - name: lint
           script: cd src && go vet ./...
         - name: test
-          script: cd src && go test -timeout 120s ./...
+          script: cd src && go test -timeout 120s -coverprofile=coverage.out ./...
+        - name: coverage-gate
+          script: bash scripts/check-coverage.sh 70 src/coverage.out
         - name: race
           # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
           script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
         - name: webui-test
           image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm test
+            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
         - name: check-release-configs
           script: bash scripts/check-release-configs.sh
         - name: determine-version
@@ -47,6 +49,11 @@ main:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
+        # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
+        - name: release-gates
+          script: bash scripts/check-release-gates.sh "$BUILD_VERSION"
+        - name: check-platforms-sync
+          script: bash scripts/check-platforms-sync.sh
         - name: webui-build
           image: node:26.13.0-alpine
           script: |
@@ -93,16 +100,23 @@ main:
         - name: lint
           script: cd src && go vet ./...
         - name: test
-          script: cd src && go test -timeout 120s ./...
+          script: cd src && go test -timeout 120s -coverprofile=coverage.out ./...
+        - name: coverage-gate
+          script: bash scripts/check-coverage.sh 70 src/coverage.out
         - name: race
           # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
           script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
         - name: webui-test
           image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm test
+            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
         - name: check-release-configs
           script: bash scripts/check-release-configs.sh
+        - name: check-platforms-sync
+          script: bash scripts/check-platforms-sync.sh
+        - name: golangci-lint
+          image: golangci/golangci-lint:v2.15.0
+          script: cd src && golangci-lint run
       failStages:
         - name: pr-check-failed
           script: echo "PR 检查未通过，请修复后重新提交"
@@ -130,7 +144,9 @@ main:
           image: golangci/golangci-lint:v2.15.0
           script: cd src && golangci-lint config verify && golangci-lint run
         - name: test
-          script: cd src && go test -timeout 120s ./...
+          script: cd src && go test -timeout 120s -coverprofile=coverage.out ./...
+        - name: coverage-gate
+          script: bash scripts/check-coverage.sh 70 src/coverage.out
         - name: race
           # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
           script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
@@ -143,7 +159,7 @@ main:
         - name: webui-test
           image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm test
+            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
         - name: check-release-configs
           script: bash scripts/check-release-configs.sh
         - name: determine-version
@@ -153,6 +169,11 @@ main:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
+        # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
+        - name: release-gates
+          script: bash scripts/check-release-gates.sh "$BUILD_VERSION"
+        - name: check-platforms-sync
+          script: bash scripts/check-platforms-sync.sh
         - name: webui-build
           image: node:26.13.0-alpine
           script: |

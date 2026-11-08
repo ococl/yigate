@@ -81,9 +81,10 @@ foreach ($Platform in $Platforms) {
     $Env:GOARCH = $Parts[1]
     $Env:GOARM = if ($Parts[2]) { $Parts[2].Substring(1) } else { "" }
 
+    # 与 scripts/platforms.sh 的 normalize_platform 保持一致（含 arm/v6）。
     $OutputName = "yigate-$Env:GOOS-$Env:GOARCH"
-    if ($Env:GOARCH -eq "arm" -and $Env:GOARM -eq "7") {
-        $OutputName = "yigate-$Env:GOOS-armv7"
+    if ($Env:GOARCH -eq "arm" -and $Env:GOARM) {
+        $OutputName = "yigate-$Env:GOOS-arm$Env:GOARM"
     }
     if ($Env:GOOS -eq "windows") {
         $OutputName += ".exe"

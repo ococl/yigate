@@ -18,32 +18,11 @@ if [[ -z "${VERSION}" ]]; then
   exit 1
 fi
 
-# 校验版本格式
-if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: 版本号必须为 x.y.z 格式" >&2
-  exit 1
-fi
+# 版本格式、工作区干净、tag 指向 HEAD 的门禁统一由共享脚本执行，
+# 与 CNB / GitHub Actions 发布通道复用同一份检查。
+bash "${SCRIPTS_DIR}/check-release-gates.sh" "${VERSION}" --tag
 
 TAG="v${VERSION}"
-
-# 前置校验：工作区干净
-if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
-  echo "error: Git 工作区不干净，拒绝发布" >&2
-  exit 1
-fi
-
-# 前置校验：tag 存在且指向当前 commit
-if ! git -C "${REPO_ROOT}" rev-parse "${TAG}" >/dev/null 2>&1; then
-  echo "error: tag ${TAG} 不存在" >&2
-  exit 1
-fi
-
-TAG_COMMIT="$(git -C "${REPO_ROOT}" rev-list -n1 "${TAG}")"
-HEAD_COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"
-if [[ "${TAG_COMMIT}" != "${HEAD_COMMIT}" ]]; then
-  echo "error: tag ${TAG} 指向 ${TAG_COMMIT:0:8}，但 HEAD 为 ${HEAD_COMMIT:0:8}" >&2
-  exit 1
-fi
 
 # 版本元数据
 COMMIT="$(git -C "${REPO_ROOT}" rev-parse HEAD)"

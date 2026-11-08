@@ -29,6 +29,7 @@ test:
 cross: web-embed
 	@mkdir -p $(BUILD_DIR)
 	@bash -c '\
+		set -e; \
 		source $(SCRIPTS_DIR)/platforms.sh; \
 		for platform in $$(all_platforms); do \
 			name="$$(output_name "$(VERSION)" "$$platform")"; \

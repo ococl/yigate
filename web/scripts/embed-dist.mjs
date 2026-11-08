@@ -24,7 +24,14 @@ async function walk(dir) {
 }
 
 await readFile(join(source, 'index.html'))
-await rm(target, { recursive: true, force: true })
+// 清理上一次的构建产物，但保留被跟踪的 PLACEHOLDER.md，
+// 避免 `make build` / CI 构建后工作区出现被跟踪文件的改动。
+const placeholderName = 'PLACEHOLDER.md'
+const existing = await readdir(target, { withFileTypes: true }).catch(() => [])
+for (const entry of existing) {
+  if (entry.name === placeholderName) continue
+  await rm(join(target, entry.name), { recursive: true, force: true })
+}
 await mkdir(target, { recursive: true })
 
 const files = await walk(source)
