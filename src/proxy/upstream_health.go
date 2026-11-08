@@ -164,6 +164,17 @@ type UpstreamCheckResult struct {
 // CheckUpstream 立即对指定名称的上游执行一次健康检查，并同步更新其 alive/dead 状态。
 // 该检查不影响定时健康检查调度，适合 WebUI 手动触发或单点巡检。
 func (m *UpstreamManager) CheckUpstream(name string) (UpstreamCheckResult, error) {
+	// 合并同一上游的并发检查：定时任务、一键巡检与手动点击可能同时触发。
+	value, err, _ := m.checkSF.Do(name, func() (any, error) {
+		return m.checkUpstreamOnce(name)
+	})
+	if err != nil {
+		return UpstreamCheckResult{}, err
+	}
+	return value.(UpstreamCheckResult), nil
+}
+
+func (m *UpstreamManager) checkUpstreamOnce(name string) (UpstreamCheckResult, error) {
 	m.mu.Lock()
 	u := m.byName[name]
 	m.mu.Unlock()
@@ -211,10 +222,14 @@ func (m *UpstreamManager) CheckAllUpstreams() []UpstreamCheckResult {
 
 	results := make([]UpstreamCheckResult, len(ups))
 	var wg sync.WaitGroup
+	// 限制并发探测数量，避免上游很多时瞬间耗尽文件描述符。
+	limit := make(chan struct{}, 8)
 	for i, u := range ups {
 		wg.Add(1)
 		go func(idx int, up *Upstream) {
 			defer wg.Done()
+			limit <- struct{}{}
+			defer func() { <-limit }()
 			res, _ := m.CheckUpstream(up.Name)
 			results[idx] = res
 		}(i, u)

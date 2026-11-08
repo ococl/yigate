@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -326,6 +328,7 @@ func (u *Upstream) ActiveConns() int64 {
 type UpstreamManager struct {
 	upstreams     []*Upstream
 	byName        map[string]*Upstream
+	checkSF       singleflight.Group
 	groups        map[int][]*Upstream
 	order         []int
 	mu            sync.Mutex

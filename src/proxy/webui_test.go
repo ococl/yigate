@@ -112,6 +112,29 @@ func TestServeWebUIFileCachesHashedAssetImmutably(t *testing.T) {
 	}
 }
 
+func TestServeWebUIFileCachesDecompressedHashedAsset(t *testing.T) {
+	const content = "console.log('cached')"
+	name := "/assets/cache-" + t.Name() + "-AbCdEf12.js"
+	fsys := fstest.MapFS{name[1:] + ".gz": {Data: gzipAsset(t, content)}}
+	req := httptest.NewRequest(http.MethodGet, name, nil)
+	rec := httptest.NewRecorder()
+
+	serveWebUIFile(fsys, name, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if _, ok := webUIDecompressCache.Load(name[1:]); !ok {
+		t.Fatalf("expected decompressed asset to be cached")
+	}
+
+	// 第二次请求命中缓存，内容保持一致
+	rec2 := httptest.NewRecorder()
+	serveWebUIFile(fsys, name, rec2, httptest.NewRequest(http.MethodGet, name, nil))
+	if rec2.Body.String() != content {
+		t.Fatalf("body = %q, want %q", rec2.Body.String(), content)
+	}
+}
+
 func TestServeWebUIFileRevalidatesUnhashedAsset(t *testing.T) {
 	fsys := fstest.MapFS{
 		"favicon.svg": {Data: []byte("<svg/>")},

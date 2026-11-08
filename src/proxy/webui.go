@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -137,14 +138,8 @@ func serveWebUIFile(sub fs.FS, name string, w http.ResponseWriter, r *http.Reque
 			http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(compressed))
 			return
 		}
-		zr, err := gzip.NewReader(bytes.NewReader(compressed))
+		raw, err := decompressWebUIAsset(name, compressed)
 		if err != nil {
-			http.Error(w, "webui asset unavailable", http.StatusInternalServerError)
-			return
-		}
-		raw, readErr := io.ReadAll(zr)
-		closeErr := zr.Close()
-		if readErr != nil || closeErr != nil {
 			http.Error(w, "webui asset unavailable", http.StatusInternalServerError)
 			return
 		}
@@ -165,6 +160,42 @@ func serveWebUIFile(sub fs.FS, name string, w http.ResponseWriter, r *http.Reque
 // immutableAssetPattern 匹配 Vite 构建产物中带内容哈希的文件名，
 // 例如 assets/index-IQLevEbW.js。这类资源内容随哈希变化，可安全长期缓存。
 var immutableAssetPattern = regexp.MustCompile(`^assets/.+-[A-Za-z0-9_-]{8,}\.(js|css|woff2?|ttf|otf|svg|png|jpe?g|gif|webp|avif|ico|map)$`)
+
+// 非 gzip 客户端需要服务端解压；缓存少量哈希资源，避免每次请求重复解压。
+const maxDecompressCacheEntries = 64
+
+var (
+	webUIDecompressCache sync.Map // name -> []byte
+	webUIDecompressCount atomic.Int64
+)
+
+// decompressWebUIAsset 解压构建期 gzip 资源，并缓存带哈希的产物。
+func decompressWebUIAsset(name string, compressed []byte) ([]byte, error) {
+	cacheable := immutableAssetPattern.MatchString(name)
+	if cacheable {
+		if cached, ok := webUIDecompressCache.Load(name); ok {
+			return cached.([]byte), nil
+		}
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		return nil, err
+	}
+	raw, readErr := io.ReadAll(zr)
+	closeErr := zr.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if cacheable && webUIDecompressCount.Load() < maxDecompressCacheEntries {
+		if _, loaded := webUIDecompressCache.LoadOrStore(name, raw); !loaded {
+			webUIDecompressCount.Add(1)
+		}
+	}
+	return raw, nil
+}
 
 // setWebUICacheControl 为静态资源设置缓存策略：
 // 带哈希的产物长期 immutable，其余文件（favicon 等）使用 no-cache 以便升级后及时更新。

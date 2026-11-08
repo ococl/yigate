@@ -319,6 +319,7 @@ func (a *TrafficAccounter) recordHistory(k TrafficKey, bytesIn, bytesOut int64) 
 			}
 			if len(a.history) >= maxTrafficHistoryEntries {
 				a.mu.Unlock()
+				MetricInc("yigate_traffic_history_dropped_total")
 				return
 			}
 			entry = &trafficHistoryEntry{day: day, key: k}
