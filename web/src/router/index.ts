@@ -77,6 +77,12 @@ const routes: RouteRecordRaw[] = [
         name: 'about',
         component: () => import('@/views/about/AboutView.vue'),
       },
+      {
+        // 未匹配的前端路由落到 404 页面，避免空白工作区。
+        path: ':pathMatch(.*)*',
+        name: 'not-found',
+        component: () => import('@/views/not-found/NotFoundView.vue'),
+      },
     ],
   },
 ]

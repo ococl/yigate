@@ -52,3 +52,14 @@ test('logs in and renders every management page', async ({ page }) => {
 
   expect(pageErrors).toEqual([])
 })
+
+test('unknown route renders a 404 page instead of blank layout', async ({ page }) => {
+  await page.goto('/dashboard')
+  await login(page)
+
+  await page.goto('/definitely-not-exist')
+
+  await expect(page.getByText('404', { exact: true })).toBeVisible()
+  await expect(page.getByText('页面不存在或已被移除')).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回仪表盘' })).toBeVisible()
+})
