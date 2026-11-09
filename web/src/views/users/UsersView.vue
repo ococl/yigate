@@ -15,6 +15,9 @@ const loadError = ref(false)
 const submitting = ref(false)
 // 正在删除的用户名，避免重复点击触发多次 DELETE
 const deleting = ref<string | null>(null)
+// 多选批量删除只作用于桌面表格，移动端仍是单卡操作
+const selectedRowKeys = ref<string[]>([])
+const bulkDeleting = ref(false)
 const modalVisible = ref(false)
 const passwordModalVisible = ref(false)
 const resetTarget = ref('')
@@ -140,6 +143,33 @@ async function handleDelete(username: string) {
   }
 }
 
+function onSelectionChange(keys: (string | number)[]) {
+  selectedRowKeys.value = keys.map(String)
+}
+
+// 不弹二次确认框逐个删，用户可以一次清掉一批建错的账号
+async function handleBulkDelete() {
+  if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
+  bulkDeleting.value = true
+  const targets = [...selectedRowKeys.value]
+  const failed: string[] = []
+  for (const username of targets) {
+    try {
+      await deleteUser(username)
+    } catch {
+      failed.push(username)
+    }
+  }
+  bulkDeleting.value = false
+  selectedRowKeys.value = []
+  await fetchData()
+  if (failed.length === 0) {
+    message.success(`已删除 ${targets.length} 个用户`)
+    return
+  }
+  message.warning(`已删除 ${targets.length - failed.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
+}
+
 onMounted(fetchData)
 </script>
 
@@ -202,11 +232,24 @@ onMounted(fetchData)
       </div>
 
       <div v-else class="fill-table">
+        <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
+          <span>已选 {{ selectedRowKeys.length }} 项</span>
+          <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
+          <a-popconfirm
+            :title="`确定删除选中的 ${selectedRowKeys.length} 个用户？此操作不可撤销。`"
+            ok-text="删除"
+            cancel-text="取消"
+            @confirm="handleBulkDelete"
+          >
+            <a-button size="small" danger :loading="bulkDeleting">批量删除</a-button>
+          </a-popconfirm>
+        </div>
         <a-table
           :data-source="dataSource"
           :columns="columns"
           :loading="loading"
           row-key="username"
+          :row-selection="{ selectedRowKeys, onChange: onSelectionChange }"
           :pagination="tablePagination"
           :scroll="{ x: 480, y: 1 }"
         >

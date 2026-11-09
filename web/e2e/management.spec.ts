@@ -560,3 +560,69 @@ test('api docs highlight the searched keyword', async ({ page }) => {
   await expect(mark).toBeVisible()
   await expect(mark).toHaveText('健康检查')
 })
+
+test('bulk delete removes the selected users and clears the selection', async ({ page }) => {
+  await login(page)
+
+  const deleted: string[] = []
+  await page.route('**/api/v1/config/users/*', (route) => {
+    if (route.request().method() === 'DELETE') {
+      deleted.push(decodeURIComponent(route.request().url().split('/').pop() ?? ''))
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    })
+  })
+  await page.route('**/api/v1/config/users', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ users: [{ username: 'zh-bulk-1' }, { username: 'zh-bulk-2' }, { username: 'zh-bulk-3' }] }),
+    }),
+  )
+  await page.goto('/users')
+
+  const rows = page.locator('.ant-table-tbody tr.ant-table-row')
+  await rows.filter({ hasText: 'zh-bulk-1' }).locator('.ant-checkbox').click()
+  await rows.filter({ hasText: 'zh-bulk-2' }).locator('.ant-checkbox').click()
+
+  await expect(page.locator('.bulk-bar')).toContainText('已选 2 项')
+  await page.getByRole('button', { name: '批量删除' }).click()
+  await page.locator('.ant-popconfirm-buttons .ant-btn-primary').click()
+
+  await expect(page.locator('.ant-message')).toContainText('已删除 2 个用户')
+  // 删完选择栏要收起，否则会让人以为选中项还在
+  await expect(page.locator('.bulk-bar')).toHaveCount(0)
+  expect(deleted.sort()).toEqual(['zh-bulk-1', 'zh-bulk-2'])
+})
+
+test('keyboard shortcuts focus search and save settings', async ({ page }) => {
+  await login(page)
+
+  await page.goto('/traffic')
+  // 快捷键在 onMounted 里注册，等搜索框渲染出来再按，否则按键会落在挂载前
+  const search = page.getByRole('textbox', { name: '搜索用户、上游或目标' })
+  await expect(search).toBeVisible()
+  await page.keyboard.press('/')
+  await expect(search).toBeFocused()
+
+  let saves = 0
+  await page.route('**/api/v1/config/settings', async (route) => {
+    if (route.request().method() !== 'PUT') return route.continue()
+    saves += 1
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true }),
+    })
+  })
+  await page.goto('/settings')
+  const interval = page.locator('#stg-check-interval-seconds')
+  await interval.fill('77')
+  await interval.press('Control+s')
+
+  // 光标停在字段里也要能保存，这是 Ctrl+S 和按钮的主要差别
+  await expect.poll(() => saves).toBe(1)
+})

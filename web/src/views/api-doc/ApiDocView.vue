@@ -2,6 +2,8 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiGroups } from '@/data/api-docs'
+import type { InputRef } from 'antdv-next'
+import { useHotkeys } from '@/composables/useHotkeys'
 import { highlightText } from '@/utils/highlight'
 
 const route = useRoute()
@@ -10,6 +12,10 @@ const router = useRouter()
 const fallbackGroup = apiGroups[0]?.key ?? 'system'
 const detailRef = ref<HTMLElement | null>(null)
 const searchKeyword = ref('')
+const searchInputRef = ref<InputRef | null>(null)
+
+// 按 `/` 直接跳到搜索框
+useHotkeys([{ key: '/', handler: () => searchInputRef.value?.focus() }])
 
 function isGroupKey(value: unknown): value is string {
   return typeof value === 'string' && apiGroups.some((group) => group.key === value)
@@ -117,6 +123,7 @@ const totalEndpoints = computed(() =>
 
     <!-- 搜索框 -->
     <a-input
+      ref="searchInputRef"
       v-model:value="searchKeyword"
       class="api-docs-search"
       placeholder="搜索端点路径、名称或描述..."

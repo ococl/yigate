@@ -20,6 +20,9 @@ const highlightIndex = ref<number | null>(null)
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 // 正在删除的规则序号，避免重复点击触发多次 DELETE
 const deleting = ref<number | null>(null)
+// 多选批量删除只作用于桌面表格；键是规则当前序号
+const selectedRowKeys = ref<number[]>([])
+const bulkDeleting = ref(false)
 const modalVisible = ref(false)
 const submitting = ref(false)
 const isEdit = ref(false)
@@ -247,6 +250,34 @@ function actionColor(action: string) {
   }
 }
 
+function onSelectionChange(keys: (string | number)[]) {
+  selectedRowKeys.value = keys.map(Number)
+}
+
+async function handleBulkDelete() {
+  if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
+  bulkDeleting.value = true
+  // 删除会让后面的序号前移，必须从大到小删，否则会删错行
+  const targets = [...selectedRowKeys.value].sort((a, b) => b - a)
+  const failed: number[] = []
+  for (const index of targets) {
+    try {
+      await deleteRule(index)
+    } catch {
+      failed.push(index)
+    }
+  }
+  bulkDeleting.value = false
+  selectedRowKeys.value = []
+  await fetchData()
+  if (failed.length === 0) {
+    message.success(`已删除 ${targets.length} 条规则`)
+    return
+  }
+  const names = failed.map((index) => `第 ${index + 1} 条`).join('、')
+  message.warning(`已删除 ${targets.length - failed.length} 条，失败 ${failed.length} 条：${names}`)
+}
+
 onMounted(fetchData)
 </script>
 
@@ -340,11 +371,24 @@ onMounted(fetchData)
       </div>
 
       <div v-else class="fill-table">
+        <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
+          <span>已选 {{ selectedRowKeys.length }} 项</span>
+          <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
+          <a-popconfirm
+            :title="`确定删除选中的 ${selectedRowKeys.length} 条规则？此操作不可撤销。`"
+            ok-text="删除"
+            cancel-text="取消"
+            @confirm="handleBulkDelete"
+          >
+            <a-button size="small" danger :loading="bulkDeleting">批量删除</a-button>
+          </a-popconfirm>
+        </div>
         <a-table
           :data-source="dataSource"
           :columns="columns"
           :loading="loading"
           row-key="index"
+          :row-selection="{ selectedRowKeys, onChange: onSelectionChange }"
           :row-class-name="rowClassName"
           :pagination="desktopPagination"
           :scroll="{ x: 900, y: 1 }"

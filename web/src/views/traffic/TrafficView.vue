@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getTraffic } from '@/api/system'
+import type { InputRef } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
+import { useHotkeys } from '@/composables/useHotkeys'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import type { TrafficEntrySnapshot } from '@/types/api'
@@ -20,6 +22,10 @@ const loading = ref(false)
 const route = useRoute()
 const router = useRouter()
 const keyword = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const searchInputRef = ref<InputRef | null>(null)
+
+// 按 `/` 直接跳到搜索框，不用先拿鼠标点一下
+useHotkeys([{ key: '/', handler: () => searchInputRef.value?.focus() }])
 
 const columns = [
   { title: '用户', dataIndex: 'user', key: 'user', width: 140 },
@@ -127,6 +133,7 @@ useVisiblePolling(() => fetchData(false), 15000)
       </div>
       <a-space wrap class="traffic-actions">
         <a-input
+          ref="searchInputRef"
           v-model:value="keyword"
           class="traffic-search"
           placeholder="搜索用户、上游或目标"

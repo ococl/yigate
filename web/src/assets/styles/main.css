@@ -198,6 +198,21 @@ html:has(body.app-dark) {
   margin: 12px 0 0;
 }
 
+/* 批量操作条：选中行后出现在表格上方 */
+.bulk-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ant-color-primary-border, #91caff);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  font-size: 13px;
+}
+
 .muted {
   color: rgba(128, 128, 128, 0.85);
 }
@@ -336,4 +351,21 @@ body.app-dark .ant-table-tbody > tr.row-highlight > td {
 
 .mobile-card.row-highlight {
   box-shadow: inset 0 0 0 2px #1677ff;
+}
+
+/* 选中行自带浅/深蓝底，行内 link 按钮用默认蓝会掉到 3:1 以下，跟着加深/提亮一档 */
+.ant-table-tbody > tr.ant-table-row-selected .ant-btn-link {
+  color: #0958d9;
+}
+
+.ant-table-tbody > tr.ant-table-row-selected .ant-btn-link.ant-btn-dangerous {
+  color: #cf1322;
+}
+
+body.app-dark .ant-table-tbody > tr.ant-table-row-selected .ant-btn-link {
+  color: #69b1ff;
+}
+
+body.app-dark .ant-table-tbody > tr.ant-table-row-selected .ant-btn-link.ant-btn-dangerous {
+  color: #ff7875;
 }

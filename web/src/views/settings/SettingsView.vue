@@ -6,6 +6,7 @@ import { reloadConfig } from '@/api/system'
 import { getSettings, updateSettings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import { copyText } from '@/utils/clipboard'
+import { useHotkeys } from '@/composables/useHotkeys'
 import type { SettingsView, SettingsPatch } from '@/types/api'
 
 interface SettingsSection {
@@ -419,6 +420,19 @@ async function handleReload() {
   }
 }
 
+// Ctrl/Cmd+S 直接保存：光标停在输入框里时也要生效，否则改完按保存会没反应
+useHotkeys([
+  {
+    key: 's',
+    ctrlOrCmd: true,
+    allowInInput: true,
+    handler: () => {
+      if (saving.value) return
+      void handleSave()
+    },
+  },
+])
+
 function resetForm() {
   if (settings.value) applySettingsToForm(settings.value)
   message.info('已还原为上次加载的设置')
@@ -575,6 +589,7 @@ onMounted(fetchAll)
           type="primary"
           :loading="saving"
           :disabled="!isDirty || loadError || !settings"
+          title="保存设置（Ctrl+S）"
           @click="handleSave"
         >
           保存设置

@@ -38,6 +38,9 @@ const checking = ref<string[]>([])
 const toggling = ref<string[]>([])
 // 正在删除的上游名，避免重复点击触发多次 DELETE
 const deleting = ref<string | null>(null)
+// 多选批量删除只作用于桌面表格
+const selectedRowKeys = ref<string[]>([])
+const bulkDeleting = ref(false)
 const checkingAll = ref(false)
 // 本次会话内手动检查的结果，仅用于补充失败原因文案
 const lastChecks = ref<Map<string, UpstreamCheckResult>>(new Map())
@@ -316,6 +319,33 @@ async function handleDelete(name: string) {
   }
 }
 
+function onSelectionChange(keys: (string | number)[]) {
+  selectedRowKeys.value = keys.map(String)
+}
+
+async function handleBulkDelete() {
+  if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
+  bulkDeleting.value = true
+  const targets = [...selectedRowKeys.value]
+  const failed: string[] = []
+  for (const name of targets) {
+    try {
+      await deleteUpstream(name)
+      lastChecks.value.delete(name)
+    } catch {
+      failed.push(name)
+    }
+  }
+  bulkDeleting.value = false
+  selectedRowKeys.value = []
+  await fetchData()
+  if (failed.length === 0) {
+    message.success(`已删除 ${targets.length} 个上游`)
+    return
+  }
+  message.warning(`已删除 ${targets.length - failed.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
+}
+
 async function handleCheck(name: string) {
   if (checking.value.includes(name)) return
   checking.value = [...checking.value, name]
@@ -545,11 +575,24 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
       </div>
 
       <div v-else class="fill-table">
+        <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
+          <span>已选 {{ selectedRowKeys.length }} 项</span>
+          <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
+          <a-popconfirm
+            :title="`确定删除选中的 ${selectedRowKeys.length} 个上游？此操作不可撤销。`"
+            ok-text="删除"
+            cancel-text="取消"
+            @confirm="handleBulkDelete"
+          >
+            <a-button size="small" danger :loading="bulkDeleting">批量删除</a-button>
+          </a-popconfirm>
+        </div>
         <a-table
           :data-source="dataSource"
           :columns="columns"
           :loading="loading"
           row-key="name"
+          :row-selection="{ selectedRowKeys, onChange: onSelectionChange }"
           :pagination="pagination"
           :scroll="{ x: 1280, y: 1 }"
         >
