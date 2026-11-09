@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import { listUsers, addUser, updateUserPassword, deleteUser } from '@/api/users'
 import type { UserInfo } from '@/types/api'
@@ -12,10 +12,19 @@ const passwordModalVisible = ref(false)
 const resetTarget = ref('')
 const resetPassword = ref('')
 
+// 表单内联校验：字段名 -> 错误文案，输入变化后自动清除
+const fieldErrors = reactive<Record<string, string>>({})
+
+function resetFieldErrors() {
+  for (const key of Object.keys(fieldErrors)) delete fieldErrors[key]
+}
+
 const form = ref({
   username: '',
   password: '',
 })
+
+watch([() => form.value.username, () => form.value.password, resetPassword], () => resetFieldErrors())
 
 const columns = [
   { title: '用户名', dataIndex: 'username', key: 'username' },
@@ -38,18 +47,11 @@ function showAddModal() {
 }
 
 async function handleSubmit() {
-  if (!form.value.username.trim()) {
-    message.warning('请输入用户名')
-    return
-  }
-  if (!form.value.password.trim()) {
-    message.warning('请输入密码')
-    return
-  }
-  if (form.value.password.length < 4) {
-    message.warning('密码至少 4 位')
-    return
-  }
+  resetFieldErrors()
+  if (!form.value.username.trim()) fieldErrors.username = '请输入用户名'
+  if (!form.value.password.trim()) fieldErrors.password = '请输入密码'
+  else if (form.value.password.length < 4) fieldErrors.password = '密码至少 4 位'
+  if (Object.keys(fieldErrors).length > 0) return
   submitting.value = true
   try {
     await addUser({ username: form.value.username.trim(), password: form.value.password })
@@ -66,14 +68,14 @@ async function handleSubmit() {
 function showResetModal(username: string) {
   resetTarget.value = username
   resetPassword.value = ''
+  resetFieldErrors()
   passwordModalVisible.value = true
 }
 
 async function handleResetPassword() {
-  if (resetPassword.value.length < 4) {
-    message.warning('密码至少 4 位')
-    return
-  }
+  resetFieldErrors()
+  if (resetPassword.value.length < 4) fieldErrors.reset = '密码至少 4 位'
+  if (Object.keys(fieldErrors).length > 0) return
   submitting.value = true
   try {
     await updateUserPassword(resetTarget.value, resetPassword.value)
@@ -165,10 +167,22 @@ onMounted(fetchData)
     @ok="handleSubmit"
   >
     <a-form layout="vertical">
-      <a-form-item html-for="user-username" label="用户名" required>
+      <a-form-item
+        html-for="user-username"
+        label="用户名"
+        required
+        :validate-status="fieldErrors.username ? 'error' : undefined"
+        :help="fieldErrors.username"
+      >
         <a-input id="user-username" v-model:value="form.username" placeholder="用户名" />
       </a-form-item>
-      <a-form-item html-for="user-password" label="密码" required>
+      <a-form-item
+        html-for="user-password"
+        label="密码"
+        required
+        :validate-status="fieldErrors.password ? 'error' : undefined"
+        :help="fieldErrors.password"
+      >
         <a-input-password id="user-password" v-model:value="form.password" placeholder="密码" autocomplete="new-password" />
       </a-form-item>
     </a-form>
@@ -183,7 +197,13 @@ onMounted(fetchData)
     @ok="handleResetPassword"
   >
     <a-form layout="vertical">
-      <a-form-item html-for="user-reset-password" label="新密码" required>
+      <a-form-item
+        html-for="user-reset-password"
+        label="新密码"
+        required
+        :validate-status="fieldErrors.reset ? 'error' : undefined"
+        :help="fieldErrors.reset"
+      >
         <a-input-password id="user-reset-password" v-model:value="resetPassword" placeholder="至少 4 位" autocomplete="new-password" />
       </a-form-item>
     </a-form>

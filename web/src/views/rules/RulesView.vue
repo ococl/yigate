@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { listRules, addRule, updateRule, moveRule, deleteRule } from '@/api/rules'
@@ -16,6 +16,13 @@ const submitting = ref(false)
 const isEdit = ref(false)
 const editingIndex = ref(-1)
 
+// 表单内联校验：字段名 -> 错误文案，输入变化后自动清除
+const fieldErrors = reactive<Record<string, string>>({})
+
+function resetFieldErrors() {
+  for (const key of Object.keys(fieldErrors)) delete fieldErrors[key]
+}
+
 const form = ref<RuleRequest>({
   type: 'domain_suffix',
   values: [],
@@ -24,6 +31,7 @@ const form = ref<RuleRequest>({
 })
 // 文本域使用独立状态，避免每输入一个字符就被重新格式化导致光标跳动
 const valuesText = ref('')
+watch(valuesText, () => resetFieldErrors())
 
 const typeOptions = [
   { label: 'domain（精确域名）', value: 'domain' },
@@ -103,14 +111,12 @@ function syncValues(value?: string | number) {
 }
 
 async function handleSubmit() {
-  if (!form.value.type) {
-    message.warning('请选择规则类型')
-    return
-  }
+  resetFieldErrors()
+  if (!form.value.type) fieldErrors.type = '请选择规则类型'
   if (needsValues.value && form.value.values.length === 0) {
-    message.warning('请输入至少一个匹配值')
-    return
+    fieldErrors.values = '请输入至少一个匹配值'
   }
+  if (Object.keys(fieldErrors).length > 0) return
   // proxy 动作未指定上游时表示使用全部可用上游，无需强制选择
 
   const payload: RuleRequest = {
@@ -334,7 +340,13 @@ onMounted(fetchData)
     <a-form layout="vertical">
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
-          <a-form-item html-for="rule-type" label="类型" required>
+          <a-form-item
+            html-for="rule-type"
+            label="类型"
+            required
+            :validate-status="fieldErrors.type ? 'error' : undefined"
+            :help="fieldErrors.type"
+          >
             <a-select id="rule-type" v-model:value="form.type" :options="typeOptions" />
           </a-form-item>
         </a-col>
@@ -345,7 +357,14 @@ onMounted(fetchData)
         </a-col>
       </a-row>
 
-      <a-form-item v-if="needsValues" html-for="rule-values" label="匹配值（每行一个）" required>
+      <a-form-item
+        v-if="needsValues"
+        html-for="rule-values"
+        label="匹配值（每行一个）"
+        required
+        :validate-status="fieldErrors.values ? 'error' : undefined"
+        :help="fieldErrors.values"
+      >
         <a-textarea
           id="rule-values"
           :value="valuesText"

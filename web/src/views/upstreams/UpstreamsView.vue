@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -67,6 +67,24 @@ const form = ref({
   health_check: emptyHealthCheck(),
 })
 
+// 表单内联校验：输入变化后自动清除对应错误
+const nameError = ref('')
+const urlError = ref('')
+const typesError = ref('')
+const pathError = ref('')
+
+function resetFieldErrors() {
+  nameError.value = ''
+  urlError.value = ''
+  typesError.value = ''
+  pathError.value = ''
+}
+
+watch(
+  () => [form.value.name, form.value.url, form.value.types.join(','), form.value.health_check.type, form.value.health_check.path],
+  () => resetFieldErrors(),
+)
+
 const typeOptions = ['http', 'https', 'socks5', 'socks5h']
 const strategyOptions = ['weighted_round_robin', 'least_connections', 'consistent_hash', 'source_ip_hash']
 const strategySelectOptions = strategyOptions.map((s) => ({ label: s, value: s }))
@@ -130,6 +148,7 @@ function showAddModal() {
   editingName.value = ''
   modalTitle.value = '新增上游'
   originalUrl.value = ''
+  resetFieldErrors()
   form.value = {
     name: '',
     url: '',
@@ -149,6 +168,7 @@ function showEditModal(record: UpstreamInfo) {
   modalTitle.value = '编辑上游'
   const hc = record.health_check || emptyHealthCheck()
   originalUrl.value = record.url
+  resetFieldErrors()
   form.value = {
     name: record.name,
     url: record.url,
@@ -174,25 +194,30 @@ function urlUnchanged(): boolean {
   return isEdit.value && form.value.url.trim() === originalUrl.value.trim()
 }
 
-function validateForm(): string | null {
-  if (!form.value.name.trim()) return '请输入名称'
-  if (!form.value.url.trim()) return '请输入 URL'
-  if (!urlUnchanged() && !/^(https?|socks5h?):\/\/.+/i.test(form.value.url.trim())) {
-    return 'URL 需以 http://、https://、socks5:// 或 socks5h:// 开头'
+function validateForm(): { name?: string; url?: string; types?: string; path?: string } {
+  const errors: { name?: string; url?: string; types?: string; path?: string } = {}
+  if (!form.value.name.trim()) errors.name = '请输入名称'
+  if (!form.value.url.trim()) errors.url = '请输入 URL'
+  else if (!urlUnchanged() && !/^(https?|socks5h?):\/\/.+/i.test(form.value.url.trim())) {
+    errors.url = 'URL 需以 http://、https://、socks5:// 或 socks5h:// 开头'
   }
-  if (form.value.types.length === 0) return '请选择至少一种类型'
+  if (form.value.types.length === 0) errors.types = '请选择至少一种类型'
   if (form.value.health_check.type === 'http' || form.value.health_check.type === 'https') {
-    if (!form.value.health_check.path.trim()) return 'HTTP 健康检查需要填写探测路径'
+    if (!form.value.health_check.path.trim()) {
+      errors.path = 'HTTP 健康检查需要填写探测路径'
+    }
   }
-  return null
+  return errors
 }
 
 async function handleSubmit() {
-  const error = validateForm()
-  if (error) {
-    message.warning(error)
-    return
-  }
+  resetFieldErrors()
+  const errors = validateForm()
+  nameError.value = errors.name || ''
+  urlError.value = errors.url || ''
+  typesError.value = errors.types || ''
+  pathError.value = errors.path || ''
+  if (errors.name || errors.url || errors.types || errors.path) return
 
   const healthCheck: HealthCheckConfig = {
     type: form.value.health_check.type,
@@ -580,18 +605,38 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
-          <a-form-item html-for="up-name" label="名称" required tooltip="上游唯一标识。编辑时可修改，修改后会同步更新路由规则中对该上游的引用。">
+          <a-form-item
+            html-for="up-name"
+            label="名称"
+            required
+            tooltip="上游唯一标识。编辑时可修改，修改后会同步更新路由规则中对该上游的引用。"
+            :validate-status="nameError ? 'error' : undefined"
+            :help="nameError || undefined"
+          >
             <a-input id="up-name" v-model:value="form.name" placeholder="如 default、proxy-hk" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
-          <a-form-item html-for="up-url" label="URL" required tooltip="上游代理地址，支持 http://、https://、socks5://、socks5h:// 协议。">
+          <a-form-item
+            html-for="up-url"
+            label="URL"
+            required
+            tooltip="上游代理地址，支持 http://、https://、socks5://、socks5h:// 协议。"
+            :validate-status="urlError ? 'error' : undefined"
+            :help="urlError || undefined"
+          >
             <a-input id="up-url" v-model:value="form.url" placeholder="如 socks5://127.0.0.1:1080" />
           </a-form-item>
         </a-col>
       </a-row>
 
-      <a-form-item label="类型" :tooltip="typeHelp" required>
+      <a-form-item
+        label="类型"
+        :tooltip="typeHelp"
+        required
+        :validate-status="typesError ? 'error' : undefined"
+        :help="typesError || undefined"
+      >
         <a-checkbox-group v-model:value="form.types" :options="typeOptions" />
       </a-form-item>
 
@@ -622,8 +667,15 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
-          <a-form-item html-for="up-path" label="探测路径" :tooltip="'仅 http/https 探测方式需要，如 /health。'">
-            <a-input id="up-path"
+          <a-form-item
+            html-for="up-path"
+            label="探测路径"
+            :tooltip="'仅 http/https 探测方式需要，如 /health。'"
+            :validate-status="pathError ? 'error' : undefined"
+            :help="pathError || undefined"
+          >
+            <a-input
+              id="up-path"
               v-model:value="form.health_check.path"
               :disabled="!showHealthCheckPath"
               placeholder="/health"
