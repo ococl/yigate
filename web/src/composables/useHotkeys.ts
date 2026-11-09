@@ -32,7 +32,7 @@ export function useHotkeys(hotkeys: Hotkey[]): void {
       if (event.key.toLowerCase() !== hotkey.key.toLowerCase()) continue
       const modifierMatches = hotkey.ctrlOrCmd ? event.ctrlKey || event.metaKey : !hasModifier
       if (!modifierMatches) continue
-      if (!hotkey.allowInInput && isTypingTarget(event.target)) return
+      if (!hotkey.allowInInput && isTypingTarget(event.target)) continue
       event.preventDefault()
       hotkey.handler(event)
       return
