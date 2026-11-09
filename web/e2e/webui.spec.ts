@@ -106,3 +106,14 @@ test('settings warns before leaving with unsaved changes', async ({ page }) => {
   await page.locator('.app-sider').getByText('仪表盘').click()
   await expect(page).toHaveURL(/\/dashboard$/)
 })
+
+test('document title follows the current page', async ({ page }) => {
+  await page.goto('/login')
+  await expect(page).toHaveTitle('登录 · YiGate')
+
+  await login(page)
+  await expect(page).toHaveTitle('仪表盘 · YiGate')
+
+  await page.getByRole('link', { name: '路由规则' }).click()
+  await expect(page).toHaveTitle('路由规则 · YiGate')
+})

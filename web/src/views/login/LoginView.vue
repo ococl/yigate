@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import { useAuthStore } from '@/stores/auth'
@@ -8,19 +8,26 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const token = ref('')
+// 登录失败直接标在字段下方，不依赖一闪而过的 toast
+const loginError = ref('')
+
+watch(token, () => {
+  loginError.value = ''
+})
 
 async function handleLogin() {
   if (!token.value.trim()) {
-    message.warning('请输入管理 Token')
+    loginError.value = '请输入管理 Token'
     return
   }
+  loginError.value = ''
 
   const success = await authStore.login(token.value.trim())
   if (success) {
     message.success('登录成功')
     router.push('/dashboard')
   } else {
-    message.error('Token 验证失败，请检查 Token 或后端服务')
+    loginError.value = 'Token 验证失败，请检查 Token 或后端服务'
   }
 }
 </script>
@@ -33,8 +40,14 @@ async function handleLogin() {
     </div>
 
     <a-form layout="vertical" @submit.prevent="handleLogin">
-      <a-form-item label="管理 Token">
+      <a-form-item
+        html-for="login-token"
+        label="管理 Token"
+        :validate-status="loginError ? 'error' : undefined"
+        :help="loginError || undefined"
+      >
         <a-input-password
+          id="login-token"
           v-model:value="token"
           placeholder="请输入 management_auth_token"
           size="large"

@@ -121,6 +121,28 @@ router.beforeEach((to) => {
   return true
 })
 
+// 路由标题：多标签页并排时能区分页面，也便于浏览器历史识别
+const PAGE_TITLES: Record<string, string> = {
+  login: '登录',
+  dashboard: '仪表盘',
+  upstreams: '上游管理',
+  rules: '路由规则',
+  geosite: 'GeoSite 数据',
+  users: '用户管理',
+  traffic: '流量审计',
+  settings: '系统设置',
+  pprof: 'pprof 性能分析',
+  'docs-auth': '认证文档',
+  'docs-api': 'API 文档',
+  about: '关于',
+  'not-found': '页面不存在',
+}
+
+router.afterEach((to) => {
+  const title = PAGE_TITLES[String(to.name ?? '')]
+  document.title = title ? `${title} · YiGate` : 'YiGate'
+})
+
 // API 层收到 401 后清除凭据并广播事件；这里完成 SPA 内跳转，
 // 避免拦截器中硬刷新（window.location.href）造成状态丢失与无限循环。
 if (typeof window !== 'undefined') {
