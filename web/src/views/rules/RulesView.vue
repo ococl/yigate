@@ -213,7 +213,9 @@ onMounted(fetchData)
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-        <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理" />
+        <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理">
+          <a-button type="primary" @click="openAddModal">新增规则</a-button>
+        </a-empty>
         <a-card v-for="record in mobileItems" :key="record.index" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-space size="small">
@@ -336,7 +338,9 @@ onMounted(fetchData)
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-          <a-empty v-else description="暂无路由规则，所有请求将按全局 default_action 处理" />
+          <a-empty v-else description="暂无路由规则，所有请求将按全局 default_action 处理">
+            <a-button type="primary" @click="openAddModal">新增规则</a-button>
+          </a-empty>
         </template>
         </a-table>
       </div>

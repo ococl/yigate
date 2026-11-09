@@ -195,3 +195,46 @@ test('dashboard does not claim a fresh update when every API fails', async ({ pa
   // 全部接口失败时不能显示「最近更新」，否则等于宣称数据是新的
   await expect(page.getByText('最近更新')).toHaveCount(0)
 })
+
+test('empty upstream list offers a create action', async ({ page }) => {
+  await login(page)
+  await page.route('**/api/v1/config/upstreams', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ upstreams: [] }) }),
+  )
+  await page.goto('/upstreams')
+
+  const empty = page.locator('.ant-empty').filter({ hasText: '暂无上游' })
+  await expect(empty).toBeVisible()
+  await empty.getByRole('button', { name: '新增上游' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('empty rule list offers a create action', async ({ page }) => {
+  await login(page)
+  await page.route('**/api/v1/config/rules', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ rules: [] }) }),
+  )
+  await page.goto('/rules')
+
+  const empty = page.locator('.ant-empty').filter({ hasText: '暂无路由规则' })
+  await expect(empty).toBeVisible()
+  await empty.getByRole('button', { name: '新增规则' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('traffic card offers retry instead of a settings link when loading fails', async ({ page }) => {
+  await login(page)
+
+  let calls = 0
+  await page.route('**/api/v1/traffic', (route) => {
+    calls += 1
+    return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' })
+  })
+  await page.goto('/dashboard')
+
+  await expect(page.getByText('流量数据加载失败')).toBeVisible()
+  const card = page.locator('.ant-card').filter({ hasText: '流量数据加载失败' })
+  // antd 会在两个汉字间插入空格，可访问名称是「重 试」
+  await card.getByRole('button', { name: /重\s*试/ }).click()
+  await expect.poll(() => calls).toBeGreaterThan(1)
+})

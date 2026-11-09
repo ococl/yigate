@@ -541,9 +541,10 @@ useVisiblePolling(() => fetchData(true), 10000)
             <a-typography-text v-else type="secondary" class="charts-empty">暂无流量数据</a-typography-text>
           </template>
           <a-empty v-else :description="traffic ? '暂无流量记录' : '流量数据加载失败'">
-            <RouterLink to="/settings?section=quota">
+            <RouterLink v-if="traffic" to="/settings?section=quota">
               <a-button type="primary" size="small">前往系统设置查看流量审计</a-button>
             </RouterLink>
+            <a-button v-else type="primary" size="small" :loading="loading" @click="fetchData()">重试</a-button>
           </a-empty>
         </a-card>
       </a-col>

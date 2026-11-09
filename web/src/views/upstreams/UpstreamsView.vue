@@ -457,7 +457,9 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-        <a-empty v-else-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理" />
+        <a-empty v-else-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理">
+          <a-button type="primary" @click="showAddModal">新增上游</a-button>
+        </a-empty>
         <a-card v-for="record in mobileItems" :key="record.name" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-typography-text strong>{{ record.name }}</a-typography-text>
@@ -596,7 +598,9 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-          <a-empty v-else description="暂无上游，请先新增一个上游代理" />
+          <a-empty v-else description="暂无上游，请先新增一个上游代理">
+            <a-button type="primary" @click="showAddModal">新增上游</a-button>
+          </a-empty>
         </template>
         </a-table>
       </div>
