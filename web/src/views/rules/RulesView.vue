@@ -60,6 +60,17 @@ const needsUpstreams = computed(() => form.value.action === 'proxy')
 // 移动端卡片列表本地分页，与桌面表格每页条数保持一致
 const MOBILE_PAGE_SIZE = 20
 const mobilePage = ref(1)
+// 桌面表格同样受控，删除/重排后能把越界页码收回来
+const DESKTOP_PAGE_SIZE = 20
+const desktopPage = ref(1)
+const desktopPagination = computed(() => ({
+  current: desktopPage.value,
+  pageSize: DESKTOP_PAGE_SIZE,
+  hideOnSinglePage: true,
+  onChange: (page: number) => {
+    desktopPage.value = page
+  },
+}))
 const mobileItems = computed(() =>
   dataSource.value.slice((mobilePage.value - 1) * MOBILE_PAGE_SIZE, mobilePage.value * MOBILE_PAGE_SIZE),
 )
@@ -73,12 +84,21 @@ const columns = [
   { title: '操作', key: 'operations', width: 230, fixed: 'right' as const },
 ]
 
+// 删除/重排后页码可能越界，会停在空页；越界时回落到最后一页，其余情况保留当前页
+function clampPages() {
+  const total = dataSource.value.length
+  const desktopMax = Math.max(1, Math.ceil(total / DESKTOP_PAGE_SIZE))
+  if (desktopPage.value > desktopMax) desktopPage.value = desktopMax
+  const mobileMax = Math.max(1, Math.ceil(total / MOBILE_PAGE_SIZE))
+  if (mobilePage.value > mobileMax) mobilePage.value = mobileMax
+}
+
 async function fetchData() {
   loading.value = true
   try {
     const [rules, ups] = await Promise.all([listRules(), listUpstreams()])
     dataSource.value = rules.rules || []
-    mobilePage.value = 1
+    clampPages()
     upstreamOptions.value = (ups.upstreams || []).map((u) => ({ label: u.name, value: u.name }))
     loadError.value = false
   } catch {
@@ -287,7 +307,7 @@ onMounted(fetchData)
           :columns="columns"
           :loading="loading"
           row-key="index"
-          :pagination="{ pageSize: 20, hideOnSinglePage: true }"
+          :pagination="desktopPagination"
           :scroll="{ x: 900, y: 1 }"
         >
     <template #bodyCell="{ column, record }">

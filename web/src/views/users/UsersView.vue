@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -38,12 +38,30 @@ const columns = [
   { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
 ]
 
+// 桌面表格分页受控，删除后能收回越界页码
+const PAGE_SIZE = 20
+const page = ref(1)
+const tablePagination = computed(() => ({
+  current: page.value,
+  pageSize: PAGE_SIZE,
+  hideOnSinglePage: true,
+  onChange: (value: number) => {
+    page.value = value
+  },
+}))
+
+function clampPage() {
+  const maxPage = Math.max(1, Math.ceil(dataSource.value.length / PAGE_SIZE))
+  if (page.value > maxPage) page.value = maxPage
+}
+
 async function fetchData() {
   loading.value = true
   try {
     const res = await listUsers()
     dataSource.value = res.users || []
     loadError.value = false
+    clampPage()
   } catch {
     // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
     loadError.value = true
@@ -143,7 +161,9 @@ onMounted(fetchData)
 
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-        <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证" />
+        <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证">
+          <a-button type="primary" @click="showAddModal">新增用户</a-button>
+        </a-empty>
         <a-card v-for="record in dataSource" :key="record.username" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-typography-text strong>{{ record.username }}</a-typography-text>
@@ -168,7 +188,7 @@ onMounted(fetchData)
           :columns="columns"
           :loading="loading"
           row-key="username"
-          :pagination="{ pageSize: 20, hideOnSinglePage: true }"
+          :pagination="tablePagination"
           :scroll="{ x: 480, y: 1 }"
         >
     <template #bodyCell="{ column, record }">
@@ -188,7 +208,9 @@ onMounted(fetchData)
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-          <a-empty v-else description="暂无用户，未配置用户时表示不启用代理认证" />
+          <a-empty v-else description="暂无用户，未配置用户时表示不启用代理认证">
+            <a-button type="primary" @click="showAddModal">新增用户</a-button>
+          </a-empty>
         </template>
         </a-table>
       </div>

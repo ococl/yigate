@@ -51,6 +51,18 @@ watch(keyword, (value) => {
   router.replace({ query: { ...route.query, q: value || undefined, page: undefined } })
 })
 
+// 页码越界（手改 URL、搜索后条数变少、保留期清理）时会看到空表格，回落到最后一页
+watch([() => filtered.value.length, () => route.query.size], () => {
+  const size = Number(route.query.size) || 20
+  const maxPage = Math.max(1, Math.ceil(filtered.value.length / size))
+  const current = Number(route.query.page) || 1
+  if (current > maxPage) {
+    router.replace({ query: { ...route.query, page: maxPage > 1 ? String(maxPage) : undefined } })
+  }
+  const maxMobile = Math.max(1, Math.ceil(filtered.value.length / mobilePageSize))
+  if (mobilePage.value > maxMobile) mobilePage.value = maxMobile
+})
+
 const tablePagination = computed(() => ({
   current: Number(route.query.page) || 1,
   pageSize: Number(route.query.size) || 20,
@@ -164,7 +176,14 @@ useVisiblePolling(() => fetchData(false), 15000)
 
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError && dataSource.length === 0" :retrying="loading" @retry="() => fetchData()" />
-        <a-empty v-else-if="mobileItems.length === 0" :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
+        <a-empty
+          v-else-if="mobileItems.length === 0"
+          :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'"
+        >
+          <RouterLink v-if="!enabled" to="/settings?section=quota">
+            <a-button type="primary" size="small">前往系统设置</a-button>
+          </RouterLink>
+        </a-empty>
         <a-card v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-space size="small" wrap>
@@ -225,7 +244,11 @@ useVisiblePolling(() => fetchData(false), 15000)
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="() => fetchData()" />
-          <a-empty v-else :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
+          <a-empty v-else :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'">
+            <RouterLink v-if="!enabled" to="/settings?section=quota">
+              <a-button type="primary" size="small">前往系统设置</a-button>
+            </RouterLink>
+          </a-empty>
         </template>
         </a-table>
       </div>

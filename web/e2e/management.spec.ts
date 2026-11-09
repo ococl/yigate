@@ -386,3 +386,84 @@ test('an out-of-range page falls back to the last page', async ({ page, request 
     await request.delete(`/api/v1/config/upstreams/${encodeURIComponent(name)}`, { headers: auth })
   }
 })
+
+test('empty user list offers a create action', async ({ page }) => {
+  await login(page)
+  await page.route('**/api/v1/config/users', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"users":[]}' }),
+  )
+  await page.goto('/users')
+
+  const empty = page.locator('.ant-empty').filter({ hasText: '暂无用户' })
+  await expect(empty).toBeVisible()
+  await empty.getByRole('button', { name: '新增用户' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+})
+
+test('user page falls back a page after deleting the last row', async ({ page }) => {
+  await login(page)
+
+  let total = 21
+  const users = () => ({
+    users: Array.from({ length: total }, (_, i) => ({ username: `zh-user-${String(i + 1).padStart(2, '0')}` })),
+  })
+  await page.route('**/api/v1/config/users', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(users()) }),
+  )
+  await page.route('**/api/v1/config/users/*', (route) => {
+    total = 20
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' })
+  })
+
+  await page.goto('/users')
+  await page.locator('.ant-pagination-item-2').click()
+  await expect(page.locator('.ant-table-tbody tr.ant-table-row')).toHaveCount(1)
+
+  await page.getByText('删除', { exact: true }).first().click()
+  await page.locator('.ant-popover .ant-btn-primary').click()
+
+  // 第 2 页删空后应回到第 1 页：20 条只剩一页，分页器随之隐藏
+  await expect(page.locator('.ant-table-tbody tr.ant-table-row')).toHaveCount(20)
+  await expect(page.locator('.ant-pagination')).toHaveCount(0)
+})
+
+test('traffic page falls back from an out-of-range page', async ({ page }) => {
+  await login(page)
+
+  const entries = Array.from({ length: 3 }, (_, i) => ({
+    user: 'zh',
+    upstream: 'zh-upstream',
+    target: `t${i}.example.com`,
+    bytes_in: 1,
+    bytes_out: 1,
+    total: 2,
+  }))
+  await page.route('**/api/v1/traffic', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ enabled: true, retention_days: 30, entries }),
+    }),
+  )
+  await page.goto('/traffic?page=99')
+
+  await expect(page.locator('.ant-table-tbody tr.ant-table-row').first()).toBeVisible()
+  await expect(page).not.toHaveURL(/page=99/)
+})
+
+test('traffic disabled state links to the settings section', async ({ page }) => {
+  await login(page)
+  await page.route('**/api/v1/traffic', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ enabled: false, retention_days: 30, entries: [] }),
+    }),
+  )
+  await page.goto('/traffic')
+
+  const empty = page.locator('.ant-empty').filter({ hasText: '流量审计未启用' })
+  await expect(empty).toBeVisible()
+  await empty.getByRole('button', { name: '前往系统设置' }).click()
+  await expect(page).toHaveURL(/\/settings\?section=quota/)
+})
