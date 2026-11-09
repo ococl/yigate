@@ -375,13 +375,13 @@ useVisiblePolling(() => fetchData(true), 10000)
     </a-alert>
 
     <a-row :gutter="16" style="margin-bottom: 16px;">
-      <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small" style="height: 100%;">
+      <a-col :xs="12" :sm="12" :lg="6">
+        <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic title="运行状态" :value="health ? health.status || '-' : '—'" :value-style="{ color: statusColor }" />
         </a-card>
       </a-col>
-      <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small" style="height: 100%;">
+      <a-col :xs="12" :sm="12" :lg="6">
+        <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
             title="可用上游"
             :value="status ? aliveCount : '—'"
@@ -392,8 +392,8 @@ useVisiblePolling(() => fetchData(true), 10000)
           </a-typography-text>
         </a-card>
       </a-col>
-      <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small" style="height: 100%;">
+      <a-col :xs="12" :sm="12" :lg="6">
+        <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
             title="路由 / 管理就绪"
             :value="health ? (health.router_ready && health.manager_ready ? '就绪' : '异常') : '—'"
@@ -401,8 +401,8 @@ useVisiblePolling(() => fetchData(true), 10000)
           />
         </a-card>
       </a-col>
-      <a-col :xs="24" :sm="12" :lg="6">
-        <a-card size="small" style="height: 100%;">
+      <a-col :xs="12" :sm="12" :lg="6">
+        <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic title="运行时长" :value="formatUptime(status?.uptime_seconds || 0)" />
           <a-typography-text type="secondary" style="font-size: 12px;">
             {{ status?.go_version || '' }}
@@ -870,7 +870,31 @@ useVisiblePolling(() => fetchData(true), 10000)
   margin-top: 12px;
 }
 
+/* 窄屏统计卡排成两列，值需要压一档字号并允许省略 */
 @media (max-width: 768px) {
+  .stat-card :deep(.ant-statistic-content) {
+    font-size: 20px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  /* 「0 条 / 0 个用户」这类后缀在两列宽度里会折行，压一档字号并单行省略 */
+  .stat-card :deep(.ant-statistic-content-value),
+  .stat-card :deep(.ant-statistic-content-suffix) {
+    font-size: 14px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .stat-card :deep(.ant-statistic-content-value) {
+    font-size: 20px;
+  }
+
   .traffic-charts {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;

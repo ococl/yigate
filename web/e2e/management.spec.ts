@@ -462,7 +462,8 @@ test('traffic disabled state links to the settings section', async ({ page }) =>
   )
   await page.goto('/traffic')
 
-  const empty = page.locator('.ant-empty').filter({ hasText: '流量审计未启用' })
+  // 未启用的事实由顶部 alert 说明，空态只报「暂无数据」，不再重复同一句话
+  const empty = page.locator('.ant-empty').filter({ hasText: '暂无流量统计数据' })
   await expect(empty).toBeVisible()
   await empty.getByRole('button', { name: '前往系统设置' }).click()
   await expect(page).toHaveURL(/\/settings\?section=quota/)

@@ -154,23 +154,23 @@ useVisiblePolling(() => fetchData(false), 15000)
       </a-alert>
 
       <a-row class="fill-card-toolbar" :gutter="16" style="margin-bottom: 16px;">
-        <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small">
+        <a-col :xs="12" :sm="12" :lg="6">
+          <a-card size="small" class="stat-card" style="height: 100%;">
             <a-statistic title="总流量" :value="formatBytes(summary.total)" />
           </a-card>
         </a-col>
-        <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small">
+        <a-col :xs="12" :sm="12" :lg="6">
+          <a-card size="small" class="stat-card" style="height: 100%;">
             <a-statistic title="统计条目" :value="summary.entries" :suffix="`条 / ${summary.userCount} 个用户`" />
           </a-card>
         </a-col>
-        <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small">
+        <a-col :xs="12" :sm="12" :lg="6">
+          <a-card size="small" class="stat-card" style="height: 100%;">
             <a-statistic title="流量最大用户" :value="summary.topUser" :value-style="{ fontSize: '16px' }" />
           </a-card>
         </a-col>
-        <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small">
+        <a-col :xs="12" :sm="12" :lg="6">
+          <a-card size="small" class="stat-card" style="height: 100%;">
             <a-statistic title="流量最大上游" :value="summary.topUpstream" :value-style="{ fontSize: '16px' }" />
           </a-card>
         </a-col>
@@ -181,7 +181,7 @@ useVisiblePolling(() => fetchData(false), 15000)
         <MobileListSkeleton v-else-if="loading && mobileItems.length === 0" />
         <a-empty
           v-else-if="mobileItems.length === 0"
-          :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'"
+          description="暂无流量统计数据"
         >
           <RouterLink v-if="!enabled" to="/settings?section=quota">
             <a-button type="primary" size="small">前往系统设置</a-button>
@@ -243,7 +243,7 @@ useVisiblePolling(() => fetchData(false), 15000)
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="() => fetchData()" />
-          <a-empty v-else :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'">
+          <a-empty v-else description="暂无流量统计数据">
             <RouterLink v-if="!enabled" to="/settings?section=quota">
               <a-button type="primary" size="small">前往系统设置</a-button>
             </RouterLink>
@@ -260,7 +260,32 @@ useVisiblePolling(() => fetchData(false), 15000)
   width: 240px;
 }
 
+/* 窄屏统计卡排成两列，值需要压一档字号并允许省略 */
 @media (max-width: 768px) {
+  .stat-card :deep(.ant-statistic-content) {
+    font-size: 20px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  /* 「0 条 / 0 个用户」这类后缀在两列宽度里会折行，压一档字号并单行省略 */
+  .stat-card :deep(.ant-statistic-content-value),
+  .stat-card :deep(.ant-statistic-content-suffix) {
+    font-size: 14px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 流量值常是长用户名，16px 能多显示三成字符再省略 */
+  .stat-card :deep(.ant-statistic-content-value) {
+    font-size: 16px;
+  }
+
   .traffic-actions {
     width: 100%;
   }
