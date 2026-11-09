@@ -1393,19 +1393,24 @@ func TestIntegrationTrafficSurvivesConfigReload(t *testing.T) {
 		return sum
 	}
 
-	// 监听建立与运行时装配是异步的，允许重试几次，避免偶发的「还没开始记账」误判。
+	// 代理是在把响应写回客户端之后才记账，客户端可能先拿到 body 后返回，
+	// 所以这里只能轮询等待记账落地；不能在「还没记账」时重发请求，
+	// 那会真的多打一次 origin、多记一份流量，把 after 撑成 before 的两倍。
+	resp, err := client.Get("http://" + originAddr + "/")
+	if err != nil {
+		t.Fatalf("proxy GET: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
 	var before int64
-	for attempt := 0; attempt < 5 && before <= 0; attempt++ {
-		resp, err := client.Get("http://" + originAddr + "/")
-		if err != nil {
-			t.Fatalf("proxy GET: %v", err)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if v := total(); v > 0 {
+			before = v
+			break
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		before = total()
-		if before <= 0 {
-			time.Sleep(100 * time.Millisecond)
-		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if before <= 0 {
 		t.Fatal("no traffic recorded before reload")
@@ -1425,6 +1430,8 @@ func TestIntegrationTrafficSurvivesConfigReload(t *testing.T) {
 	}
 
 	if after := total(); after != before {
-		t.Fatalf("traffic total changed after reload: before=%d after=%d", before, after)
+		// 附上明细：翻倍既可能是条目重复，也可能是同一 key 被累加两次，两者根因不同。
+		t.Fatalf("traffic total changed after reload: before=%d after=%d entries=%+v",
+			before, after, s.currentRuntime().trafficAccounter.Snapshot().Entries)
 	}
 }
