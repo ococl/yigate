@@ -107,6 +107,13 @@ html:has(body.app-dark) {
   flex: 0 0 auto;
 }
 
+/* 页头左侧：主标题 + 副标题纵向堆叠 */
+.page-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .fill-card {
   display: flex;
   flex-direction: column;
@@ -204,6 +211,38 @@ html:has(body.app-dark) {
   padding: 0;
   height: 100%;
   overflow: hidden;
+}
+
+/* 文档页代码块：API 文档与认证文档共用，样式只在这里维护一份 */
+.code-block {
+  background: var(--ant-color-fill-quaternary, #f5f5f5);
+  border: 1px solid var(--ant-color-border-secondary, #e8e8e8);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  background: var(--ant-color-fill-tertiary, #fafafa);
+  border-bottom: 1px solid var(--ant-color-border-secondary, #e8e8e8);
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #666);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 12px 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.code-block code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
 /* 移动端卡片列表：替代宽表格，避免横向滚动才能看到关键信息 */

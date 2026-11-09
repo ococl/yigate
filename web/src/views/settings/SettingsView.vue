@@ -542,9 +542,9 @@ onMounted(fetchAll)
 </script>
 
 <template>
-  <div class="settings">
-    <div class="settings-header">
-      <div class="settings-header-text">
+  <div class="page-shell">
+    <div class="page-header">
+      <div class="page-header-text">
         <a-typography-title :level="4" style="margin: 0;">系统设置</a-typography-title>
         <a-typography-text type="secondary">
           修改后立即写入配置文件并热加载；WebUI、pprof 与管理令牌即时生效，监听地址等启动参数需重启。
@@ -1058,14 +1058,6 @@ onMounted(fetchAll)
 </template>
 
 <style scoped>
-/* 页面撑满工作区高度：标题操作区固定，右侧内容独立滚动 */
-.settings {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-}
-
 .token-input-row {
   display: flex;
   gap: 8px;
@@ -1073,22 +1065,6 @@ onMounted(fetchAll)
 
 .token-input-row :deep(.ant-input-affix-wrapper) {
   flex: 1 1 auto;
-}
-
-.settings-header {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 0 0 16px 0;
-}
-
-.settings-header-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 .settings-load-error {
@@ -1160,11 +1136,6 @@ onMounted(fetchAll)
 }
 
 @media (max-width: 768px) {
-  .settings-header {
-    gap: 12px;
-    padding-bottom: 12px;
-  }
-
   .settings-actions {
     width: 100%;
   }

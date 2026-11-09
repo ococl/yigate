@@ -187,26 +187,22 @@ useVisiblePolling(() => fetchData(false), 15000)
             <a-button type="primary" size="small">前往系统设置</a-button>
           </RouterLink>
         </a-empty>
-        <a-card v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`" size="small" class="mobile-card">
-          <div class="mobile-card-head">
+        <MobileCard v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`">
+          <template #head>
             <a-space size="small" wrap>
               <a-tag v-if="record.user">{{ record.user }}</a-tag>
               <span v-else class="muted">匿名</span>
               <a-tag color="purple">{{ record.upstream || '—' }}</a-tag>
             </a-space>
+          </template>
+          <template #extra>
             <a-typography-text strong>{{ formatBytes(record.total) }}</a-typography-text>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">目标</span>
-            <span class="mobile-value">{{ record.target }}</span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">流入/流出</span>
-            <span class="mobile-value">
-              {{ formatBytes(record.bytes_in) }} / {{ formatBytes(record.bytes_out) }}
-            </span>
-          </div>
-        </a-card>
+          </template>
+          <MobileCardRow label="目标">{{ record.target }}</MobileCardRow>
+          <MobileCardRow label="流入/流出">
+            {{ formatBytes(record.bytes_in) }} / {{ formatBytes(record.bytes_out) }}
+          </MobileCardRow>
+        </MobileCard>
         <a-pagination
           v-if="filtered.length > mobilePageSize"
           v-model:current="mobilePage"

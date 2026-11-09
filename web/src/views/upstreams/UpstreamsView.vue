@@ -485,9 +485,11 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
         <a-empty v-else-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理">
           <a-button type="primary" @click="showAddModal">新增上游</a-button>
         </a-empty>
-        <a-card v-for="record in mobileItems" :key="record.name" size="small" class="mobile-card">
-          <div class="mobile-card-head">
+        <MobileCard v-for="record in mobileItems" :key="record.name">
+          <template #head>
             <a-typography-text strong>{{ record.name }}</a-typography-text>
+          </template>
+          <template #extra>
             <a-switch
               :checked="record.enabled !== false"
               :loading="toggling.includes(record.name)"
@@ -495,40 +497,22 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
               :aria-label="`启用或禁用上游 ${record.name}`"
               @change="(checked: boolean) => handleToggle(record, checked)"
             />
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">URL</span>
-            <span class="mobile-value">{{ record.url }}</span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">类型</span>
-            <span class="mobile-value">
-              <a-space wrap size="small">
-                <a-tag v-for="t in record.types" :key="t" color="blue">{{ t }}</a-tag>
-                <span v-if="!record.types || record.types.length === 0" class="muted">—</span>
-              </a-space>
-            </span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">优先级/权重</span>
-            <span class="mobile-value">{{ record.priority ?? 0 }} / {{ record.weight ?? 0 }}</span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">策略</span>
-            <span class="mobile-value">{{ record.strategy || '—' }}</span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">健康</span>
-            <span class="mobile-value">
-              <a-tag>{{ healthCheckText(record) }}</a-tag>
-              <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
-            </span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">最后检查</span>
-            <span class="mobile-value">{{ lastCheckText(record) }}</span>
-          </div>
-          <div class="mobile-card-actions">
+          </template>
+          <MobileCardRow label="URL">{{ record.url }}</MobileCardRow>
+          <MobileCardRow label="类型">
+            <a-space wrap size="small">
+              <a-tag v-for="t in record.types" :key="t" color="blue">{{ t }}</a-tag>
+              <span v-if="!record.types || record.types.length === 0" class="muted">—</span>
+            </a-space>
+          </MobileCardRow>
+          <MobileCardRow label="优先级/权重">{{ record.priority ?? 0 }} / {{ record.weight ?? 0 }}</MobileCardRow>
+          <MobileCardRow label="策略">{{ record.strategy || '—' }}</MobileCardRow>
+          <MobileCardRow label="健康">
+            <a-tag>{{ healthCheckText(record) }}</a-tag>
+            <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
+          </MobileCardRow>
+          <MobileCardRow label="最后检查">{{ lastCheckText(record) }}</MobileCardRow>
+          <template #actions>
             <a-button
               size="small"
               :disabled="record.enabled === false"
@@ -546,8 +530,8 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             >
               <a-button type="link" size="small" danger :loading="deleting === record.name">删除</a-button>
             </a-popconfirm>
-          </div>
-        </a-card>
+          </template>
+        </MobileCard>
         <a-pagination
           v-if="dataSource.length > pagination.pageSize"
           :current="pagination.current"

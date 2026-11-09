@@ -68,10 +68,12 @@ watch(activeSection, () => {
 </script>
 
 <template>
-  <div class="auth-doc">
-    <div class="auth-doc-title">
-      <a-typography-title :level="4" style="margin: 0;">认证机制</a-typography-title>
-      <a-typography-text type="secondary">YiGate 管理接口认证说明</a-typography-text>
+  <div class="page-shell">
+    <div class="page-header">
+      <div class="page-header-text">
+        <a-typography-title :level="4" style="margin: 0;">认证机制</a-typography-title>
+        <a-typography-text type="secondary">YiGate 管理接口认证说明</a-typography-text>
+      </div>
     </div>
 
     <div class="auth-doc-body">
@@ -125,9 +127,7 @@ watch(activeSection, () => {
                 </a-typography-text>
               </a-descriptions-item>
               <a-descriptions-item label="未认证响应体">
-                <div class="code-block">
-                  <pre><code>{{ authInfo.unauthorizedResponse.body }}</code></pre>
-                </div>
+                <CodeBlock :code="authInfo.unauthorizedResponse.body" />
               </a-descriptions-item>
             </a-descriptions>
           </a-card>
@@ -135,26 +135,16 @@ watch(activeSection, () => {
           <!-- 使用示例 -->
           <a-card v-show="activeSection === 'usage'" title="使用示例" size="small">
             <a-typography-title :level="5">携带认证令牌的请求</a-typography-title>
-            <div class="code-block">
-              <div class="code-block-header">
-                <span>cURL</span>
-              </div>
-              <pre><code>curl -H "Authorization: Bearer &lt;your-token&gt;" \
-  http://127.0.0.1:8890/api/v1/status</code></pre>
-            </div>
+            <CodeBlock title="cURL">curl -H "Authorization: Bearer &lt;your-token&gt;" \
+  http://127.0.0.1:8890/api/v1/status</CodeBlock>
 
             <a-typography-title :level="5">未携带令牌的请求（token 非空时）</a-typography-title>
-            <div class="code-block">
-              <div class="code-block-header">
-                <span>cURL</span>
-              </div>
-              <pre><code>curl http://127.0.0.1:8890/api/v1/status
+            <CodeBlock title="cURL">curl http://127.0.0.1:8890/api/v1/status
 
 # 响应:
 # HTTP/1.1 401 Unauthorized
 # WWW-Authenticate: Bearer realm="yigate-management"
-# {"status":"unauthorized"}</code></pre>
-            </div>
+# {"status":"unauthorized"}</CodeBlock>
           </a-card>
 
           <!-- 配置说明 -->
@@ -168,13 +158,8 @@ watch(activeSection, () => {
             </a-alert>
 
             <a-typography-title :level="5">YAML 配置示例</a-typography-title>
-            <div class="code-block">
-              <div class="code-block-header">
-                <span>config.yml</span>
-              </div>
-              <pre><code>management: 127.0.0.1:8890
-management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
-            </div>
+            <CodeBlock title="config.yml">management: 127.0.0.1:8890
+management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</CodeBlock>
 
             <a-typography-paragraph type="secondary" style="margin-top: 12px;">
               配置中的 <a-typography-text code>${YIGATE_MANAGEMENT_TOKEN}</a-typography-text>
@@ -197,22 +182,6 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
 </template>
 
 <style scoped>
-/* 页面撑满工作区高度：标题固定，右侧内容独立滚动 */
-.auth-doc {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-}
-
-.auth-doc-title {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 0 0 16px 0;
-}
-
 .auth-doc-body {
   display: flex;
   flex: 1 1 auto;
@@ -250,12 +219,6 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
 }
 
 @media (max-width: 768px) {
-  .auth-doc-title {
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-bottom: 12px;
-  }
-
   .auth-doc-body {
     flex-direction: column;
     gap: 12px;
@@ -292,34 +255,4 @@ management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</code></pre>
   overscroll-behavior: contain;
 }
 
-.code-block {
-  background: var(--ant-color-fill-quaternary, #f5f5f5);
-  border: 1px solid var(--ant-color-border-secondary, #e8e8e8);
-  border-radius: 6px;
-  overflow: hidden;
-  margin: 8px 0;
-}
-
-.code-block-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 12px;
-  background: var(--ant-color-fill-tertiary, #fafafa);
-  border-bottom: 1px solid var(--ant-color-border-secondary, #e8e8e8);
-  font-size: 12px;
-  color: var(--ant-color-text-secondary, #666);
-}
-
-.code-block pre {
-  margin: 0;
-  padding: 12px 16px;
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.code-block code {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-}
 </style>

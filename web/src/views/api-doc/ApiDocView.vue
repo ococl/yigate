@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'antdv-next'
 import { apiGroups } from '@/data/api-docs'
-import { copyText } from '@/utils/clipboard'
 import { highlightText } from '@/utils/highlight'
 
 const route = useRoute()
@@ -101,20 +99,13 @@ const totalEndpoints = computed(() =>
   apiGroups.reduce((sum, g) => sum + g.endpoints.length, 0),
 )
 
-async function copyToClipboard(text: string) {
-  if (await copyText(text)) {
-    message.success('已复制')
-    return
-  }
-  message.error('复制失败，请手动选择内容复制')
-}
 </script>
 
 <template>
-  <div class="api-docs">
+  <div class="page-shell">
     <!-- 页面标题 -->
-    <div class="api-docs-title">
-      <div style="display: flex; align-items: baseline; gap: 12px;">
+    <div class="page-header">
+      <div class="page-header-text">
         <a-typography-title :level="4" style="margin: 0;">API 文档</a-typography-title>
         <a-typography-text type="secondary">YiGate 管理接口完整说明</a-typography-text>
       </div>
@@ -244,30 +235,14 @@ async function copyToClipboard(text: string) {
                   <a-divider title-placement="start" plain style="margin: 8px 0;">
                     <a-typography-text type="secondary">请求体 (JSON)</a-typography-text>
                   </a-divider>
-                  <div class="code-block">
-                    <div class="code-block-header">
-                      <span>Request Body</span>
-                      <a-button type="link" size="small" @click="copyToClipboard(endpoint.requestBody!)">
-                        复制
-                      </a-button>
-                    </div>
-                    <pre><code>{{ endpoint.requestBody }}</code></pre>
-                  </div>
+                  <CodeBlock title="Request Body" :code="endpoint.requestBody!" copyable />
                 </template>
 
                 <!-- 响应体 -->
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
                   <a-typography-text type="secondary">响应体 (JSON)</a-typography-text>
                 </a-divider>
-                <div class="code-block">
-                  <div class="code-block-header">
-                    <span>Response Body</span>
-                    <a-button type="link" size="small" @click="copyToClipboard(endpoint.responseBody)">
-                      复制
-                    </a-button>
-                  </div>
-                  <pre><code>{{ endpoint.responseBody }}</code></pre>
-                </div>
+                <CodeBlock title="Response Body" :code="endpoint.responseBody" copyable />
 
                 <!-- 状态码 -->
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
@@ -298,33 +273,16 @@ async function copyToClipboard(text: string) {
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
                   <a-typography-text type="secondary">请求示例</a-typography-text>
                 </a-divider>
-                <div class="code-block">
-                  <div class="code-block-header">
-                    <span>cURL</span>
-                    <a-button
-                      type="link"
-                      size="small"
-                      v-if="endpoint.example.request"
-                      @click="copyToClipboard(endpoint.example.request)"
-                    >
-                      复制
-                    </a-button>
-                  </div>
-                  <pre><code>{{ endpoint.example.request }}</code></pre>
-                </div>
+                <CodeBlock
+                  title="cURL"
+                  :code="endpoint.example.request || ''"
+                  :copyable="!!endpoint.example.request"
+                />
 
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
                   <a-typography-text type="secondary">响应示例</a-typography-text>
                 </a-divider>
-                <div class="code-block">
-                  <div class="code-block-header">
-                    <span>Response</span>
-                    <a-button type="link" size="small" @click="copyToClipboard(endpoint.example.response)">
-                      复制
-                    </a-button>
-                  </div>
-                  <pre><code>{{ endpoint.example.response }}</code></pre>
-                </div>
+                <CodeBlock title="Response" :code="endpoint.example.response" copyable />
               </a-card>
             </div>
           </template>
@@ -344,22 +302,6 @@ async function copyToClipboard(text: string) {
 </template>
 
 <style scoped>
-/* 页面撑满工作区高度：标题/搜索固定，详情区域独立滚动 */
-.api-docs {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-}
-
-.api-docs-title {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 0 16px 0;
-}
-
 .api-docs-search {
   flex: 0 0 auto;
   margin-bottom: 16px;
@@ -420,43 +362,7 @@ body.app-dark .api-docs-detail mark {
   color: #fff;
 }
 
-.code-block {
-  background: var(--ant-color-fill-quaternary, #f5f5f5);
-  border: 1px solid var(--ant-color-border-secondary, #e8e8e8);
-  border-radius: 6px;
-  overflow: hidden;
-  margin: 8px 0;
-}
-
-.code-block-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 12px;
-  background: var(--ant-color-fill-tertiary, #fafafa);
-  border-bottom: 1px solid var(--ant-color-border-secondary, #e8e8e8);
-  font-size: 12px;
-  color: var(--ant-color-text-secondary, #666);
-}
-
-.code-block pre {
-  margin: 0;
-  padding: 12px 16px;
-  overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.code-block code {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-}
-
 @media (max-width: 768px) {
-  .api-docs-title {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
   .api-docs-search {
     margin-bottom: 12px;
   }

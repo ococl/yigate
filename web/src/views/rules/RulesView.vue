@@ -272,38 +272,33 @@ onMounted(fetchData)
         <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理">
           <a-button type="primary" @click="openAddModal">新增规则</a-button>
         </a-empty>
-        <a-card
+        <MobileCard
           v-for="record in mobileItems"
           :key="record.index"
-          size="small"
-          :class="['mobile-card', { 'row-highlight': highlightIndex === record.index }]"
+          :highlight="highlightIndex === record.index"
         >
-          <div class="mobile-card-head">
+          <template #head>
             <a-space size="small">
               <a-tag>{{ record.index + 1 }}</a-tag>
               <a-typography-text strong>{{ record.type }}</a-typography-text>
             </a-space>
+          </template>
+          <template #extra>
             <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">匹配值</span>
-            <span class="mobile-value">
+          </template>
+          <MobileCardRow label="匹配值">
               <a-space wrap size="small">
                 <a-tag v-for="v in record.values" :key="v">{{ v }}</a-tag>
                 <span v-if="!record.values || record.values.length === 0" class="muted">—</span>
               </a-space>
-            </span>
-          </div>
-          <div class="mobile-card-row">
-            <span class="mobile-label">上游</span>
-            <span class="mobile-value">
+          </MobileCardRow>
+          <MobileCardRow label="上游">
               <a-space wrap size="small">
                 <a-tag v-for="u in record.upstreams" :key="u" color="purple">{{ u }}</a-tag>
                 <span v-if="!record.upstreams || record.upstreams.length === 0" class="muted">—</span>
               </a-space>
-            </span>
-          </div>
-          <div class="mobile-card-actions">
+          </MobileCardRow>
+          <template #actions>
             <a-button
               size="small"
               :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
@@ -331,8 +326,8 @@ onMounted(fetchData)
             >
               <a-button type="link" size="small" danger :loading="deleting === record.index">删除</a-button>
             </a-popconfirm>
-          </div>
-        </a-card>
+          </template>
+        </MobileCard>
         <a-pagination
           v-if="dataSource.length > MOBILE_PAGE_SIZE"
           v-model:current="mobilePage"

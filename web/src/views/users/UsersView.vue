@@ -174,11 +174,11 @@ onMounted(fetchData)
         <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证">
           <a-button type="primary" @click="showAddModal">新增用户</a-button>
         </a-empty>
-        <a-card v-for="record in mobileItems" :key="record.username" size="small" class="mobile-card">
-          <div class="mobile-card-head">
+        <MobileCard v-for="record in mobileItems" :key="record.username">
+          <template #head>
             <a-typography-text strong>{{ record.username }}</a-typography-text>
-          </div>
-          <div class="mobile-card-actions">
+          </template>
+          <template #actions>
             <a-button size="small" @click="showResetModal(record.username)">修改密码</a-button>
             <a-popconfirm
               title="删除后该用户将无法继续通过代理认证，确定删除？"
@@ -188,8 +188,8 @@ onMounted(fetchData)
             >
               <a-button type="link" size="small" danger :loading="deleting === record.username">删除</a-button>
             </a-popconfirm>
-          </div>
-        </a-card>
+          </template>
+        </MobileCard>
         <a-pagination
           v-if="dataSource.length > MOBILE_PAGE_SIZE"
           v-model:current="mobilePage"
