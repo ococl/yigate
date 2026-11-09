@@ -12,6 +12,8 @@ const loading = ref(false)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 const submitting = ref(false)
+// 正在删除的用户名，避免重复点击触发多次 DELETE
+const deleting = ref<string | null>(null)
 const modalVisible = ref(false)
 const passwordModalVisible = ref(false)
 const resetTarget = ref('')
@@ -98,12 +100,16 @@ async function handleResetPassword() {
 }
 
 async function handleDelete(username: string) {
+  if (deleting.value) return
+  deleting.value = username
   try {
     await deleteUser(username)
     message.success('删除成功')
     await fetchData()
   } catch {
     // 错误已由拦截器处理
+  } finally {
+    deleting.value = null
   }
 }
 
@@ -150,7 +156,7 @@ onMounted(fetchData)
               cancel-text="取消"
               @confirm="handleDelete(record.username)"
             >
-              <a-button size="small" danger>删除</a-button>
+              <a-button size="small" danger :loading="deleting === record.username">删除</a-button>
             </a-popconfirm>
           </div>
         </a-card>
@@ -175,7 +181,7 @@ onMounted(fetchData)
             cancel-text="取消"
             @confirm="handleDelete(record.username)"
           >
-            <a-button type="link" size="small" danger>删除</a-button>
+            <a-button type="link" size="small" danger :loading="deleting === record.username">删除</a-button>
           </a-popconfirm>
         </a-space>
       </template>

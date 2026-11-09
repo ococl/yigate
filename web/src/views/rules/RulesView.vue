@@ -14,6 +14,8 @@ const loading = ref(false)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 const movingIndex = ref<number | null>(null)
+// 正在删除的规则序号，避免重复点击触发多次 DELETE
+const deleting = ref<number | null>(null)
 const modalVisible = ref(false)
 const submitting = ref(false)
 const isEdit = ref(false)
@@ -164,12 +166,16 @@ async function handleMove(index: number, direction: 'up' | 'down') {
 }
 
 async function handleDelete(index: number) {
+  if (deleting.value !== null) return
+  deleting.value = index
   try {
     await deleteRule(index)
     message.success('删除成功')
     await fetchData()
   } catch {
     // 错误已由拦截器处理
+  } finally {
+    deleting.value = null
   }
 }
 
@@ -258,7 +264,7 @@ onMounted(fetchData)
               cancel-text="取消"
               @confirm="handleDelete(record.index)"
             >
-              <a-button size="small" danger>删除</a-button>
+              <a-button size="small" danger :loading="deleting === record.index">删除</a-button>
             </a-popconfirm>
           </div>
         </a-card>
@@ -323,7 +329,7 @@ onMounted(fetchData)
           </a-tooltip>
           <a-button type="link" size="small" @click="openEditModal(record)">编辑</a-button>
           <a-popconfirm title="确定删除此规则？" ok-text="删除" cancel-text="取消" @confirm="handleDelete(record.index)">
-            <a-button type="link" size="small" danger>删除</a-button>
+            <a-button type="link" size="small" danger :loading="deleting === record.index">删除</a-button>
           </a-popconfirm>
         </a-space>
       </template>

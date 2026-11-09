@@ -32,6 +32,8 @@ const loading = ref(false)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 const checking = ref<string | null>(null)
+// 正在删除的上游名，避免重复点击触发多次 DELETE
+const deleting = ref<string | null>(null)
 const checkingAll = ref(false)
 const toggling = ref<string | null>(null)
 // 本次会话内手动检查的结果，仅用于补充失败原因文案
@@ -295,6 +297,8 @@ async function handleToggle(record: UpstreamInfo, enabled: boolean) {
 }
 
 async function handleDelete(name: string) {
+  if (deleting.value) return
+  deleting.value = name
   try {
     await deleteUpstream(name)
     message.success('删除成功')
@@ -302,6 +306,8 @@ async function handleDelete(name: string) {
     await fetchData()
   } catch {
     // 错误已由拦截器处理
+  } finally {
+    deleting.value = null
   }
 }
 
@@ -511,7 +517,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
               cancel-text="取消"
               @confirm="handleDelete(record.name)"
             >
-              <a-button size="small" danger>删除</a-button>
+              <a-button size="small" danger :loading="deleting === record.name">删除</a-button>
             </a-popconfirm>
           </div>
         </a-card>
@@ -583,7 +589,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             cancel-text="取消"
             @confirm="handleDelete(record.name)"
           >
-            <a-button type="link" size="small" danger>删除</a-button>
+            <a-button type="link" size="small" danger :loading="deleting === record.name">删除</a-button>
           </a-popconfirm>
         </a-space>
       </template>

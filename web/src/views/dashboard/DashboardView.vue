@@ -376,9 +376,13 @@ useVisiblePolling(() => fetchData(true), 10000)
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
         <a-card size="small" style="height: 100%;">
-          <a-statistic title="可用上游" :value="aliveCount" :suffix="`/ ${upstreams.length || health?.upstream_count || 0}`" />
+          <a-statistic
+            title="可用上游"
+            :value="status ? aliveCount : '—'"
+            :suffix="status ? `/ ${upstreams.length || health?.upstream_count || 0}` : ''"
+          />
           <a-typography-text type="secondary" style="font-size: 12px;">
-            不可用 {{ deadCount }} · 未检测 {{ uncheckedCount }}
+            {{ status ? `不可用 ${deadCount} · 未检测 ${uncheckedCount}` : '状态接口不可用' }}
           </a-typography-text>
         </a-card>
       </a-col>

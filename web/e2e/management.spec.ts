@@ -131,3 +131,52 @@ test('geosite status failure shows an error state instead of "未找到"', async
   await page.locator('.ant-result-extra .ant-btn').click()
   await expect(page.getByText('数据加载失败')).toHaveCount(0)
 })
+
+test('dashboard shows placeholders when the status API fails', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/status', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+  )
+  await page.goto('/dashboard')
+
+  const upCard = page.locator('.ant-statistic').filter({ hasText: '可用上游' })
+  // 读不到状态时展示「—」，而不是 0 个可用上游
+  await expect(upCard).toContainText('—')
+  await expect(upCard).not.toContainText('不可用 0')
+  await expect(page.getByText('状态接口不可用')).toBeVisible()
+})
+
+test('upstream delete shows a loading state and sends only one request', async ({ page, request }) => {
+  const name = `${PREFIX}delete-slow`
+  await request.delete(`/api/v1/config/upstreams/${name}`, { headers: auth })
+  const created = await request.post('/api/v1/config/upstreams', {
+    headers: auth,
+    data: { name, url: 'http://127.0.0.1:9', types: ['http'] },
+  })
+  expect(created.ok()).toBeTruthy()
+
+  await login(page)
+  await page.goto('/upstreams')
+  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+
+  // 拖慢 DELETE，观察按钮 loading 与并发保护
+  let deletes = 0
+  await page.route('**/api/v1/config/upstreams/*', async (route) => {
+    if (route.request().method() !== 'DELETE') {
+      await route.continue()
+      return
+    }
+    deletes += 1
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await route.continue()
+  })
+
+  const row = page.locator('.ant-table-tbody tr.ant-table-row').filter({ hasText: name })
+  await row.getByText('删除', { exact: true }).click()
+  await page.locator('.ant-popover .ant-btn-primary').click()
+
+  await expect(page.locator('.ant-btn-loading').first()).toBeVisible()
+  await expect(row).toHaveCount(0, { timeout: 10000 })
+  expect(deletes).toBe(1)
+})
