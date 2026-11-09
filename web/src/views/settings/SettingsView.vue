@@ -565,8 +565,8 @@ onMounted(fetchAll)
                 <a-card size="small" title="检查与连接" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="健康检查间隔（秒）" tooltip="上游健康检查的全局默认间隔；0 表示停止周期性检查">
-                        <a-input-number
+                      <a-form-item html-for="stg-check-interval-seconds" label="健康检查间隔（秒）" tooltip="上游健康检查的全局默认间隔；0 表示停止周期性检查">
+                        <a-input-number id="stg-check-interval-seconds"
                           v-model:value="form.check_interval_seconds"
                           :min="0"
                           style="width: 100%;"
@@ -575,8 +575,8 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="最大连接数（兜底）" tooltip="listener 未单独设置时的并发上限；0 表示不限制">
-                        <a-input-number
+                      <a-form-item html-for="stg-max-connections" label="最大连接数（兜底）" tooltip="listener 未单独设置时的并发上限；0 表示不限制">
+                        <a-input-number id="stg-max-connections"
                           v-model:value="form.max_connections"
                           :min="0"
                           style="width: 100%;"
@@ -585,8 +585,8 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="日志级别">
-                        <a-select v-model:value="form.log_level" :options="logLevelOptions" aria-label="日志级别" />
+                      <a-form-item html-for="stg-log-level" label="日志级别">
+                        <a-select id="stg-log-level" v-model:value="form.log_level" :options="logLevelOptions" aria-label="日志级别" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -595,8 +595,8 @@ onMounted(fetchAll)
                 <a-card size="small" title="SOCKS5 能力">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="SOCKS5 BIND">
-                        <a-switch
+                      <a-form-item html-for="stg-socks5-allow-bind" label="SOCKS5 BIND">
+                        <a-switch id="stg-socks5-allow-bind"
                           v-model:checked="form.socks5_allow_bind"
                           checked-children="允许"
                           un-checked-children="禁止"
@@ -605,8 +605,8 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="SOCKS5 UDP ASSOCIATE">
-                        <a-switch
+                      <a-form-item html-for="stg-socks5-allow-udp-associate" label="SOCKS5 UDP ASSOCIATE">
+                        <a-switch id="stg-socks5-allow-udp-associate"
                           v-model:checked="form.socks5_allow_udp_associate"
                           checked-children="允许"
                           un-checked-children="禁止"
@@ -623,8 +623,8 @@ onMounted(fetchAll)
                 <a-card size="small" title="管理面板" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="内置 WebUI" tooltip="关闭后管理端口仅提供 API，不再返回前端页面">
-                        <a-switch
+                      <a-form-item html-for="stg-webui-enabled" label="内置 WebUI" tooltip="关闭后管理端口仅提供 API，不再返回前端页面">
+                        <a-switch id="stg-webui-enabled"
                           v-model:checked="form.webui_enabled"
                           checked-children="启用"
                           un-checked-children="关闭"
@@ -633,12 +633,12 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="16">
-                      <a-form-item
+                      <a-form-item html-for="stg-token-input"
                         label="管理令牌"
                         :tooltip="`对应 management_auth_token；当前${settings?.management_token_set ? '已设置' : '未设置'}。留空表示保持不变。`"
                       >
                         <div class="token-input-row">
-                          <a-input-password
+                          <a-input-password id="stg-token-input"
                             v-model:value="tokenInput"
                             placeholder="留空则不修改，修改后需重新登录"
                             autocomplete="new-password"
@@ -677,18 +677,18 @@ onMounted(fetchAll)
                 <a-card size="small" title="路由策略" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="兜底动作" tooltip="所有规则都未命中时使用的动作">
-                        <a-select v-model:value="form.routing_final" :options="finalOptions" />
+                      <a-form-item html-for="stg-routing-final" label="兜底动作" tooltip="所有规则都未命中时使用的动作">
+                        <a-select id="stg-routing-final" v-model:value="form.routing_final" :options="finalOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="自动模式" tooltip="final=auto 时的判断方式">
-                        <a-select v-model:value="form.auto_mode" :options="autoModeOptions" />
+                      <a-form-item html-for="stg-auto-mode" label="自动模式" tooltip="final=auto 时的判断方式">
+                        <a-select id="stg-auto-mode" v-model:value="form.auto_mode" :options="autoModeOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item label="直连探测超时（秒）">
-                        <a-input-number
+                      <a-form-item html-for="stg-auto-direct-timeout-seconds" label="直连探测超时（秒）">
+                        <a-input-number id="stg-auto-direct-timeout-seconds"
                           v-model:value="form.auto_direct_timeout_seconds"
                           :min="0.1"
                           :step="0.1"
@@ -697,13 +697,13 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item label="自动结果缓存（秒）">
-                        <a-input-number v-model:value="form.auto_cache_ttl_seconds" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-auto-cache-ttl-seconds" label="自动结果缓存（秒）">
+                        <a-input-number id="stg-auto-cache-ttl-seconds" v-model:value="form.auto_cache_ttl_seconds" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                   </a-row>
-                  <a-form-item label="socks5h 重定向">
-                    <a-switch v-model:checked="form.socks5h_redirect_enabled" aria-label="socks5h 重定向" />
+                  <a-form-item html-for="stg-socks5h-redirect-enabled" label="socks5h 重定向">
+                    <a-switch id="stg-socks5h-redirect-enabled" v-model:checked="form.socks5h_redirect_enabled" aria-label="socks5h 重定向" />
                     <a-typography-text type="secondary" style="margin-left: 8px;">
                       启用后，目标为 socks5h:// 的请求会重定向到指定上游
                     </a-typography-text>
@@ -716,13 +716,13 @@ onMounted(fetchAll)
                 <a-card size="small" title="DNS 解析" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="解析方式">
-                        <a-select v-model:value="form.dns_type" :options="dnsTypeOptions" />
+                      <a-form-item html-for="stg-dns-type" label="解析方式">
+                        <a-select id="stg-dns-type" v-model:value="form.dns_type" :options="dnsTypeOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item label="DoH URL" tooltip="仅 doh 模式生效">
-                        <a-input
+                      <a-form-item html-for="stg-doh-url" label="DoH URL" tooltip="仅 doh 模式生效">
+                        <a-input id="stg-doh-url"
                           v-model:value="form.doh_url"
                           :disabled="form.dns_type !== 'doh'"
                           placeholder="https://dns.example/dns-query"
@@ -730,25 +730,25 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item label="DoT 地址" tooltip="仅 dot 模式生效，格式 host:port">
-                        <a-input v-model:value="form.dot_addr" :disabled="form.dns_type !== 'dot'" placeholder="1.1.1.1:853" />
+                      <a-form-item html-for="stg-dot-addr" label="DoT 地址" tooltip="仅 dot 模式生效，格式 host:port">
+                        <a-input id="stg-dot-addr" v-model:value="form.dot_addr" :disabled="form.dns_type !== 'dot'" placeholder="1.1.1.1:853" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item label="IP 优先级">
-                        <a-select v-model:value="form.ip_precedence" :options="ipPrecedenceOptions" />
+                      <a-form-item html-for="stg-ip-precedence" label="IP 优先级">
+                        <a-select id="stg-ip-precedence" v-model:value="form.ip_precedence" :options="ipPrecedenceOptions" />
                       </a-form-item>
                     </a-col>
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="解析超时（秒）">
-                        <a-input-number v-model:value="form.dns_timeout_seconds" :min="0.1" :step="0.1" style="width: 100%;" />
+                      <a-form-item html-for="stg-dns-timeout-seconds" label="解析超时（秒）">
+                        <a-input-number id="stg-dns-timeout-seconds" v-model:value="form.dns_timeout_seconds" :min="0.1" :step="0.1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="失败回退系统 DNS">
-                        <a-switch v-model:checked="form.dns_fallback" aria-label="失败回退系统 DNS" />
+                      <a-form-item html-for="stg-dns-fallback" label="失败回退系统 DNS">
+                        <a-switch id="stg-dns-fallback" v-model:checked="form.dns_fallback" aria-label="失败回退系统 DNS" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -766,18 +766,18 @@ onMounted(fetchAll)
                   />
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="拨号超时（秒）">
-                        <a-input-number v-model:value="form.dial_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
+                      <a-form-item html-for="stg-dial-timeout-seconds" label="拨号超时（秒）">
+                        <a-input-number id="stg-dial-timeout-seconds" v-model:value="form.dial_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="握手超时（秒）">
-                        <a-input-number v-model:value="form.handshake_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
+                      <a-form-item html-for="stg-handshake-timeout-seconds" label="握手超时（秒）">
+                        <a-input-number id="stg-handshake-timeout-seconds" v-model:value="form.handshake_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="HTTP 交换超时（秒）">
-                        <a-input-number
+                      <a-form-item html-for="stg-http-exchange-timeout-seconds" label="HTTP 交换超时（秒）">
+                        <a-input-number id="stg-http-exchange-timeout-seconds"
                           v-model:value="form.http_exchange_timeout_seconds"
                           :min="0"
                           :step="0.1"
@@ -786,8 +786,8 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="隧道空闲超时（秒）">
-                        <a-input-number v-model:value="form.tunnel_idle_timeout_seconds" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-tunnel-idle-timeout-seconds" label="隧道空闲超时（秒）">
+                        <a-input-number id="stg-tunnel-idle-timeout-seconds" v-model:value="form.tunnel_idle_timeout_seconds" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -799,49 +799,49 @@ onMounted(fetchAll)
                 <a-card size="small" title="默认动作">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="默认动作">
-                        <a-select v-model:value="form.default_action" :options="destinationActionOptions" />
+                      <a-form-item html-for="stg-default-action" label="默认动作">
+                        <a-select id="stg-default-action" v-model:value="form.default_action" :options="destinationActionOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item label="保护私网目标" tooltip="启用后默认拒绝访问内网地址">
-                        <a-switch v-model:checked="form.protect_private" aria-label="保护私网目标" />
+                      <a-form-item html-for="stg-protect-private" label="保护私网目标" tooltip="启用后默认拒绝访问内网地址">
+                        <a-switch id="stg-protect-private" v-model:checked="form.protect_private" aria-label="保护私网目标" />
                       </a-form-item>
                     </a-col>
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="拒绝 CIDR">
-                        <a-select v-model:value="form.deny_cidrs" mode="tags" placeholder="10.0.0.0/8" style="width: 100%;" />
+                      <a-form-item html-for="stg-deny-cidrs" label="拒绝 CIDR">
+                        <a-select id="stg-deny-cidrs" v-model:value="form.deny_cidrs" mode="tags" placeholder="10.0.0.0/8" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="允许 CIDR">
-                        <a-select v-model:value="form.allow_cidrs" mode="tags" placeholder="192.168.0.0/16" style="width: 100%;" />
-                      </a-form-item>
-                    </a-col>
-                  </a-row>
-                  <a-row :gutter="16">
-                    <a-col :xs="24" :md="12">
-                      <a-form-item label="拒绝域名">
-                        <a-select v-model:value="form.deny_domains" mode="tags" placeholder="example.com" style="width: 100%;" />
-                      </a-form-item>
-                    </a-col>
-                    <a-col :xs="24" :md="12">
-                      <a-form-item label="允许域名">
-                        <a-select v-model:value="form.allow_domains" mode="tags" placeholder="*.internal" style="width: 100%;" />
+                      <a-form-item html-for="stg-allow-cidrs" label="允许 CIDR">
+                        <a-select id="stg-allow-cidrs" v-model:value="form.allow_cidrs" mode="tags" placeholder="192.168.0.0/16" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="拒绝端口" tooltip="逗号或空格分隔，如 25, 135, 445">
-                        <a-input v-model:value="denyPortsText" placeholder="25, 135, 445" />
+                      <a-form-item html-for="stg-deny-domains" label="拒绝域名">
+                        <a-select id="stg-deny-domains" v-model:value="form.deny_domains" mode="tags" placeholder="example.com" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="允许端口">
-                        <a-input v-model:value="allowPortsText" placeholder="80, 443" />
+                      <a-form-item html-for="stg-allow-domains" label="允许域名">
+                        <a-select id="stg-allow-domains" v-model:value="form.allow_domains" mode="tags" placeholder="*.internal" style="width: 100%;" />
+                      </a-form-item>
+                    </a-col>
+                  </a-row>
+                  <a-row :gutter="16">
+                    <a-col :xs="24" :md="12">
+                      <a-form-item html-for="stg-deny-ports-text" label="拒绝端口" tooltip="逗号或空格分隔，如 25, 135, 445">
+                        <a-input id="stg-deny-ports-text" v-model:value="denyPortsText" placeholder="25, 135, 445" />
+                      </a-form-item>
+                    </a-col>
+                    <a-col :xs="24" :md="12">
+                      <a-form-item html-for="stg-allow-ports-text" label="允许端口">
+                        <a-input id="stg-allow-ports-text" v-model:value="allowPortsText" placeholder="80, 443" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -853,23 +853,23 @@ onMounted(fetchAll)
                 <a-card size="small" title="客户端与限速">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item label="客户端白名单" tooltip="留空表示不限制；支持单个 IP 或 CIDR">
-                        <a-select v-model:value="form.allowed_clients" mode="tags" placeholder="127.0.0.1, 10.0.0.0/8" style="width: 100%;" />
+                      <a-form-item html-for="stg-allowed-clients" label="客户端白名单" tooltip="留空表示不限制；支持单个 IP 或 CIDR">
+                        <a-select id="stg-allowed-clients" v-model:value="form.allowed_clients" mode="tags" placeholder="127.0.0.1, 10.0.0.0/8" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item label="每秒连接上限" tooltip="0 表示不限制">
-                        <a-input-number v-model:value="form.rate_limit_connections_per_second" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-rate-limit-connections-per-second" label="每秒连接上限" tooltip="0 表示不限制">
+                        <a-input-number id="stg-rate-limit-connections-per-second" v-model:value="form.rate_limit_connections_per_second" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item label="突发容量">
-                        <a-input-number v-model:value="form.rate_limit_burst" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-rate-limit-burst" label="突发容量">
+                        <a-input-number id="stg-rate-limit-burst" v-model:value="form.rate_limit_burst" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item label="单用户最大连接" tooltip="0 表示不限制">
-                        <a-input-number v-model:value="form.max_conns_per_user" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-max-conns-per-user" label="单用户最大连接" tooltip="0 表示不限制">
+                        <a-input-number id="stg-max-conns-per-user" v-model:value="form.max_conns_per_user" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -881,28 +881,28 @@ onMounted(fetchAll)
                 <a-card size="small" title="流量审计与配额">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="4">
-                      <a-form-item label="启用流量审计">
-                        <a-switch v-model:checked="form.traffic_audit_enabled" checked-children="启用" un-checked-children="关闭" />
+                      <a-form-item html-for="stg-traffic-audit-enabled" label="启用流量审计">
+                        <a-switch id="stg-traffic-audit-enabled" v-model:checked="form.traffic_audit_enabled" checked-children="启用" un-checked-children="关闭" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item label="单用户配额（字节）" tooltip="0 表示不限制">
-                        <a-input-number v-model:value="form.per_user_quota" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-per-user-quota" label="单用户配额（字节）" tooltip="0 表示不限制">
+                        <a-input-number id="stg-per-user-quota" v-model:value="form.per_user_quota" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item label="单上游配额（字节）" tooltip="0 表示不限制">
-                        <a-input-number v-model:value="form.per_upstream_quota" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-per-upstream-quota" label="单上游配额（字节）" tooltip="0 表示不限制">
+                        <a-input-number id="stg-per-upstream-quota" v-model:value="form.per_upstream_quota" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item label="配额窗口（秒）" tooltip="0 表示使用默认 1 小时">
-                        <a-input-number v-model:value="form.quota_window_seconds" :min="0" style="width: 100%;" />
+                      <a-form-item html-for="stg-quota-window-seconds" label="配额窗口（秒）" tooltip="0 表示使用默认 1 小时">
+                        <a-input-number id="stg-quota-window-seconds" v-model:value="form.quota_window_seconds" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item label="流量保留天数" tooltip="默认保留 30 天，0 表示使用默认值">
-                        <a-input-number
+                      <a-form-item html-for="stg-traffic-retention-days" label="流量保留天数" tooltip="默认保留 30 天，0 表示使用默认值">
+                        <a-input-number id="stg-traffic-retention-days"
                           v-model:value="form.traffic_retention_days"
                           :min="0"
                           :max="3650"

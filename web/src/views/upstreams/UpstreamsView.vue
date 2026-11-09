@@ -574,19 +574,19 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     @ok="handleSubmit"
   >
     <a-form layout="vertical">
-      <a-form-item label="启用" tooltip="关闭后该上游不参与流量调度与健康检查，配置保留，可随时重新启用。">
-        <a-switch v-model:checked="form.enabled" checked-children="启用" un-checked-children="禁用" />
+      <a-form-item html-for="up-enabled" label="启用" tooltip="关闭后该上游不参与流量调度与健康检查，配置保留，可随时重新启用。">
+        <a-switch id="up-enabled" v-model:checked="form.enabled" checked-children="启用" un-checked-children="禁用" />
       </a-form-item>
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
-          <a-form-item label="名称" required tooltip="上游唯一标识。编辑时可修改，修改后会同步更新路由规则中对该上游的引用。">
-            <a-input v-model:value="form.name" placeholder="如 default、proxy-hk" />
+          <a-form-item html-for="up-name" label="名称" required tooltip="上游唯一标识。编辑时可修改，修改后会同步更新路由规则中对该上游的引用。">
+            <a-input id="up-name" v-model:value="form.name" placeholder="如 default、proxy-hk" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
-          <a-form-item label="URL" required tooltip="上游代理地址，支持 http://、https://、socks5://、socks5h:// 协议。">
-            <a-input v-model:value="form.url" placeholder="如 socks5://127.0.0.1:1080" />
+          <a-form-item html-for="up-url" label="URL" required tooltip="上游代理地址，支持 http://、https://、socks5://、socks5h:// 协议。">
+            <a-input id="up-url" v-model:value="form.url" placeholder="如 socks5://127.0.0.1:1080" />
           </a-form-item>
         </a-col>
       </a-row>
@@ -597,18 +597,18 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <a-row :gutter="16">
         <a-col :span="8">
-          <a-form-item label="优先级" :tooltip="priorityHelp">
-            <a-input-number v-model:value="form.priority" :min="0" style="width: 100%;" />
+          <a-form-item html-for="up-priority" label="优先级" :tooltip="priorityHelp">
+            <a-input-number id="up-priority" v-model:value="form.priority" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :span="8">
-          <a-form-item label="权重" :tooltip="weightHelp">
-            <a-input-number v-model:value="form.weight" :min="0" style="width: 100%;" />
+          <a-form-item html-for="up-weight" label="权重" :tooltip="weightHelp">
+            <a-input-number id="up-weight" v-model:value="form.weight" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :span="8">
-          <a-form-item label="策略" :tooltip="strategyHelp">
-            <a-select v-model:value="form.strategy" :options="strategySelectOptions" />
+          <a-form-item html-for="up-strategy" label="策略" :tooltip="strategyHelp">
+            <a-select id="up-strategy" v-model:value="form.strategy" :options="strategySelectOptions" />
           </a-form-item>
         </a-col>
       </a-row>
@@ -617,13 +617,13 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
-          <a-form-item label="探测方式" :tooltip="healthCheckHelp">
-            <a-select v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
+          <a-form-item html-for="up-type" label="探测方式" :tooltip="healthCheckHelp">
+            <a-select id="up-type" v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
-          <a-form-item label="探测路径" :tooltip="'仅 http/https 探测方式需要，如 /health。'">
-            <a-input
+          <a-form-item html-for="up-path" label="探测路径" :tooltip="'仅 http/https 探测方式需要，如 /health。'">
+            <a-input id="up-path"
               v-model:value="form.health_check.path"
               :disabled="!showHealthCheckPath"
               placeholder="/health"
@@ -634,29 +634,29 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item label="间隔（秒）" tooltip="0 表示使用全局默认间隔">
-            <a-input-number v-model:value="form.health_check.interval_seconds" :min="0" style="width: 100%;" />
+          <a-form-item html-for="up-interval-seconds" label="间隔（秒）" tooltip="0 表示使用全局默认间隔">
+            <a-input-number id="up-interval-seconds" v-model:value="form.health_check.interval_seconds" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item label="超时（秒）" tooltip="0 表示使用全局默认超时">
-            <a-input-number v-model:value="form.health_check.timeout_seconds" :min="0" style="width: 100%;" />
+          <a-form-item html-for="up-timeout-seconds" label="超时（秒）" tooltip="0 表示使用全局默认超时">
+            <a-input-number id="up-timeout-seconds" v-model:value="form.health_check.timeout_seconds" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item label="失败阈值" tooltip="连续失败多少次后标记为不可用，0 表示使用全局默认值">
-            <a-input-number v-model:value="form.health_check.failure_threshold" :min="0" style="width: 100%;" />
+          <a-form-item html-for="up-failure-threshold" label="失败阈值" tooltip="连续失败多少次后标记为不可用，0 表示使用全局默认值">
+            <a-input-number id="up-failure-threshold" v-model:value="form.health_check.failure_threshold" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item label="恢复阈值" tooltip="连续成功多少次后恢复可用，0 表示使用全局默认值">
-            <a-input-number v-model:value="form.health_check.success_threshold" :min="0" style="width: 100%;" />
+          <a-form-item html-for="up-success-threshold" label="恢复阈值" tooltip="连续成功多少次后恢复可用，0 表示使用全局默认值">
+            <a-input-number id="up-success-threshold" v-model:value="form.health_check.success_threshold" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
       </a-row>
 
-      <a-form-item label="期望状态码" tooltip="仅 http/https 探测方式使用，留空表示使用默认 200-299">
-        <a-select
+      <a-form-item html-for="up-expected-codes" label="期望状态码" tooltip="仅 http/https 探测方式使用，留空表示使用默认 200-299">
+        <a-select id="up-expected-codes"
           v-model:value="form.health_check.expected_codes"
           mode="tags"
           :disabled="!showHealthCheckPath"

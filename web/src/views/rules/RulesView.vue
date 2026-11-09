@@ -334,8 +334,8 @@ onMounted(fetchData)
     <a-form layout="vertical">
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
-          <a-form-item label="类型" required>
-            <a-select v-model:value="form.type" :options="typeOptions" />
+          <a-form-item html-for="rule-type" label="类型" required>
+            <a-select id="rule-type" v-model:value="form.type" :options="typeOptions" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
@@ -345,8 +345,9 @@ onMounted(fetchData)
         </a-col>
       </a-row>
 
-      <a-form-item v-if="needsValues" label="匹配值（每行一个）" required>
+      <a-form-item v-if="needsValues" html-for="rule-values" label="匹配值（每行一个）" required>
         <a-textarea
+          id="rule-values"
           :value="valuesText"
           :rows="5"
           :placeholder="form.type === 'ip_cidr' ? '10.0.0.0/8\n192.168.0.0/16' : 'example.com\nexample.org'"
@@ -365,8 +366,8 @@ onMounted(fetchData)
         <a-alert type="info" show-icon message="match 类型匹配所有请求，无需填写匹配值，通常放在规则末尾作为兜底。" />
       </a-form-item>
 
-      <a-form-item v-if="needsUpstreams" label="指定上游（可多选）">
-        <a-select
+      <a-form-item html-for="rule-upstreams" v-if="needsUpstreams" label="指定上游（可多选）">
+        <a-select id="rule-upstreams"
           v-model:value="form.upstreams"
           mode="multiple"
           :options="upstreamOptions"

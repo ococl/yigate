@@ -331,15 +331,15 @@ onMounted(fetchInfo)
             </template>
             <div class="column-scroll">
               <a-form layout="vertical">
-                <a-form-item label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
-                  <a-input
+                <a-form-item html-for="geo-update-url" label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
+                  <a-input id="geo-update-url"
                     v-model:value="sourceForm.update_url"
                     placeholder="https://..."
                     aria-label="GeoSite 更新地址"
                   />
                 </a-form-item>
-                <a-form-item label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
-                  <a-input-password
+                <a-form-item html-for="geo-update-token" label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
+                  <a-input-password id="geo-update-token"
                     v-model:value="sourceForm.update_token"
                     :placeholder="
                       restoredDefaults && info?.update_token_set
@@ -355,13 +355,13 @@ onMounted(fetchInfo)
 
                 <div class="field-row">
                   <div class="field-block">
-                    <a-form-item label="自动更新">
-                      <a-switch v-model:checked="sourceForm.auto_update" aria-label="自动更新" />
+                    <a-form-item html-for="geo-auto-update" label="自动更新">
+                      <a-switch id="geo-auto-update" v-model:checked="sourceForm.auto_update" aria-label="自动更新" />
                     </a-form-item>
                   </div>
                   <div class="field-block">
-                    <a-form-item label="间隔（小时）">
-                      <a-input-number
+                    <a-form-item html-for="geo-update-interval-hours" label="间隔（小时）">
+                      <a-input-number id="geo-update-interval-hours"
                         v-model:value="sourceForm.update_interval_hours"
                         :min="1"
                         :max="8760"
@@ -372,11 +372,11 @@ onMounted(fetchInfo)
                   </div>
                 </div>
 
-                <a-form-item
+                <a-form-item html-for="geo-use-upstream"
                   label="通过上游代理下载"
                   tooltip="优先使用已配置且可用的上游代理，全部失败后回退直连；网络正常时可关闭"
                 >
-                  <a-switch v-model:checked="sourceForm.use_upstream" aria-label="通过上游代理下载" />
+                  <a-switch id="geo-use-upstream" v-model:checked="sourceForm.use_upstream" aria-label="通过上游代理下载" />
                   <a-typography-text type="secondary" class="foot-hint" style="margin-left: 8px;">
                     {{ sourceForm.use_upstream ? '优先走上游' : '始终直连' }}
                   </a-typography-text>
@@ -411,8 +411,8 @@ onMounted(fetchInfo)
               />
 
               <a-form layout="vertical">
-                <a-form-item label="允许下游同步">
-                  <a-switch
+                <a-form-item html-for="geo-enabled" label="允许下游同步">
+                  <a-switch id="geo-enabled"
                     v-model:checked="syncForm.enabled"
                     aria-label="允许下游同步"
                     @change="handleSyncToggle"

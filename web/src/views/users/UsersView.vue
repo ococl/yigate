@@ -165,11 +165,11 @@ onMounted(fetchData)
     @ok="handleSubmit"
   >
     <a-form layout="vertical">
-      <a-form-item label="用户名" required>
-        <a-input v-model:value="form.username" placeholder="用户名" />
+      <a-form-item html-for="user-username" label="用户名" required>
+        <a-input id="user-username" v-model:value="form.username" placeholder="用户名" />
       </a-form-item>
-      <a-form-item label="密码" required>
-        <a-input-password v-model:value="form.password" placeholder="密码" autocomplete="new-password" />
+      <a-form-item html-for="user-password" label="密码" required>
+        <a-input-password id="user-password" v-model:value="form.password" placeholder="密码" autocomplete="new-password" />
       </a-form-item>
     </a-form>
   </a-modal>
@@ -183,8 +183,8 @@ onMounted(fetchData)
     @ok="handleResetPassword"
   >
     <a-form layout="vertical">
-      <a-form-item label="新密码" required>
-        <a-input-password v-model:value="resetPassword" placeholder="至少 4 位" autocomplete="new-password" />
+      <a-form-item html-for="user-reset-password" label="新密码" required>
+        <a-input-password id="user-reset-password" v-model:value="resetPassword" placeholder="至少 4 位" autocomplete="new-password" />
       </a-form-item>
     </a-form>
   </a-modal>
