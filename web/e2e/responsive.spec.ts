@@ -76,3 +76,21 @@ test('settings switches to a section picker on mobile', async ({ page }) => {
     .click()
   await expect(page.getByRole('heading', { name: '流量审计与配额' })).toBeVisible()
 })
+
+test('mobile empty list keeps the create action reachable', async ({ page }) => {
+  await login(page)
+  await page.route('**/api/v1/config/upstreams', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ upstreams: [] }) }),
+  )
+  await page.goto('/upstreams')
+
+  const empty = page.locator('.ant-empty').filter({ hasText: '暂无上游' })
+  await expect(empty).toBeVisible()
+  await empty.getByRole('button', { name: '新增上游' }).click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+  // 窄屏下弹窗不应超出视口
+  const box = await dialog.boundingBox()
+  expect(box?.width ?? 0).toBeLessThanOrEqual(390)
+})

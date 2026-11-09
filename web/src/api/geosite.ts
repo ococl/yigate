@@ -10,8 +10,12 @@ export function getGeoSiteInfo(options?: { silent?: boolean }): Promise<GeoSiteI
 }
 
 // updateGeoSite 立即从配置的更新地址拉取一次数据。
+// 需要下载并解析远端数据集，耗时远超普通接口，单独放宽超时；
+// 沿用全局 15s 会让还在正常下载的更新被误判为失败。
 export function updateGeoSite(): Promise<GeoSiteUpdateResult> {
-  return request.post('/api/v1/geosite/update').then((r) => r.data)
+  return request
+    .post('/api/v1/geosite/update', undefined, { timeout: 180000 })
+    .then((r) => r.data)
 }
 
 // getGeoSiteSyncToken 读取当前只读同步令牌（仅管理令牌可用），供界面掩码展示与复制。
