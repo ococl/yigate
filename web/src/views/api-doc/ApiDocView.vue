@@ -115,11 +115,12 @@ async function copyToClipboard(text: string) {
     </div>
 
     <!-- 搜索框 -->
-    <a-input-search
+    <a-input
       v-model:value="searchKeyword"
       class="api-docs-search"
       placeholder="搜索端点路径、名称或描述..."
       allow-clear
+      aria-label="搜索端点路径、名称或描述"
     />
 
     <div class="api-docs-body">

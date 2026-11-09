@@ -27,7 +27,6 @@ declare module 'vue' {
     AInput: typeof import('antdv-next')['Input']
     AInputNumber: typeof import('antdv-next')['InputNumber']
     AInputPassword: typeof import('antdv-next')['InputPassword']
-    AInputSearch: typeof import('antdv-next')['InputSearch']
     ALayout: typeof import('antdv-next')['Layout']
     ALayoutContent: typeof import('antdv-next')['LayoutContent']
     ALayoutHeader: typeof import('antdv-next')['LayoutHeader']

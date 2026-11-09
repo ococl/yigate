@@ -566,17 +566,27 @@ onMounted(fetchAll)
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
                       <a-form-item label="健康检查间隔（秒）" tooltip="上游健康检查的全局默认间隔；0 表示停止周期性检查">
-                        <a-input-number v-model:value="form.check_interval_seconds" :min="0" style="width: 100%;" />
+                        <a-input-number
+                          v-model:value="form.check_interval_seconds"
+                          :min="0"
+                          style="width: 100%;"
+                          aria-label="健康检查间隔（秒）"
+                        />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
                       <a-form-item label="最大连接数（兜底）" tooltip="listener 未单独设置时的并发上限；0 表示不限制">
-                        <a-input-number v-model:value="form.max_connections" :min="0" style="width: 100%;" />
+                        <a-input-number
+                          v-model:value="form.max_connections"
+                          :min="0"
+                          style="width: 100%;"
+                          aria-label="最大连接数（兜底）"
+                        />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
                       <a-form-item label="日志级别">
-                        <a-select v-model:value="form.log_level" :options="logLevelOptions" />
+                        <a-select v-model:value="form.log_level" :options="logLevelOptions" aria-label="日志级别" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -586,7 +596,12 @@ onMounted(fetchAll)
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
                       <a-form-item label="SOCKS5 BIND">
-                        <a-switch v-model:checked="form.socks5_allow_bind" checked-children="允许" un-checked-children="禁止" />
+                        <a-switch
+                          v-model:checked="form.socks5_allow_bind"
+                          checked-children="允许"
+                          un-checked-children="禁止"
+                          aria-label="SOCKS5 BIND"
+                        />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
@@ -595,6 +610,7 @@ onMounted(fetchAll)
                           v-model:checked="form.socks5_allow_udp_associate"
                           checked-children="允许"
                           un-checked-children="禁止"
+                          aria-label="SOCKS5 UDP ASSOCIATE"
                         />
                       </a-form-item>
                     </a-col>
@@ -608,7 +624,12 @@ onMounted(fetchAll)
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
                       <a-form-item label="内置 WebUI" tooltip="关闭后管理端口仅提供 API，不再返回前端页面">
-                        <a-switch v-model:checked="form.webui_enabled" checked-children="启用" un-checked-children="关闭" />
+                        <a-switch
+                          v-model:checked="form.webui_enabled"
+                          checked-children="启用"
+                          un-checked-children="关闭"
+                          aria-label="内置 WebUI"
+                        />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="16">
@@ -682,7 +703,7 @@ onMounted(fetchAll)
                     </a-col>
                   </a-row>
                   <a-form-item label="socks5h 重定向">
-                    <a-switch v-model:checked="form.socks5h_redirect_enabled" />
+                    <a-switch v-model:checked="form.socks5h_redirect_enabled" aria-label="socks5h 重定向" />
                     <a-typography-text type="secondary" style="margin-left: 8px;">
                       启用后，目标为 socks5h:// 的请求会重定向到指定上游
                     </a-typography-text>
@@ -727,7 +748,7 @@ onMounted(fetchAll)
                     </a-col>
                     <a-col :xs="24" :md="6">
                       <a-form-item label="失败回退系统 DNS">
-                        <a-switch v-model:checked="form.dns_fallback" />
+                        <a-switch v-model:checked="form.dns_fallback" aria-label="失败回退系统 DNS" />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -784,7 +805,7 @@ onMounted(fetchAll)
                     </a-col>
                     <a-col :xs="24" :md="6">
                       <a-form-item label="保护私网目标" tooltip="启用后默认拒绝访问内网地址">
-                        <a-switch v-model:checked="form.protect_private" />
+                        <a-switch v-model:checked="form.protect_private" aria-label="保护私网目标" />
                       </a-form-item>
                     </a-col>
                   </a-row>

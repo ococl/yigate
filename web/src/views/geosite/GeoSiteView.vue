@@ -332,7 +332,11 @@ onMounted(fetchInfo)
             <div class="column-scroll">
               <a-form layout="vertical">
                 <a-form-item label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
-                  <a-input v-model:value="sourceForm.update_url" placeholder="https://..." />
+                  <a-input
+                    v-model:value="sourceForm.update_url"
+                    placeholder="https://..."
+                    aria-label="GeoSite 更新地址"
+                  />
                 </a-form-item>
                 <a-form-item label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
                   <a-input-password
@@ -345,13 +349,14 @@ onMounted(fetchInfo)
                           : '可选，Bearer 令牌'
                     "
                     autocomplete="new-password"
+                    aria-label="GeoSite 更新令牌"
                   />
                 </a-form-item>
 
                 <div class="field-row">
                   <div class="field-block">
                     <a-form-item label="自动更新">
-                      <a-switch v-model:checked="sourceForm.auto_update" />
+                      <a-switch v-model:checked="sourceForm.auto_update" aria-label="自动更新" />
                     </a-form-item>
                   </div>
                   <div class="field-block">
@@ -361,6 +366,7 @@ onMounted(fetchInfo)
                         :min="1"
                         :max="8760"
                         style="width: 100%;"
+                        aria-label="自动更新间隔（小时）"
                       />
                     </a-form-item>
                   </div>
@@ -370,7 +376,7 @@ onMounted(fetchInfo)
                   label="通过上游代理下载"
                   tooltip="优先使用已配置且可用的上游代理，全部失败后回退直连；网络正常时可关闭"
                 >
-                  <a-switch v-model:checked="sourceForm.use_upstream" />
+                  <a-switch v-model:checked="sourceForm.use_upstream" aria-label="通过上游代理下载" />
                   <a-typography-text type="secondary" class="foot-hint" style="margin-left: 8px;">
                     {{ sourceForm.use_upstream ? '优先走上游' : '始终直连' }}
                   </a-typography-text>
@@ -406,7 +412,11 @@ onMounted(fetchInfo)
 
               <a-form layout="vertical">
                 <a-form-item label="允许下游同步">
-                  <a-switch v-model:checked="syncForm.enabled" @change="handleSyncToggle" />
+                  <a-switch
+                    v-model:checked="syncForm.enabled"
+                    aria-label="允许下游同步"
+                    @change="handleSyncToggle"
+                  />
                 </a-form-item>
                 <a-form-item
                   label="同步令牌"
@@ -417,6 +427,7 @@ onMounted(fetchInfo)
                       :value="syncForm.token"
                       readonly
                       :placeholder="loading && info?.sync_token_set ? '正在加载…' : '尚未生成'"
+                      aria-label="GeoSite 同步令牌"
                     />
                     <a-button
                       :disabled="!syncForm.token"

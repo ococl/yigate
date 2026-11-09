@@ -105,11 +105,12 @@ useVisiblePolling(() => fetchData(false), 15000)
         </a-typography-text>
       </div>
       <a-space wrap class="traffic-actions">
-        <a-input-search
+        <a-input
           v-model:value="keyword"
           class="traffic-search"
           placeholder="搜索用户、上游或目标"
           allow-clear
+          aria-label="搜索用户、上游或目标"
         />
         <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
       </a-space>
