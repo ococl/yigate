@@ -4,6 +4,7 @@ import { message } from 'antdv-next'
 import axios from 'axios'
 import { generateGeoSiteSyncToken, getGeoSiteInfo, getGeoSiteSyncToken, updateGeoSite } from '@/api/geosite'
 import { updateSettings } from '@/api/settings'
+import LoadError from '@/components/LoadError.vue'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/datetime'
 import { formatBytes } from '@/utils/format'
@@ -12,6 +13,8 @@ import type { GeoSiteInfo, SettingsPatch } from '@/types/api'
 const info = ref<GeoSiteInfo | null>(null)
 // unsupported 标记当前后端没有 GeoSite 管理接口（通常是服务端版本较旧）。
 const unsupported = ref(false)
+// 状态读取失败时用错误态替代概要区，避免把「读不到」显示成「未找到」
+const loadError = ref(false)
 const loading = ref(false)
 const updating = ref(false)
 const savingSource = ref(false)
@@ -89,6 +92,7 @@ async function fetchInfo() {
     const data = await getGeoSiteInfo({ silent: true })
     applyInfo(data)
     unsupported.value = false
+    loadError.value = false
     if (data.sync_token_set) {
       await loadSyncToken()
     }
@@ -97,6 +101,7 @@ async function fetchInfo() {
     // 而不是弹一个含义不明的「请求错误 (404)」。
     if (errorStatus(error) === 404) {
       unsupported.value = true
+      loadError.value = false
       info.value = null
       return
     }
@@ -105,6 +110,7 @@ async function fetchInfo() {
       // 认证失效由请求拦截器统一跳转登录页
       return
     }
+    loadError.value = true
     message.error(status ? `加载 GeoSite 状态失败（${status}）` : '加载 GeoSite 状态失败，请检查后端服务')
   } finally {
     loading.value = false
@@ -268,7 +274,14 @@ onMounted(fetchInfo)
       description="请求 /api/v1/geosite 返回 404，说明所连接服务端的版本较旧。请重新构建并重启后端服务（make build），或把开发服务器代理的 VITE_API_TARGET 指向已升级的实例。"
     />
 
-    <div v-if="!unsupported" class="geosite-body">
+    <LoadError
+      v-if="loadError && !unsupported"
+      description="无法读取 GeoSite 数据状态，请检查后端服务是否运行。"
+      :retrying="loading"
+      @retry="fetchInfo"
+    />
+
+    <div v-else-if="!unsupported" class="geosite-body">
       <!-- 版本概要：横向铺开，避免占用左右分栏空间 -->
       <a-card size="small" class="summary-card">
         <a-descriptions :column="{ xs: 1, sm: 2, lg: 4 }" size="small" :colon="false">

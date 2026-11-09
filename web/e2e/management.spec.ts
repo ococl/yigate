@@ -96,3 +96,20 @@ test('upstream page survives a network outage', async ({ page }) => {
   await expect(page.getByText('数据加载失败')).toBeVisible()
   await expect(page.getByText('网络错误').first()).toBeVisible()
 })
+
+test('geosite status failure shows an error state instead of "未找到"', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/geosite', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+  )
+  await page.goto('/geosite')
+  await expect(page.getByRole('heading', { name: 'GeoSite 数据' })).toBeVisible()
+  await expect(page.getByText('数据加载失败')).toBeVisible()
+  // 读不到状态时不能显示成「未找到」，否则会被当成数据未下载
+  await expect(page.getByText('未找到')).toHaveCount(0)
+
+  await page.unroute('**/api/v1/geosite')
+  await page.locator('.ant-result-extra .ant-btn').click()
+  await expect(page.getByText('数据加载失败')).toHaveCount(0)
+})
