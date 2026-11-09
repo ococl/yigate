@@ -180,3 +180,18 @@ test('upstream delete shows a loading state and sends only one request', async (
   await expect(row).toHaveCount(0, { timeout: 10000 })
   expect(deletes).toBe(1)
 })
+
+test('dashboard does not claim a fresh update when every API fails', async ({ page }) => {
+  await login(page)
+
+  for (const pattern of ['**/api/v1/status', '**/api/v1/traffic', '**/health']) {
+    await page.route(pattern, (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+    )
+  }
+  await page.goto('/dashboard')
+
+  await expect(page.getByText('无法获取网关运行状态')).toBeVisible()
+  // 全部接口失败时不能显示「最近更新」，否则等于宣称数据是新的
+  await expect(page.getByText('最近更新')).toHaveCount(0)
+})

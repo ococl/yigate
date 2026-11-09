@@ -28,7 +28,8 @@ async function fetchData(silent = false) {
     health.value = h
     status.value = s
     traffic.value = t
-    lastRefreshed.value = new Date()
+    // 全部接口都失败时保留上一次成功时间，避免把刷新失败显示成「刚刚更新」
+    if (h || s || t) lastRefreshed.value = new Date()
   } finally {
     if (!silent) loading.value = false
   }
