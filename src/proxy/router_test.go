@@ -105,6 +105,50 @@ func TestNormalizeHelpers(t *testing.T) {
 	if !validAction("direct") || !validAction("proxy") || !validAction("auto") || validAction("x") {
 		t.Fatal("validAction failed")
 	}
+	if !validAction(ActionDirectFirst) || !validAction(ActionProxyFirst) {
+		t.Fatal("validAction should accept prioritized actions")
+	}
+	if normalizeAction("DIRECT-FIRST") != ActionDirectFirst {
+		t.Fatalf("normalizeAction hyphen failed: %q", normalizeAction("DIRECT-FIRST"))
+	}
+}
+
+// 禁用的规则必须从匹配链里消失，否则"临时停用"没有意义。
+func TestDisabledRuleSkipped(t *testing.T) {
+	router, err := NewRouter(RoutingConfig{
+		Final: ActionDirect,
+		Rules: []RouteRule{
+			{Type: "domain_suffix", Values: []string{"example.com"}, Action: ActionProxy, Disabled: true},
+			{Type: "domain_keyword", Values: []string{"other"}, Action: ActionDeny},
+		},
+	}, DNSConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := router.Decide("www.example.com"); got.Action != ActionDirect {
+		t.Fatalf("disabled rule should be skipped, got %+v", got)
+	}
+	if got := router.Decide("other.example.org"); got.Action != ActionDeny {
+		t.Fatalf("enabled rule after disabled one should still match, got %+v", got)
+	}
+}
+
+func TestCompilePrioritizedActionMode(t *testing.T) {
+	compiled, err := compileRouteRule(RouteRule{Type: "match", Action: "proxy-first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.decision.Action != ActionProxyFirst || compiled.decision.Mode != "proxy_first" {
+		t.Fatalf("unexpected decision: %+v", compiled.decision)
+	}
+
+	compiled, err = compileRouteRule(RouteRule{Type: "match", Action: ActionAuto})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.decision.Mode != "" {
+		t.Fatalf("auto should keep global mode, got %q", compiled.decision.Mode)
+	}
 }
 
 func TestRouterDialDirect(t *testing.T) {

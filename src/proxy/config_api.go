@@ -36,6 +36,12 @@ type ConfigEditor interface {
 	RemoveRule(index int) error
 	// RemoveRules 批量删除路由规则：索引按删除前的原始位置解释。
 	RemoveRules(indexes []int) (BatchDeleteResult, error)
+	// ReplaceRules 用给定列表整体替换路由规则：全部校验通过才落盘，
+	// 只产生一次写盘与一次热加载，供文本视图保存使用。
+	ReplaceRules(rules []RouteRule) error
+	// SetRulesDisabled 批量启用/禁用路由规则：一次落盘一次热加载，
+	// 索引按调用前的原始位置解释，越界项记入失败但不影响其它项。
+	SetRulesDisabled(indexes []int, disabled bool) (BatchUpdateResult, error)
 
 	// ListUsers 返回当前用户名列表（不含密码）。
 	ListUsers() []string
@@ -179,6 +185,7 @@ type ruleInfo struct {
 	Values    []string `json:"values,omitempty"`
 	Action    string   `json:"action"`
 	Upstreams []string `json:"upstreams,omitempty"`
+	Disabled  bool     `json:"disabled,omitempty"`
 }
 
 // addRuleRequest 是添加路由规则的请求体。
@@ -187,6 +194,26 @@ type addRuleRequest struct {
 	Values    []string `json:"values,omitempty"`
 	Action    string   `json:"action"`
 	Upstreams []string `json:"upstreams,omitempty"`
+	Disabled  bool     `json:"disabled,omitempty"`
+}
+
+// replaceRulesRequest 是整体替换路由规则的请求体。
+// rules 允许为空数组（清空全部规则），但字段本身必须出现，避免误把缺字段当成清空。
+type replaceRulesRequest struct {
+	Rules []RouteRule `json:"rules"`
+}
+
+// batchToggleRequest 是批量启用/禁用规则的请求体。
+type batchToggleRequest struct {
+	Indexes  []int `json:"indexes"`
+	Disabled bool  `json:"disabled"`
+}
+
+// BatchUpdateResult 是批量更新的结果：updated 为处理成功的索引，failed 为越界等失败项。
+type BatchUpdateResult struct {
+	Status  string               `json:"status"`
+	Updated []string             `json:"updated"`
+	Failed  []BatchDeleteFailure `json:"failed,omitempty"`
 }
 
 // userInfo 是用户的 API 响应表示。
@@ -460,6 +487,7 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 				Values:    rule.Values,
 				Action:    rule.Action,
 				Upstreams: rule.Upstreams,
+				Disabled:  rule.Disabled,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"rules": result})
@@ -505,6 +533,24 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusOK, batchDeleteResponse(res))
 			return
 		}
+		if len(rest) == 1 && rest[0] == "batch-toggle" {
+			var req batchToggleRequest
+			if err := decodeJSON(r, &req); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if len(req.Indexes) == 0 {
+				writeJSONError(w, http.StatusBadRequest, "indexes must not be empty")
+				return
+			}
+			res, err := editor.SetRulesDisabled(req.Indexes, req.Disabled)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, res)
+			return
+		}
 		if len(rest) > 0 {
 			writeJSONError(w, http.StatusNotFound, "unknown path")
 			return
@@ -530,6 +576,24 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
 
 	case http.MethodPut:
+		// PUT /api/v1/config/rules 整体替换规则列表（文本视图保存）。
+		if len(rest) == 0 {
+			var req replaceRulesRequest
+			if err := decodeJSON(r, &req); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if req.Rules == nil {
+				writeJSONError(w, http.StatusBadRequest, "rules must not be null")
+				return
+			}
+			if err := editor.ReplaceRules(req.Rules); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "count": len(req.Rules)})
+			return
+		}
 		if len(rest) != 1 {
 			writeJSONError(w, http.StatusBadRequest, "rule index required in path")
 			return

@@ -60,13 +60,35 @@ func TestRequestAutoDirectFirst(t *testing.T) {
 	defer ts.Close()
 
 	req := httptest.NewRequest("GET", ts.URL+"/path", nil)
-	resp, err := requestAuto(req, mgr, router, func() {}, "")
+	resp, err := requestAuto(req, mgr, router, RouteDecision{Action: ActionAuto}, func() {}, "")
 	if err != nil {
 		t.Fatalf("requestAuto: %v", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "auto" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
+func TestRequestAutoProxyFirstDecision(t *testing.T) {
+	proxyAddr := startMockHTTPProxy(t)
+	mgr, _ := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
+	router, _ := NewRouter(RoutingConfig{Final: ActionAuto}, DNSConfig{})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("proxy-first"))
+	}))
+	defer ts.Close()
+
+	req := httptest.NewRequest("GET", ts.URL+"/path", nil)
+	resp, err := requestAuto(req, mgr, router, RouteDecision{Action: ActionProxyFirst, Mode: "proxy_first"}, func() {}, "")
+	if err != nil {
+		t.Fatalf("requestAuto proxy_first: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "proxy-first" {
 		t.Fatalf("body = %q", body)
 	}
 }

@@ -33,6 +33,7 @@ var errNotFound = proxy.ErrNotFound
 // 批量删除的结果类型与接口定义同在 proxy 包，这里用别名避免两处维护同一份结构。
 type BatchDeleteResult = proxy.BatchDeleteResult
 type BatchDeleteFailure = proxy.BatchDeleteFailure
+type BatchUpdateResult = proxy.BatchUpdateResult
 
 func effectiveTrafficRetentionDays(days int) int {
 	if days <= 0 {
@@ -209,10 +210,12 @@ var allowedRuleTypes = map[string]struct{}{
 }
 
 var allowedRuleActions = map[string]struct{}{
-	proxy.ActionDirect: {},
-	proxy.ActionProxy:  {},
-	proxy.ActionAuto:   {},
-	proxy.ActionDeny:   {},
+	proxy.ActionDirect:      {},
+	proxy.ActionProxy:       {},
+	proxy.ActionAuto:        {},
+	proxy.ActionDirectFirst: {},
+	proxy.ActionProxyFirst:  {},
+	proxy.ActionDeny:        {},
 }
 
 // validateRouteRule 在写入前校验路由规则，避免把非法规则持久化到磁盘。
@@ -255,6 +258,12 @@ func validateRouteRule(rule proxy.RouteRule, upstreams []proxy.UpstreamConfig) e
 				return fmt.Errorf("invalid ip_cidr %q: %w", v, err)
 			}
 		}
+	}
+
+	// 禁用规则不参与匹配，允许它引用暂时不存在的上游（例如上游正在重建）；
+	// 重新启用时会再走一次完整校验，所以不会把非法引用带到生效路径上。
+	if rule.Disabled {
+		return nil
 	}
 
 	known := make(map[string]struct{}, len(upstreams))
@@ -493,6 +502,25 @@ func (e *configEditor) UpdateRule(index int, rule proxy.RouteRule) error {
 	return e.saveAndApply(cfg)
 }
 
+// ReplaceRules 用给定列表整体替换路由规则。
+// 与逐条增改不同，这里先校验全部规则再落盘：任何一条非法都不会写入磁盘，
+// 整组规则只产生一次写盘与一次热加载，避免文本视图保存时出现半成品配置。
+func (e *configEditor) ReplaceRules(rules []proxy.RouteRule) error {
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return err
+	}
+	normalized := make([]proxy.RouteRule, 0, len(rules))
+	for i, rule := range rules {
+		if err := validateRouteRule(rule, cfg.Upstreams); err != nil {
+			return fmt.Errorf("rules[%d]: %w", i, err)
+		}
+		normalized = append(normalized, rule)
+	}
+	cfg.Routing.Rules = normalized
+	return e.saveAndApply(cfg)
+}
+
 func (e *configEditor) MoveRule(index int, direction string) error {
 	cfg, err := e.loadRawConfig()
 	if err != nil {
@@ -571,6 +599,47 @@ func (e *configEditor) RemoveRules(indexes []int) (BatchDeleteResult, error) {
 	cfg.Routing.Rules = kept
 	if err := e.saveAndApply(cfg); err != nil {
 		return BatchDeleteResult{Deleted: []string{}}, err
+	}
+	return res, nil
+}
+
+// SetRulesDisabled 批量启用/禁用路由规则。
+// 索引按调用前的原始位置解释，越界项记入 failed，其余项照常生效；
+// 全部改动合并成一次落盘与一次热加载，避免批量操作触发多次 reload。
+func (e *configEditor) SetRulesDisabled(indexes []int, disabled bool) (BatchUpdateResult, error) {
+	res := BatchUpdateResult{Status: "ok", Updated: []string{}}
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return res, err
+	}
+	rules := cfg.Routing.Rules
+	seen := make(map[int]struct{}, len(indexes))
+	changed := false
+	for _, index := range indexes {
+		if index < 0 || index >= len(rules) {
+			detail := "no rules configured"
+			if len(rules) > 0 {
+				detail = fmt.Sprintf("rule index %d out of range (0-%d)", index, len(rules)-1)
+			}
+			res.Failed = append(res.Failed, BatchDeleteFailure{Target: strconv.Itoa(index), Error: detail})
+			continue
+		}
+		if _, dup := seen[index]; dup {
+			continue
+		}
+		seen[index] = struct{}{}
+		if rules[index].Disabled != disabled {
+			rules[index].Disabled = disabled
+			changed = true
+		}
+		res.Updated = append(res.Updated, strconv.Itoa(index))
+	}
+	if !changed {
+		return res, nil
+	}
+	cfg.Routing.Rules = rules
+	if err := e.saveAndApply(cfg); err != nil {
+		return BatchUpdateResult{Status: "ok", Updated: []string{}}, err
 	}
 	return res, nil
 }

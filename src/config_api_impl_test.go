@@ -171,6 +171,144 @@ routing:
 	}
 }
 
+func TestConfigEditorReplaceRules(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+routing:
+  final: auto
+  rules:
+    - type: domain_suffix
+      values: ["old.com"]
+      action: direct
+`)
+
+	err := editor.ReplaceRules([]proxy.RouteRule{
+		{Type: "geosite", Values: []string{"cn"}, Action: "direct"},
+		{Type: "geosite", Values: []string{"geolocation-!cn"}, Action: "proxy", Upstreams: []string{"up1"}},
+		{Type: "match", Action: "proxy"},
+	})
+	if err != nil {
+		t.Fatalf("ReplaceRules: %v", err)
+	}
+
+	rules := editor.ListRules()
+	if len(rules) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(rules))
+	}
+	if rules[0].Type != "geosite" || rules[0].Values[0] != "cn" {
+		t.Fatalf("unexpected first rule: %+v", rules[0])
+	}
+	if rules[1].Upstreams[0] != "up1" {
+		t.Fatalf("expected upstream ref preserved, got %+v", rules[1])
+	}
+	if rules[2].Type != "match" {
+		t.Fatalf("expected match rule last, got %+v", rules[2])
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	if contains(string(data), "old.com") {
+		t.Fatalf("expected old rule replaced, got:\n%s", data)
+	}
+}
+
+// 任一条非法都不应落盘：整体替换必须保持原配置不变。
+func TestConfigEditorReplaceRulesRejectsInvalid(t *testing.T) {
+	editor, _ := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+  rules:
+    - type: domain_suffix
+      values: ["old.com"]
+      action: direct
+`)
+
+	err := editor.ReplaceRules([]proxy.RouteRule{
+		{Type: "geosite", Values: []string{"cn"}, Action: "direct"},
+		{Type: "domain", Action: "proxy"},
+	})
+	if err == nil {
+		t.Fatal("expected error for rule without values")
+	}
+	rules := editor.ListRules()
+	if len(rules) != 1 || len(rules[0].Values) == 0 || rules[0].Values[0] != "old.com" {
+		t.Fatalf("rules must stay unchanged on validation failure, got %+v", rules)
+	}
+}
+
+func TestConfigEditorSetRulesDisabled(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+  rules:
+    - type: domain_suffix
+      values: ["a.com"]
+      action: direct
+    - type: domain_suffix
+      values: ["b.com"]
+      action: proxy
+`)
+
+	res, err := editor.SetRulesDisabled([]int{0, 7}, true)
+	if err != nil {
+		t.Fatalf("SetRulesDisabled: %v", err)
+	}
+	if len(res.Updated) != 1 || len(res.Failed) != 1 {
+		t.Fatalf("expected 1 updated + 1 failed, got %+v", res)
+	}
+	rules := editor.ListRules()
+	if !rules[0].Disabled {
+		t.Fatalf("rule 0 should be disabled, got %+v", rules[0])
+	}
+	if rules[1].Disabled {
+		t.Fatalf("rule 1 must stay enabled, got %+v", rules[1])
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	if !contains(string(data), "disabled: true") {
+		t.Fatalf("expected disabled flag persisted, got:\n%s", data)
+	}
+
+	// 再批量启用，disabled 字段应从 YAML 中消失（omitempty）
+	if _, err := editor.SetRulesDisabled([]int{0}, false); err != nil {
+		t.Fatalf("SetRulesDisabled(false): %v", err)
+	}
+	data, _ = os.ReadFile(cfgPath)
+	if contains(string(data), "disabled:") {
+		t.Fatalf("expected disabled field removed, got:\n%s", data)
+	}
+}
+
+// 禁用规则允许引用暂不存在的上游：否则"想先停用、再重建上游"就做不成。
+func TestConfigEditorDisabledRuleAllowsUnknownUpstream(t *testing.T) {
+	editor, _ := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+`)
+
+	err := editor.AddRule(proxy.RouteRule{
+		Type:      "domain_suffix",
+		Values:    []string{"x.com"},
+		Action:    "proxy",
+		Upstreams: []string{"missing"},
+		Disabled:  true,
+	})
+	if err != nil {
+		t.Fatalf("disabled rule should tolerate unknown upstream: %v", err)
+	}
+
+	err = editor.AddRule(proxy.RouteRule{
+		Type:      "domain_suffix",
+		Values:    []string{"y.com"},
+		Action:    "proxy",
+		Upstreams: []string{"missing"},
+	})
+	if err == nil {
+		t.Fatal("enabled rule with unknown upstream should be rejected")
+	}
+}
+
 func TestConfigEditorRemoveRule(t *testing.T) {
 	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
 upstreams:

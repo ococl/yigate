@@ -226,9 +226,12 @@ npm run build       # 构建即验证
 
 支持的动作：
 
-- `direct`：直连目标。
-- `proxy`：通过上游代理连接。
-- `auto`：按策略先试直连或代理，并缓存成功结果。
+- `direct`：只直连，失败不回落。
+- `proxy`：只走上游，失败不回落。
+- `direct_first`：直连优先，失败后回退到上游（规则级覆盖全局 `routing.auto.mode`）。
+- `proxy_first`：上游优先，失败后回退到直连（规则级覆盖全局 `routing.auto.mode`）。
+- `auto`：沿用全局 `routing.auto.mode` 的探测顺序，并缓存成功结果。
+- `deny`：拒绝该目标（`match` 类型不允许）。
 
 ## 管理接口
 
@@ -241,7 +244,9 @@ npm run build       # 构建即验证
 - `GET/POST /api/v1/config/upstreams`：列出/添加上游（含健康检查配置与 `enabled` 开关）。
 - `PUT/DELETE /api/v1/config/upstreams/{name}`：更新/删除上游；更新为局部更新，`enabled=false` 时暂停调度与健康检查。
 - `GET/POST /api/v1/config/rules`：列出/添加路由规则。
-- `PUT /api/v1/config/rules/{index}`：更新路由规则。
+- `PUT /api/v1/config/rules`：整体替换路由规则（一次校验、一次落盘、一次热加载，WebUI 文本视图保存使用）。
+- `POST /api/v1/config/rules/batch-toggle`：批量启用/禁用规则，请求体 `{"indexes":[0,2],"disabled":true}`，一次落盘；越界索引记入 `failed` 不影响其它项。
+- `PUT /api/v1/config/rules/{index}`：更新路由规则（含 `disabled` 字段）。
 - `POST /api/v1/config/rules/{index}/move`：上移/下移路由规则。
 - `DELETE /api/v1/config/rules/{index}`：删除路由规则。
 - `GET/POST /api/v1/config/users`：列出/添加用户。

@@ -18,8 +18,12 @@ const (
 	ActionDirect = "direct"
 	ActionProxy  = "proxy"
 	ActionAuto   = "auto"
-	ActionDeny   = "deny"
-	ActionAllow  = "allow"
+	// ActionDirectFirst / ActionProxyFirst 表示"优先"而不是"只走"：
+	// 先按指定方向尝试，失败后再走另一边，探测结果与 auto 共用缓存。
+	ActionDirectFirst = "direct_first"
+	ActionProxyFirst  = "proxy_first"
+	ActionDeny        = "deny"
+	ActionAllow       = "allow"
 )
 
 const (
@@ -111,15 +115,21 @@ type AutoConfig struct {
 }
 
 type RouteRule struct {
-	Type      string   `yaml:"type"`
-	Values    []string `yaml:"values"`
-	Action    string   `yaml:"action"`
-	Upstreams []string `yaml:"upstreams"`
+	Type      string   `yaml:"type" json:"type"`
+	Values    []string `yaml:"values" json:"values"`
+	Action    string   `yaml:"action" json:"action"`
+	Upstreams []string `yaml:"upstreams,omitempty" json:"upstreams,omitempty"`
+	// Disabled 为 true 时规则保留在配置里但不参与匹配：
+	// 用于临时停用某条规则，恢复时不必重新填写匹配值。
+	Disabled bool `yaml:"disabled,omitempty" json:"disabled,omitempty"`
 }
 
 type RouteDecision struct {
 	Action    string
 	Upstreams []string
+	// Mode 只在优先型动作时有值（direct_first / proxy_first）；
+	// 为空表示沿用全局 routing.auto.mode。
+	Mode string
 }
 
 type Router struct {
@@ -216,6 +226,11 @@ func NewRouter(cfg RoutingConfig, dnsCfg DNSConfig) (*Router, error) {
 	}
 
 	for i, rule := range cfg.Rules {
+		// 禁用的规则保留在配置中，只是在匹配时被跳过；
+		// 索引仍用原始位置，报错信息与实际配置文件的行序一致。
+		if rule.Disabled {
+			continue
+		}
 		compiled, err := compileRouteRule(rule)
 		if err != nil {
 			return nil, fmt.Errorf("routing.rules[%d]: %w", i, err)
@@ -245,6 +260,7 @@ func compileRouteRule(rule RouteRule) (compiledRouteRule, error) {
 		decision: RouteDecision{
 			Action:    action,
 			Upstreams: normalizeUpstreamNames(rule.Upstreams),
+			Mode:      autoModeForAction(action),
 		},
 	}
 
@@ -361,7 +377,7 @@ func (r *Router) Dial(target string, mgr *UpstreamManager, sourceIP ...string) (
 		conn, _, err := r.dialProxy(target, mgr, decision.Upstreams, sip)
 		return conn, err
 	default:
-		return r.dialAuto(target, mgr, sip)
+		return r.dialAuto(target, mgr, decision.Upstreams, sip, decision.Mode)
 	}
 }
 
@@ -416,8 +432,11 @@ func (r *Router) Stop() {
 	}
 }
 
-func (r *Router) dialAuto(target string, mgr *UpstreamManager, sourceIP string) (net.Conn, error) {
+func (r *Router) dialAuto(target string, mgr *UpstreamManager, upstreams []string, sourceIP, mode string) (net.Conn, error) {
 	key := routeCacheKey(target)
+	if mode == "" {
+		mode = r.auto.Mode
+	}
 	if entry, ok := r.cache.Get(key); ok {
 		switch entry.Action {
 		case ActionDirect:
@@ -442,8 +461,8 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager, sourceIP string) 
 		if entry, ok := r.cache.Get(key); ok {
 			return entry, nil
 		}
-		if r.auto.Mode == "proxy_first" {
-			conn, up, dialErr := r.dialProxy(target, mgr, nil, sourceIP)
+		if mode == "proxy_first" {
+			conn, up, dialErr := r.dialProxy(target, mgr, upstreams, sourceIP)
 			if dialErr == nil {
 				_ = conn.Close()
 				r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
@@ -464,7 +483,7 @@ func (r *Router) dialAuto(target string, mgr *UpstreamManager, sourceIP string) 
 			r.cache.SetDirect(key, r.auto.CacheTTL)
 			return RouteCacheEntry{Action: ActionDirect}, nil
 		}
-		conn, up, proxyErr := r.dialProxy(target, mgr, nil, sourceIP)
+		conn, up, proxyErr := r.dialProxy(target, mgr, upstreams, sourceIP)
 		if proxyErr == nil {
 			_ = conn.Close()
 			r.cache.SetProxy(key, up.Name, r.auto.CacheTTL)
@@ -579,11 +598,38 @@ func normalizeRuleType(v string) string {
 }
 
 func normalizeAction(v string) string {
-	return strings.ToLower(strings.TrimSpace(v))
+	v = strings.ToLower(strings.TrimSpace(v))
+	// 允许 direct-first / proxy-first 这类连字符写法
+	return strings.ReplaceAll(v, "-", "_")
 }
 
 func validAction(action string) bool {
-	return action == ActionDirect || action == ActionProxy || action == ActionAuto || action == ActionDeny
+	switch action {
+	case ActionDirect, ActionProxy, ActionAuto, ActionDirectFirst, ActionProxyFirst, ActionDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// autoModeForAction 把优先型动作映射为探测顺序；auto 返回空，表示沿用全局配置。
+func autoModeForAction(action string) string {
+	switch action {
+	case ActionDirectFirst:
+		return "direct_first"
+	case ActionProxyFirst:
+		return "proxy_first"
+	default:
+		return ""
+	}
+}
+
+// autoMode 返回一次路由决策实际使用的优先顺序：优先型动作覆盖全局 routing.auto.mode。
+func (r *Router) autoMode(decision RouteDecision) string {
+	if decision.Mode != "" {
+		return decision.Mode
+	}
+	return r.auto.Mode
 }
 
 func normalizeAutoMode(v string) string {

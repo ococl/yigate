@@ -147,6 +147,8 @@ export interface RuleInfo {
   values: string[]
   action: string
   upstreams: string[]
+  /** true 表示规则保留但不参与匹配 */
+  disabled?: boolean
 }
 
 export interface RuleListResponse {
@@ -158,6 +160,7 @@ export interface RuleRequest {
   values: string[]
   action: string
   upstreams: string[]
+  disabled?: boolean
 }
 
 export type AddRuleRequest = RuleRequest
@@ -261,6 +264,13 @@ export interface BatchDeleteFailure {
 export interface BatchDeleteResult {
   status: string
   deleted: string[]
+  failed?: BatchDeleteFailure[]
+}
+
+/** 批量启用/禁用结果：updated 为处理成功的索引，越界项留在 failed。 */
+export interface BatchUpdateResult {
+  status: string
+  updated: string[]
   failed?: BatchDeleteFailure[]
 }
 

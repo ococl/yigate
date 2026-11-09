@@ -82,7 +82,7 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 	case ActionProxy:
 		resp, err = requestViaProxy(req, mgr, router, decision.Upstreams, resetBody, sourceIP)
 	default:
-		resp, err = requestAuto(req, mgr, router, resetBody, sourceIP)
+		resp, err = requestAuto(req, mgr, router, decision, resetBody, sourceIP)
 	}
 	if err != nil {
 		Logger().Warnw("forward request failed", "target", targetHost(req), "error", err)
@@ -188,9 +188,16 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 	case ActionProxy:
 		resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams, sourceIP)
 	default:
+		if router.autoMode(decision) == "proxy_first" {
+			resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams, sourceIP)
+			if err != nil {
+				resp, err = directRequest(req, router)
+			}
+			break
+		}
 		resp, err = directRequestWithTimeout(req, router.auto.DirectTimeout, router)
 		if err != nil {
-			resp, err = requestViaProxyNoRetry(req, mgr, router, nil, sourceIP)
+			resp, err = requestViaProxyNoRetry(req, mgr, router, decision.Upstreams, sourceIP)
 		}
 	}
 	if err != nil {
@@ -224,7 +231,7 @@ func requestViaProxyNoRetry(req *http.Request, mgr *UpstreamManager, router *Rou
 	return resp, err
 }
 
-func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetBody func(), sourceIP string) (*http.Response, error) {
+func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, decision RouteDecision, resetBody func(), sourceIP string) (*http.Response, error) {
 	target := targetHost(req)
 	key := routeCacheKey(target)
 	if entry, ok := router.cache.Get(key); ok {
@@ -245,8 +252,8 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 		}
 	}
 
-	if router.auto.Mode == "proxy_first" {
-		resp, err := requestViaProxy(req, mgr, router, nil, resetBody, sourceIP)
+	if router.autoMode(decision) == "proxy_first" {
+		resp, err := requestViaProxy(req, mgr, router, decision.Upstreams, resetBody, sourceIP)
 		if err == nil {
 			return resp, nil
 		}
@@ -264,7 +271,7 @@ func requestAuto(req *http.Request, mgr *UpstreamManager, router *Router, resetB
 		router.cache.SetDirect(key, router.auto.CacheTTL)
 		return resp, nil
 	}
-	resp, proxyErr := requestViaProxy(req, mgr, router, nil, resetBody, sourceIP)
+	resp, proxyErr := requestViaProxy(req, mgr, router, decision.Upstreams, resetBody, sourceIP)
 	if proxyErr == nil {
 		return resp, nil
 	}

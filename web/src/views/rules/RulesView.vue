@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { message } from 'antdv-next'
+import { message, Modal } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { listRules, addRule, updateRule, moveRule, deleteRule, batchDeleteRules } from '@/api/rules'
+import {
+  listRules,
+  addRule,
+  updateRule,
+  moveRule,
+  deleteRule,
+  batchDeleteRules,
+  batchToggleRules,
+  replaceRules,
+} from '@/api/rules'
 import { listUpstreams } from '@/api/upstreams'
 import type { RuleInfo, RuleRequest } from '@/types/api'
 
@@ -20,9 +29,12 @@ const highlightIndex = ref<number | null>(null)
 let highlightTimer: ReturnType<typeof setTimeout> | undefined
 // 正在删除的规则序号，避免重复点击触发多次 DELETE
 const deleting = ref<number | null>(null)
-// 多选批量删除只作用于桌面表格；键是规则当前序号
+// 多选批量操作只作用于桌面表格；键是规则当前序号
 const selectedRowKeys = ref<number[]>([])
 const bulkDeleting = ref(false)
+// 正在切换启用状态的行（单行开关用），避免连点重复请求
+const togglingIndex = ref<number | null>(null)
+const bulkToggling = ref(false)
 const modalVisible = ref(false)
 const submitting = ref(false)
 const isEdit = ref(false)
@@ -40,6 +52,7 @@ const form = ref<RuleRequest>({
   values: [],
   action: 'proxy',
   upstreams: [],
+  disabled: false,
 })
 // 文本域使用独立状态，避免每输入一个字符就被重新格式化导致光标跳动
 const valuesText = ref('')
@@ -55,14 +68,16 @@ const typeOptions = [
   { label: 'match（兜底匹配）', value: 'match' },
 ]
 const actionOptions = [
-  { label: 'proxy（走上游）', value: 'proxy' },
-  { label: 'direct（直连）', value: 'direct' },
-  { label: 'auto（自动判断）', value: 'auto' },
+  { label: 'proxy（仅走上游）', value: 'proxy' },
+  { label: 'direct（仅直连）', value: 'direct' },
+  { label: 'proxy_first（代理优先，失败再直连）', value: 'proxy_first' },
+  { label: 'direct_first（直连优先，失败再代理）', value: 'direct_first' },
+  { label: 'auto（按全局 auto_mode 判断）', value: 'auto' },
   { label: 'deny（拒绝）', value: 'deny' },
 ]
 
 const needsValues = computed(() => form.value.type !== 'match')
-const needsUpstreams = computed(() => form.value.action === 'proxy')
+const needsUpstreams = computed(() => form.value.action !== 'direct' && form.value.action !== 'deny')
 
 // 移动端卡片列表本地分页，与桌面表格每页条数保持一致
 const MOBILE_PAGE_SIZE = 20
@@ -84,6 +99,7 @@ const mobileItems = computed(() =>
 
 const columns = [
   { title: '顺序', dataIndex: 'index', key: 'index', width: 70 },
+  { title: '启用', key: 'enabled', width: 80 },
   { title: '类型', dataIndex: 'type', key: 'type', width: 150 },
   { title: '值', dataIndex: 'values', key: 'values', ellipsis: true },
   { title: '动作', dataIndex: 'action', key: 'action', width: 100 },
@@ -100,6 +116,242 @@ function clampPages() {
   if (mobilePage.value > mobileMax) mobilePage.value = mobileMax
 }
 
+// --- 文本视图：与可视化表格共用同一份服务端规则 ---
+
+type RuleViewMode = 'visual' | 'text'
+const viewMode = ref<RuleViewMode>('visual')
+const viewModeOptions = [
+  { label: '可视化', value: 'visual' },
+  { label: '文本', value: 'text' },
+]
+const rulesText = ref('')
+// 已保存文本快照，用于判断是否有未保存修改
+const savedText = ref('')
+const textSaving = ref(false)
+
+// 兼容 Clash 写法（DOMAIN-SUFFIX / IP-CIDR6 / PROXY / REJECT 等），保存时统一转为 yiGate 名称
+const RULE_TYPE_ALIASES: Record<string, string> = {
+  domain: 'domain',
+  domainsuffix: 'domain_suffix',
+  domainkeyword: 'domain_keyword',
+  domainregex: 'domain_regex',
+  ipcidr: 'ip_cidr',
+  ipcidr6: 'ip_cidr',
+  geosite: 'geosite',
+  match: 'match',
+}
+
+const RULE_ACTION_ALIASES: Record<string, string> = {
+  direct: 'direct',
+  proxy: 'proxy',
+  auto: 'auto',
+  directfirst: 'direct_first',
+  proxyfirst: 'proxy_first',
+  deny: 'deny',
+  reject: 'deny',
+  rejectdrop: 'deny',
+}
+
+function compactToken(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[-_\s]/g, '')
+}
+
+function normalizeRuleType(raw: string): string {
+  return RULE_TYPE_ALIASES[compactToken(raw)] || ''
+}
+
+function normalizeRuleAction(raw: string): string {
+  return RULE_ACTION_ALIASES[compactToken(raw)] || ''
+}
+
+interface TextRuleIssue {
+  line: number
+  message: string
+}
+
+// splitEscaped 按分隔符切分，只处理 \<sep> 与 \\ 两种转义；
+// 其它反斜杠原样保留，避免破坏 domain_regex 里的 \. 写法。
+function splitEscaped(text: string, sep: string): string[] {
+  const out: string[] = []
+  let buf = ''
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]
+    if (ch === '\\' && i + 1 < text.length) {
+      const next = text[i + 1]
+      if (next === sep || next === '\\') {
+        buf += next
+        i += 1
+        continue
+      }
+      buf += ch
+      continue
+    }
+    if (ch === sep) {
+      out.push(buf)
+      buf = ''
+      continue
+    }
+    buf += ch
+  }
+  out.push(buf)
+  return out
+}
+
+function escapeToken(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/,/g, '\\,')
+}
+
+/** 规则序列化为文本：类型,匹配值1|匹配值2,动作[,上游1|上游2]；行首 ! 表示禁用 */
+function formatRulesText(rules: RuleRequest[]): string {
+  return rules
+    .map((rule) => {
+      const values = (rule.values || []).map(escapeToken).join('|') || '-'
+      const upstreams = (rule.upstreams || []).map(escapeToken).join('|')
+      const fields = [rule.type, values, rule.action]
+      if (upstreams) fields.push(upstreams)
+      return (rule.disabled ? '!' : '') + fields.join(',')
+    })
+    .join('\n')
+}
+
+/**
+ * 解析文本。动作从行尾向前识别，所以匹配值里可以直接写逗号（例如正则量词 {1,3}），
+ * 多个匹配值之间用 | 分隔。
+ */
+function parseRulesText(text: string): { rules: RuleRequest[]; issues: TextRuleIssue[] } {
+  const rules: RuleRequest[] = []
+  const issues: TextRuleIssue[] = []
+  text.split(/\r?\n/).forEach((raw, index) => {
+    const lineNo = index + 1
+    let line = raw.trim()
+    if (!line || line.startsWith('#')) return
+    // 行首 ! 表示禁用该条规则；与整行 # 注释区分开，禁用规则会保留在配置里
+    const disabled = line.startsWith('!')
+    if (disabled) line = line.slice(1).trim()
+    if (!line) {
+      issues.push({ line: lineNo, message: '! 后面缺少规则内容' })
+      return
+    }
+    const parts = splitEscaped(line, ',')
+    const type = normalizeRuleType(parts[0] || '')
+    if (!type) {
+      issues.push({ line: lineNo, message: `未知类型 "${(parts[0] || '').trim()}"` })
+      return
+    }
+    let actionIndex = -1
+    for (let i = parts.length - 1; i >= 2; i -= 1) {
+      if (normalizeRuleAction(parts[i])) {
+        actionIndex = i
+        break
+      }
+    }
+    if (actionIndex < 0) {
+      // 兼容 Clash 的 MATCH,PROXY 两段写法
+      const shorthand = type === 'match' && parts.length === 2 ? normalizeRuleAction(parts[1]) : ''
+      if (shorthand) {
+        rules.push({ type, values: [], action: shorthand, upstreams: [], disabled })
+        return
+      }
+      issues.push({ line: lineNo, message: '缺少动作（如 direct / proxy / auto / deny）' })
+      return
+    }
+    const action = normalizeRuleAction(parts[actionIndex])
+    if (type === 'match' && action === 'deny') {
+      issues.push({ line: lineNo, message: 'match 类型不能使用 deny 动作' })
+      return
+    }
+    const rawValues = parts.slice(1, actionIndex).join(',')
+    const values =
+      rawValues === '' || rawValues === '-'
+        ? []
+        : splitEscaped(rawValues, '|')
+            .map((v) => v.trim())
+            .filter((v) => v !== '' && v !== '-')
+    if (type !== 'match' && values.length === 0) {
+      issues.push({ line: lineNo, message: `类型 ${type} 至少需要一个匹配值` })
+      return
+    }
+    const rawUpstreams = parts.slice(actionIndex + 1).join(',')
+    const upstreams = rawUpstreams
+      ? splitEscaped(rawUpstreams, '|')
+          .map((v) => v.trim())
+          .filter(Boolean)
+      : []
+    rules.push({ type, values: type === 'match' ? [] : values, action, upstreams, disabled })
+  })
+  return { rules, issues }
+}
+
+const parsedText = computed(() => parseRulesText(rulesText.value))
+const textIssues = computed(() => parsedText.value.issues)
+const textDirty = computed(() => rulesText.value !== savedText.value)
+const disabledCount = computed(() => parsedText.value.rules.filter((rule) => rule.disabled).length)
+
+function loadRulesIntoText() {
+  rulesText.value = formatRulesText(dataSource.value)
+  savedText.value = rulesText.value
+}
+
+function onViewModeChange(next: string | number) {
+  const mode = next as RuleViewMode
+  if (mode === viewMode.value) return
+  if (mode === 'visual' && textDirty.value) {
+    Modal.confirm({
+      title: '放弃文本修改？',
+      content: '文本视图中有未保存的修改，切换到可视化视图会丢弃这些修改。',
+      okText: '放弃修改',
+      cancelText: '继续编辑',
+      onOk: () => {
+        viewMode.value = 'visual'
+      },
+    })
+    return
+  }
+  viewMode.value = mode
+  if (mode === 'text') loadRulesIntoText()
+}
+
+async function saveRulesText() {
+  if (textIssues.value.length > 0) {
+    message.error(`还有 ${textIssues.value.length} 处格式问题，请先修正`)
+    return
+  }
+  const rules = parsedText.value.rules
+  const submit = async () => {
+    textSaving.value = true
+    try {
+      await replaceRules(rules)
+      message.success(`已保存 ${rules.length} 条规则`)
+      await fetchData()
+      loadRulesIntoText()
+    } catch {
+      // 错误已由请求拦截器提示，保留文本内容供用户继续修改
+    } finally {
+      textSaving.value = false
+    }
+  }
+  if (rules.length === 0) {
+    Modal.confirm({
+      title: '清空全部路由规则？',
+      content: '保存后会删除所有路由规则，未命中的请求将按全局 final 动作处理。',
+      okText: '清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: submit,
+    })
+    return
+  }
+  await submit()
+}
+
+function formatTextNow() {
+  if (textIssues.value.length > 0) {
+    message.warning('请先修正格式问题再格式化')
+    return
+  }
+  rulesText.value = formatRulesText(parsedText.value.rules)
+}
+
 async function fetchData() {
   loading.value = true
   try {
@@ -108,6 +360,8 @@ async function fetchData() {
     clampPages()
     upstreamOptions.value = (ups.upstreams || []).map((u) => ({ label: u.name, value: u.name }))
     loadError.value = false
+    // 文本视图下刷新时同步最新规则；有未保存修改则保留用户输入
+    if (viewMode.value === 'text' && !textDirty.value) loadRulesIntoText()
   } catch {
     // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
     loadError.value = true
@@ -119,7 +373,7 @@ async function fetchData() {
 function openAddModal() {
   isEdit.value = false
   editingIndex.value = -1
-  form.value = { type: 'domain_suffix', values: [], action: 'proxy', upstreams: [] }
+  form.value = { type: 'domain_suffix', values: [], action: 'proxy', upstreams: [], disabled: false }
   valuesText.value = ''
   modalVisible.value = true
 }
@@ -132,6 +386,7 @@ function openEditModal(record: RuleInfo) {
     values: [...(record.values || [])],
     action: record.action,
     upstreams: [...(record.upstreams || [])],
+    disabled: record.disabled === true,
   }
   valuesText.value = (record.values || []).join('\n')
   modalVisible.value = true
@@ -160,6 +415,7 @@ async function handleSubmit() {
     values: needsValues.value ? form.value.values : [],
     action: form.value.action,
     upstreams: needsUpstreams.value ? form.value.upstreams : [],
+    disabled: form.value.disabled === true,
   }
 
   submitting.value = true
@@ -204,7 +460,10 @@ function revealMovedRule(newIndex: number) {
 }
 
 function rowClassName(record: RuleInfo): string {
-  return highlightIndex.value === record.index ? 'row-highlight' : ''
+  const classes: string[] = []
+  if (highlightIndex.value === record.index) classes.push('row-highlight')
+  if (record.disabled) classes.push('row-disabled')
+  return classes.join(' ')
 }
 
 async function handleMove(index: number, direction: 'up' | 'down') {
@@ -240,8 +499,10 @@ async function handleDelete(index: number) {
 function actionColor(action: string) {
   switch (action) {
     case 'direct':
+    case 'direct_first':
       return 'green'
     case 'proxy':
+    case 'proxy_first':
       return 'blue'
     case 'deny':
       return 'red'
@@ -278,6 +539,50 @@ async function handleBulkDelete() {
   }
 }
 
+/** 单行启用/禁用：整条规则回写，避免只发改动字段时清空匹配值与上游。 */
+async function handleToggle(record: RuleInfo, enabled: boolean) {
+  if (togglingIndex.value !== null) return
+  togglingIndex.value = record.index
+  try {
+    await updateRule(record.index, {
+      type: record.type,
+      values: [...(record.values || [])],
+      action: record.action,
+      upstreams: [...(record.upstreams || [])],
+      disabled: !enabled,
+    })
+    message.success(enabled ? '已启用' : '已禁用')
+    await fetchData()
+  } catch {
+    // 错误已由拦截器处理
+  } finally {
+    togglingIndex.value = null
+  }
+}
+
+async function handleBulkToggle(disabled: boolean) {
+  if (bulkToggling.value || selectedRowKeys.value.length === 0) return
+  bulkToggling.value = true
+  const targets = [...selectedRowKeys.value]
+  const label = disabled ? '禁用' : '启用'
+  try {
+    const res = await batchToggleRules(targets, disabled)
+    selectedRowKeys.value = []
+    await fetchData()
+    const failed = res.failed ?? []
+    if (failed.length === 0) {
+      message.success(`已${label} ${res.updated.length} 条规则`)
+      return
+    }
+    const names = failed.map((item) => `第 ${Number(item.target) + 1} 条`).join('、')
+    message.warning(`已${label} ${res.updated.length} 条，失败 ${failed.length} 条：${names}`)
+  } catch {
+    // 整体失败已由请求层提示，保留当前选择
+  } finally {
+    bulkToggling.value = false
+  }
+}
+
 onMounted(fetchData)
 </script>
 
@@ -290,14 +595,69 @@ onMounted(fetchData)
           规则自上而下匹配，命中即停止；顺序会影响最终路由结果。
         </a-typography-text>
       </div>
-      <a-space>
+      <a-space wrap>
+        <a-radio-group
+          :value="viewMode"
+          size="small"
+          option-type="button"
+          :options="viewModeOptions"
+          @update:value="onViewModeChange"
+        />
         <a-button @click="fetchData" :loading="loading">刷新</a-button>
-        <a-button type="primary" @click="openAddModal">新增规则</a-button>
+        <a-button v-if="viewMode === 'visual'" type="primary" @click="openAddModal">新增规则</a-button>
       </a-space>
     </div>
 
     <a-card class="fill-card">
-      <div v-if="isMobile" class="mobile-list">
+      <div v-if="viewMode === 'text'" class="text-editor">
+        <a-alert
+          type="info"
+          show-icon
+          message="每行一条规则：类型,匹配值1|匹配值2,动作[,上游1|上游2]"
+          description="动作为 direct / proxy / direct_first / proxy_first / auto / deny；行首 ! 表示禁用（保留规则但不参与匹配）；整行以 # 开头为注释；兼容 Clash 写法（DOMAIN-SUFFIX / PROXY / REJECT）；匹配值含逗号或竖线时用反斜杠转义。"
+        />
+        <a-textarea
+          v-model:value="rulesText"
+          class="rules-textarea"
+          :rows="18"
+          spellcheck="false"
+          placeholder="geosite,category-ads-all,deny&#10;!domain_suffix,ads.example.com,deny&#10;geosite,cn,direct&#10;geosite,geolocation-!cn,proxy&#10;match,-,proxy"
+        />
+        <a-alert
+          v-if="textIssues.length > 0"
+          type="error"
+          show-icon
+          :message="`${textIssues.length} 处格式问题`"
+        >
+          <template #description>
+            <ul class="text-issues">
+              <li v-for="issue in textIssues" :key="`${issue.line}-${issue.message}`">
+                第 {{ issue.line }} 行：{{ issue.message }}
+              </li>
+            </ul>
+          </template>
+        </a-alert>
+        <div class="text-actions">
+          <a-space wrap>
+            <a-button @click="loadRulesIntoText" :disabled="textSaving">重置</a-button>
+            <a-button @click="formatTextNow" :disabled="textSaving">格式化</a-button>
+            <a-button
+              type="primary"
+              :loading="textSaving"
+              :disabled="textIssues.length > 0"
+              @click="saveRulesText"
+            >
+              保存规则
+            </a-button>
+          </a-space>
+          <span class="muted">
+            {{ parsedText.rules.length }} 条规则{{ disabledCount > 0 ? ` · ${disabledCount} 条已禁用` : ''
+            }}{{ textDirty ? ' · 有未保存修改' : '' }}
+          </span>
+        </div>
+      </div>
+
+      <div v-else-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理">
@@ -315,7 +675,17 @@ onMounted(fetchData)
             </a-space>
           </template>
           <template #extra>
-            <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
+            <a-space size="small">
+              <a-tag v-if="record.disabled" color="default">已禁用</a-tag>
+              <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
+              <a-switch
+                size="small"
+                :checked="!record.disabled"
+                :loading="togglingIndex === record.index"
+                :disabled="togglingIndex !== null && togglingIndex !== record.index"
+                @change="(checked) => handleToggle(record, checked === true)"
+              />
+            </a-space>
           </template>
           <MobileCardRow label="匹配值">
               <a-space wrap size="small">
@@ -374,6 +744,8 @@ onMounted(fetchData)
         <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
           <span>已选 {{ selectedRowKeys.length }} 项</span>
           <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
+          <a-button size="small" :loading="bulkToggling" @click="handleBulkToggle(false)">批量启用</a-button>
+          <a-button size="small" :loading="bulkToggling" @click="handleBulkToggle(true)">批量禁用</a-button>
           <a-popconfirm
             :title="`确定删除选中的 ${selectedRowKeys.length} 条规则？此操作不可撤销。`"
             ok-text="删除"
@@ -396,6 +768,15 @@ onMounted(fetchData)
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'index'">
         {{ record.index + 1 }}
+      </template>
+      <template v-else-if="column.key === 'enabled'">
+        <a-switch
+          size="small"
+          :checked="!record.disabled"
+          :loading="togglingIndex === record.index"
+          :disabled="togglingIndex !== null && togglingIndex !== record.index"
+          @change="(checked) => handleToggle(record, checked === true)"
+        />
       </template>
       <template v-else-if="column.key === 'values'">
         <a-space wrap size="small">
@@ -478,7 +859,7 @@ onMounted(fetchData)
         </a-col>
         <a-col :xs="24" :sm="12">
           <a-form-item label="动作" required>
-            <a-radio-group v-model:value="form.action" :options="actionOptions" />
+            <a-select v-model:value="form.action" :options="actionOptions" />
           </a-form-item>
         </a-col>
       </a-row>
@@ -519,8 +900,55 @@ onMounted(fetchData)
           placeholder="不选择时使用全部可用上游"
           allow-clear
         />
-        <template #extra>仅对 proxy 动作生效；auto 动作会根据探测结果在直连与全部上游之间选择。</template>
+        <template #extra>
+          proxy、proxy_first、auto 会使用这里指定的上游；不选则使用全部可用上游。direct_first 仅在回退到代理时使用。
+        </template>
+      </a-form-item>
+
+      <a-form-item label="规则状态">
+        <a-space>
+          <a-switch
+            :checked="form.disabled !== true"
+            @change="(checked) => (form.disabled = checked !== true)"
+          />
+          <span class="muted">
+            {{ form.disabled ? '已禁用：保存后保留规则但不参与匹配' : '启用中：参与路由匹配' }}
+          </span>
+        </a-space>
       </a-form-item>
     </a-form>
   </a-modal>
 </template>
+
+<style scoped>
+.text-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rules-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.text-issues {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.text-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 禁用行整体弱化，但仍可编辑与重新启用 */
+:deep(.row-disabled) > td {
+  opacity: 0.55;
+}
+</style>

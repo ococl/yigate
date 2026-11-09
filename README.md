@@ -9,7 +9,7 @@
 ## 特性
 
 - **单端口多协议**：同一监听端口自动识别并分流 HTTP、HTTPS CONNECT、SOCKS5。
-- **规则路由**：`domain` / `domain_suffix` / `domain_keyword` / `domain_regex` / `ip_cidr`（IPv4+IPv6）/ `geosite` / `match`，动作支持 `direct` / `proxy` / `auto`。
+- **规则路由**：`domain` / `domain_suffix` / `domain_keyword` / `domain_regex` / `ip_cidr`（IPv4+IPv6）/ `geosite` / `match`；动作支持 `direct`（只直连）、`proxy`（只走上游）、`direct_first`（直连优先）、`proxy_first`（代理优先）、`auto`（沿用全局 `auto.mode`）与 `deny`。
 - **多上游与负载**：`weighted_round_robin` / `least_connections` / `consistent_hash` / `source_ip_hash`，含优先级、权重、死节点剔除。
 - **健康检查**：TCP / HTTP / HTTPS / TLS 四种探测。
 - **DNS 增强**：内置 DoH / DoT 解析器，系统 DNS 兜底，TTL 缓存，IPv4/IPv6 优先级策略。
@@ -128,8 +128,8 @@ sudo systemctl start yigate
 | `users` | 为空则允许匿名代理 |
 | `tls` | TLS 服务端终止（`cert_file` / `key_file` / `client_ca_file`） |
 | `upstreams` | 上游代理，类型 `http`/`https`/`socks5`/`socks5h`，策略与健康检查 |
-| `routing.rules` / `routing.final` | 规则列表（首个命中生效）与兜底动作 `direct`/`proxy`/`auto`/`deny` |
-| `routing.auto.mode` | `direct_first`（默认）或 `proxy_first`；非法值会在加载时报错 |
+| `routing.rules` / `routing.final` | 规则列表（首个命中生效）与兜底动作 `direct`/`proxy`/`direct_first`/`proxy_first`/`auto`/`deny` |
+| `routing.auto.mode` | `direct_first`（默认）或 `proxy_first`；规则上的 `direct_first`/`proxy_first` 会覆盖该全局设置 |
 | `routing.socks5h_redirect` | 目标域名交由上游解析（远端 DNS），可用 `upstreams` 限定范围 |
 | `routing.geosite` | 数据路径、自动更新地址/间隔、`update_token`（从上游拉取），以及 `sync_enabled`/`sync_token`（供下游只读同步） |
 | `dns` | `system` / `doh` / `dot`，`ip_precedence` 控制 IPv4/IPv6 优先；`fallback` 默认 true |
@@ -162,7 +162,9 @@ sudo systemctl start yigate
 | `GET/POST /api/v1/config/upstreams` | 列出 / 添加上游（含健康检查配置与 `enabled` 开关） |
 | `PUT/DELETE /api/v1/config/upstreams/{name}` | 更新 / 删除上游（局部更新，未提交字段保持原值；`enabled=false` 暂停调度与健康检查） |
 | `GET/POST /api/v1/config/rules` | 列出 / 添加路由规则 |
-| `PUT /api/v1/config/rules/{index}` | 更新路由规则 |
+| `PUT /api/v1/config/rules` | 整体替换路由规则（一次校验、一次落盘、一次热加载） |
+| `POST /api/v1/config/rules/batch-toggle` | 批量启用/禁用规则（一次落盘） |
+| `PUT /api/v1/config/rules/{index}` | 更新路由规则（含 `disabled` 开关） |
 | `POST /api/v1/config/rules/{index}/move` | 上移 / 下移路由规则 |
 | `DELETE /api/v1/config/rules/{index}` | 删除路由规则 |
 | `GET/POST /api/v1/config/users` | 列出 / 添加用户 |

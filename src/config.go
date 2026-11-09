@@ -677,8 +677,13 @@ func validateConfig(cfg *Config) error {
 		upstreamNames[name] = struct{}{}
 	}
 
-	// 校验路由规则引用的上游名是否存在
+	// 校验路由规则引用的上游名是否存在。
+	// 禁用规则不参与匹配，允许它指向暂不存在的上游（例如上游正在重建），
+	// 重新启用时仍会走完整校验。
 	for i, rule := range cfg.Routing.Rules {
+		if rule.Disabled {
+			continue
+		}
 		for j, name := range rule.Upstreams {
 			name = strings.TrimSpace(name)
 			if name == "" {

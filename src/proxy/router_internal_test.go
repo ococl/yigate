@@ -145,6 +145,63 @@ func TestRouterDialAutoProxyFallback(t *testing.T) {
 	}
 }
 
+// 规则上的优先型动作必须覆盖全局 auto.mode，否则"国内直连优先、国外代理优先"无法同时表达。
+func TestRouterRuleProxyFirstOverridesGlobal(t *testing.T) {
+	proxyAddr := startMockHTTPProxy(t)
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := NewRouter(RoutingConfig{
+		Final: ActionDirect,
+		Auto:  AutoConfig{Mode: "direct_first", DirectTimeout: Duration(200 * time.Millisecond)},
+		Rules: []RouteRule{{Type: "match", Action: ActionProxyFirst}},
+	}, DNSConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := startMockTarget(t)
+	conn, err := router.Dial(target, mgr)
+	if err != nil {
+		t.Fatalf("dial proxy_first: %v", err)
+	}
+	conn.Close()
+
+	entry, ok := router.cache.Get(routeCacheKey(target))
+	if !ok || entry.Action != ActionProxy {
+		t.Fatalf("proxy_first should prefer proxy, got entry=%+v ok=%v", entry, ok)
+	}
+}
+
+func TestRouterRuleDirectFirstOverridesGlobal(t *testing.T) {
+	proxyAddr := startMockHTTPProxy(t)
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := NewRouter(RoutingConfig{
+		Final: ActionProxy,
+		Auto:  AutoConfig{Mode: "proxy_first"},
+		Rules: []RouteRule{{Type: "match", Action: ActionDirectFirst}},
+	}, DNSConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := startMockTarget(t)
+	conn, err := router.Dial(target, mgr)
+	if err != nil {
+		t.Fatalf("dial direct_first: %v", err)
+	}
+	conn.Close()
+
+	entry, ok := router.cache.Get(routeCacheKey(target))
+	if !ok || entry.Action != ActionDirect {
+		t.Fatalf("direct_first should prefer direct, got entry=%+v ok=%v", entry, ok)
+	}
+}
+
 func TestRouterDialSocks5H(t *testing.T) {
 	proxyAddr := startMockSocks5Proxy(t)
 	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "socks5", URL: "socks5://" + proxyAddr}})

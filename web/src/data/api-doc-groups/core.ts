@@ -555,7 +555,8 @@ yigate_connections_total 12345
         method: 'GET',
         path: '/api/v1/config/rules',
         summary: '列出所有路由规则',
-        description: '返回所有路由规则列表，按配置顺序排列。',
+        description:
+          '返回所有路由规则列表，按配置顺序排列。disabled 为 true 表示该规则保留但不参与匹配。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -566,7 +567,8 @@ yigate_connections_total 12345
       "type": "domain",
       "values": ["example.com"],
       "action": "proxy",
-      "upstreams": ["us-east-1"]
+      "upstreams": ["us-east-1"],
+      "disabled": true
     }
   ]
 }`,
@@ -595,7 +597,7 @@ yigate_connections_total 12345
         path: '/api/v1/config/rules',
         summary: '添加路由规则',
         description:
-          '在规则列表末尾追加一条路由规则。支持的规则类型：domain、domain_suffix、domain_keyword、domain_regex、ip_cidr、geosite、match。支持的动作：direct、proxy、auto。',
+          '在规则列表末尾追加一条路由规则。支持的规则类型：domain、domain_suffix、domain_keyword、domain_regex、ip_cidr、geosite、match。支持的动作：direct（只直连）、proxy（只走上游）、direct_first（直连优先）、proxy_first（代理优先）、auto（沿用全局 auto_mode）、deny（拒绝，match 类型不可用）。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -697,6 +699,42 @@ yigate_connections_total 12345
         ],
       },
       {
+        id: 'rules-batch-toggle',
+        method: 'POST',
+        path: '/api/v1/config/rules/batch-toggle',
+        summary: '批量启用/禁用路由规则',
+        description:
+          '一次请求切换多条规则的 disabled 状态，整批只写一次配置文件、只热加载一次。indexes 按调用前的原始位置解释，越界索引记入 failed，其余项照常生效。禁用的规则保留在配置中但不参与匹配。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        requestBody: `{
+  "indexes": [0, 2],
+  "disabled": true
+}`,
+        responseBody: `{
+  "status": "ok",
+  "updated": ["0", "2"],
+  "failed": [
+    { "target": "9", "error": "rule index 9 out of range (0-2)" }
+  ]
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/rules/batch-toggle \\
+  -H "Content-Type: application/json" \\
+  -d '{"indexes": [0, 2], "disabled": true}'`,
+          response: `{
+  "status": "ok",
+  "updated": ["0", "2"]
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '请求已处理，逐项结果见 updated / failed' },
+          { code: 400, description: '请求体格式错误或 indexes 为空' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
         id: 'rules-update',
         method: 'PUT',
         path: '/api/v1/config/rules/{index}',
@@ -739,6 +777,42 @@ yigate_connections_total 12345
           { code: 200, description: '更新成功' },
           { code: 400, description: '规则校验失败' },
           { code: 404, description: '索引超出范围' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'rules-replace',
+        method: 'PUT',
+        path: '/api/v1/config/rules',
+        summary: '整体替换路由规则',
+        description:
+          '用请求体中的列表整体替换现有规则（文本视图保存使用）。服务端先校验全部规则再落盘：任一条非法都不会写入，成功后只写一次配置文件、只热加载一次。rules 字段必须出现，传空数组表示清空全部规则。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        requestBody: `{
+  "rules": [
+    { "type": "geosite", "values": ["cn"], "action": "direct" },
+    { "type": "geosite", "values": ["geolocation-!cn"], "action": "proxy" },
+    { "type": "match", "action": "proxy" }
+  ]
+}`,
+        responseBody: `{
+  "status": "ok",
+  "count": 3
+}`,
+        example: {
+          request: `curl -X PUT http://127.0.0.1:8890/api/v1/config/rules \\
+  -H "Content-Type: application/json" \\
+  -d '{"rules":[{"type":"geosite","values":["cn"],"action":"direct"}]}'`,
+          response: `{
+  "status": "ok",
+  "count": 1
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '替换成功' },
+          { code: 400, description: 'rules 缺失或任一规则校验失败' },
           { code: 401, description: '未认证' },
         ],
       },

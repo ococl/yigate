@@ -121,6 +121,30 @@ func (m *mockConfigEditor) UpdateRule(index int, rule RouteRule) error {
 	return nil
 }
 
+func (m *mockConfigEditor) ReplaceRules(rules []RouteRule) error {
+	if m.applyErr != nil {
+		return m.applyErr
+	}
+	m.rules = append([]RouteRule(nil), rules...)
+	return nil
+}
+
+func (m *mockConfigEditor) SetRulesDisabled(indexes []int, disabled bool) (BatchUpdateResult, error) {
+	res := BatchUpdateResult{Status: "ok", Updated: []string{}}
+	if m.applyErr != nil {
+		return res, m.applyErr
+	}
+	for _, index := range indexes {
+		if index < 0 || index >= len(m.rules) {
+			res.Failed = append(res.Failed, BatchDeleteFailure{Target: strconv.Itoa(index), Error: "out of range"})
+			continue
+		}
+		m.rules[index].Disabled = disabled
+		res.Updated = append(res.Updated, strconv.Itoa(index))
+	}
+	return res, nil
+}
+
 func (m *mockConfigEditor) MoveRule(index int, direction string) error {
 	if m.applyErr != nil {
 		return m.applyErr
@@ -503,6 +527,89 @@ func TestConfigAPIAddRule(t *testing.T) {
 	}
 	if len(editor.rules) != 3 {
 		t.Fatalf("expected 3 rules after add, got %d", len(editor.rules))
+	}
+}
+
+func TestConfigAPIReplaceRules(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "PUT", addr, "/api/v1/config/rules", replaceRulesRequest{
+		Rules: []RouteRule{
+			{Type: "geosite", Values: []string{"cn"}, Action: "direct"},
+			{Type: "geosite", Values: []string{"geolocation-!cn"}, Action: "proxy"},
+			{Type: "match", Action: "proxy"},
+		},
+	}, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(editor.rules) != 3 {
+		t.Fatalf("expected 3 rules after replace, got %d", len(editor.rules))
+	}
+	if editor.rules[0].Values[0] != "cn" || editor.rules[2].Type != "match" {
+		t.Fatalf("unexpected rules after replace: %+v", editor.rules)
+	}
+}
+
+func TestConfigAPIReplaceRulesEmptyList(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "PUT", addr, "/api/v1/config/rules", replaceRulesRequest{Rules: []RouteRule{}}, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(editor.rules) != 0 {
+		t.Fatalf("expected rules cleared, got %d", len(editor.rules))
+	}
+}
+
+// 缺 rules 字段不能被当成"清空"，否则一次拼错的请求会误删全部规则。
+func TestConfigAPIReplaceRulesMissingField(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "PUT", addr, "/api/v1/config/rules", map[string]any{}, "")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if len(editor.rules) != 2 {
+		t.Fatalf("rules must stay unchanged, got %d", len(editor.rules))
+	}
+}
+
+func TestConfigAPIBatchToggleRules(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "POST", addr, "/api/v1/config/rules/batch-toggle", map[string]any{
+		"indexes":  []int{0},
+		"disabled": true,
+	}, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !editor.rules[0].Disabled || editor.rules[1].Disabled {
+		t.Fatalf("unexpected disabled flags: %+v", editor.rules)
+	}
+}
+
+func TestConfigAPIBatchToggleEmptyIndexes(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "POST", addr, "/api/v1/config/rules/batch-toggle", map[string]any{
+		"indexes":  []int{},
+		"disabled": true,
+	}, "")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
