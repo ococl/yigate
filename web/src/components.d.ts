@@ -53,6 +53,7 @@ declare module 'vue' {
     ATypographyParagraph: typeof import('antdv-next')['TypographyParagraph']
     ATypographyText: typeof import('antdv-next')['TypographyText']
     ATypographyTitle: typeof import('antdv-next')['TypographyTitle']
+    LoadError: typeof import('./components/LoadError.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }
