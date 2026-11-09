@@ -42,6 +42,20 @@ request.interceptors.request.use(
   (error) => Promise.reject(error),
 )
 
+// 同一文案短时间内只提示一次：轮询或并发请求连续失败时，反复弹同一句会盖满页面
+let lastErrorText = ''
+let lastErrorAt = 0
+
+function notifyError(text: string): void {
+  const now = Date.now()
+  if (text === lastErrorText && now - lastErrorAt < 3000) {
+    return
+  }
+  lastErrorText = text
+  lastErrorAt = now
+  message.error(text)
+}
+
 // 响应拦截器：统一错误处理
 request.interceptors.response.use(
   (response) => response,
@@ -63,18 +77,18 @@ request.interceptors.response.use(
         if (window.location.pathname !== '/login') {
           window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
         }
-        message.error('认证失败，请重新登录')
+        notifyError('认证失败，请重新登录')
       } else if (apiError.status === 403) {
-        message.error(apiError.detail || '无权限执行此操作')
+        notifyError(apiError.detail || '无权限执行此操作')
       } else if (apiError.status >= 500) {
-        message.error(`服务器错误 (${apiError.status})：${apiError.detail}`)
+        notifyError(`服务器错误 (${apiError.status})：${apiError.detail}`)
       } else {
-        message.error(apiError.detail)
+        notifyError(apiError.detail)
       }
     } else if (error.code === 'ECONNABORTED') {
-      message.error('请求超时')
+      notifyError('请求超时')
     } else {
-      message.error('网络错误，请检查后端服务是否运行')
+      notifyError('网络错误，请检查后端服务是否运行')
     }
 
     return Promise.reject(error)

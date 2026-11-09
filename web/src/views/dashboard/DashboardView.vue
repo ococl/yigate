@@ -21,9 +21,9 @@ async function fetchData(silent = false) {
   if (!silent) loading.value = true
   try {
     const [h, s, t] = await Promise.all([
-      getHealth().catch(() => null),
-      getStatus().catch(() => null),
-      getTraffic().catch(() => null),
+      getHealth({ silent }).catch(() => null),
+      getStatus({ silent }).catch(() => null),
+      getTraffic({ silent }).catch(() => null),
     ])
     health.value = h
     status.value = s

@@ -7,13 +7,16 @@ import { formatUptime } from '@/utils/format'
 const info = ref<VersionInfo | null>(null)
 const error = ref('')
 
-onMounted(async () => {
+async function loadVersion() {
+  error.value = ''
   try {
     info.value = await getVersion()
   } catch {
     error.value = '无法获取版本信息'
   }
-})
+}
+
+onMounted(loadVersion)
 </script>
 
 <template>
@@ -24,7 +27,11 @@ onMounted(async () => {
     </div>
   </div>
 
-  <a-alert v-if="error" type="warning" show-icon :message="error" style="margin-bottom: 16px;" />
+  <a-alert v-if="error" type="warning" show-icon :message="error" style="margin-bottom: 16px;">
+    <template #action>
+      <a-button size="small" @click="loadVersion">重试</a-button>
+    </template>
+  </a-alert>
 
   <a-descriptions title="运行版本" :column="{ xs: 1, sm: 2 }" bordered size="small">
     <a-descriptions-item label="版本">{{ info?.version || '—' }}</a-descriptions-item>

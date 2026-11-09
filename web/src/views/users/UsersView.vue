@@ -41,6 +41,12 @@ const columns = [
 // 桌面表格分页受控，删除后能收回越界页码
 const PAGE_SIZE = 20
 const page = ref(1)
+// 移动端卡片与规则页保持一致，本地分页，避免用户多时一次性渲染全部卡片
+const MOBILE_PAGE_SIZE = 20
+const mobilePage = ref(1)
+const mobileItems = computed(() =>
+  dataSource.value.slice((mobilePage.value - 1) * MOBILE_PAGE_SIZE, mobilePage.value * MOBILE_PAGE_SIZE),
+)
 const tablePagination = computed(() => ({
   current: page.value,
   pageSize: PAGE_SIZE,
@@ -53,6 +59,8 @@ const tablePagination = computed(() => ({
 function clampPage() {
   const maxPage = Math.max(1, Math.ceil(dataSource.value.length / PAGE_SIZE))
   if (page.value > maxPage) page.value = maxPage
+  const maxMobilePage = Math.max(1, Math.ceil(dataSource.value.length / MOBILE_PAGE_SIZE))
+  if (mobilePage.value > maxMobilePage) mobilePage.value = maxMobilePage
 }
 
 async function fetchData() {
@@ -164,7 +172,7 @@ onMounted(fetchData)
         <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证">
           <a-button type="primary" @click="showAddModal">新增用户</a-button>
         </a-empty>
-        <a-card v-for="record in dataSource" :key="record.username" size="small" class="mobile-card">
+        <a-card v-for="record in mobileItems" :key="record.username" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-typography-text strong>{{ record.username }}</a-typography-text>
           </div>
@@ -180,6 +188,15 @@ onMounted(fetchData)
             </a-popconfirm>
           </div>
         </a-card>
+        <a-pagination
+          v-if="dataSource.length > MOBILE_PAGE_SIZE"
+          v-model:current="mobilePage"
+          :page-size="MOBILE_PAGE_SIZE"
+          :total="dataSource.length"
+          :show-size-changer="false"
+          size="small"
+          class="mobile-pagination"
+        />
       </div>
 
       <div v-else class="fill-table">

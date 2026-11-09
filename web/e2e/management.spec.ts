@@ -467,3 +467,46 @@ test('traffic disabled state links to the settings section', async ({ page }) =>
   await empty.getByRole('button', { name: '前往系统设置' }).click()
   await expect(page).toHaveURL(/\/settings\?section=quota/)
 })
+
+test('failing polling does not flood the page with error toasts', async ({ page }) => {
+  await login(page)
+
+  for (const pattern of ['**/health', '**/api/v1/status', '**/api/v1/traffic']) {
+    await page.route(pattern, (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+    )
+  }
+  await page.goto('/dashboard')
+
+  // 三个接口同时失败，同一句提示只该出现一次
+  await page.waitForTimeout(1200)
+  expect(await page.locator('.ant-message-notice').count()).toBeLessThanOrEqual(1)
+
+  // 轮询静默：过一个轮询周期也不该再弹
+  await page.waitForTimeout(10500)
+  expect(await page.locator('.ant-message-notice').count()).toBeLessThanOrEqual(1)
+})
+
+test('about page can retry the version read', async ({ page }) => {
+  await login(page)
+
+  let calls = 0
+  await page.route('**/api/v1/version', (route) => {
+    calls += 1
+    if (calls === 1) {
+      return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' })
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ version: 'v9.9.9', commit: 'abc', build_time: 'now', go_version: 'go1.25', platform: 'linux' }),
+    })
+  })
+  await page.goto('/about')
+
+  await expect(page.getByText('无法获取版本信息')).toBeVisible()
+  // antd 会在两个汉字间插空格，可访问名称是「重 试」
+  await page.getByRole('button', { name: /重\s*试/ }).click()
+  await expect(page.getByText('v9.9.9')).toBeVisible()
+  await expect(page.getByText('无法获取版本信息')).toHaveCount(0)
+})

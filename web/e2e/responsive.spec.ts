@@ -94,3 +94,22 @@ test('mobile empty list keeps the create action reachable', async ({ page }) => 
   const box = await dialog.boundingBox()
   expect(box?.width ?? 0).toBeLessThanOrEqual(390)
 })
+
+test('mobile user list paginates instead of rendering every card', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/config/users', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        users: Array.from({ length: 21 }, (_, i) => ({ username: `zh-mobile-${i + 1}` })),
+      }),
+    }),
+  )
+  await page.goto('/users')
+
+  await expect(page.locator('.mobile-card')).toHaveCount(20)
+  await page.locator('.mobile-pagination .ant-pagination-item-2').click()
+  await expect(page.locator('.mobile-card')).toHaveCount(1)
+})

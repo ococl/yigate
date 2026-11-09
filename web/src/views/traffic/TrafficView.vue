@@ -97,7 +97,7 @@ const summary = computed(() => {
 async function fetchData(showLoading = true) {
   if (showLoading) loading.value = true
   try {
-    const res = await getTraffic()
+    const res = await getTraffic({ silent: !showLoading })
     enabled.value = !!res.enabled
     retentionDays.value = res.retention_days || 30
     dataSource.value = res.entries || []
@@ -106,7 +106,8 @@ async function fetchData(showLoading = true) {
     // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
     loadError.value = true
   } finally {
-    loading.value = false
+    // 轮询不碰 loading，否则会把手动刷新的 loading 提前清掉
+    if (showLoading) loading.value = false
   }
 }
 
