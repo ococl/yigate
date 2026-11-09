@@ -2,9 +2,11 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { listUsers, addUser, updateUserPassword, deleteUser } from '@/api/users'
 import type { UserInfo } from '@/types/api'
 
+const isMobile = useIsMobile()
 const dataSource = ref<UserInfo[]>([])
 const loading = ref(false)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
@@ -133,7 +135,28 @@ onMounted(fetchData)
         description="多监听器模式下，新增/删除用户会同步到所有监听器。"
       />
 
-      <div class="fill-table">
+      <div v-if="isMobile" class="mobile-list">
+        <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+        <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证" />
+        <a-card v-for="record in dataSource" :key="record.username" size="small" class="mobile-card">
+          <div class="mobile-card-head">
+            <a-typography-text strong>{{ record.username }}</a-typography-text>
+          </div>
+          <div class="mobile-card-actions">
+            <a-button size="small" @click="showResetModal(record.username)">修改密码</a-button>
+            <a-popconfirm
+              title="删除后该用户将无法继续通过代理认证，确定删除？"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="handleDelete(record.username)"
+            >
+              <a-button size="small" danger>删除</a-button>
+            </a-popconfirm>
+          </div>
+        </a-card>
+      </div>
+
+      <div v-else class="fill-table">
         <a-table
           :data-source="dataSource"
           :columns="columns"
