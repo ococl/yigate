@@ -2,13 +2,14 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
+import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { listUsers, addUser, updateUserPassword, deleteUser } from '@/api/users'
 import type { UserInfo } from '@/types/api'
 
 const isMobile = useIsMobile()
 const dataSource = ref<UserInfo[]>([])
-const loading = ref(false)
+const loading = ref(true)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 const submitting = ref(false)
@@ -169,6 +170,7 @@ onMounted(fetchData)
 
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+        <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证">
           <a-button type="primary" @click="showAddModal">新增用户</a-button>
         </a-empty>

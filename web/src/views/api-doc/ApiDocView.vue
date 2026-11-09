@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import { apiGroups } from '@/data/api-docs'
 import { copyText } from '@/utils/clipboard'
+import { highlightText } from '@/utils/highlight'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,6 +67,11 @@ const methodColor: Record<string, string> = {
 
 function clearSearch() {
   searchKeyword.value = ''
+}
+
+// 结果里把命中的关键词标出来，否则一屏十几条描述，看不出为什么这条被匹配
+function highlight(text: string): string {
+  return highlightText(text, searchKeyword.value)
 }
 
 const filteredGroups = computed(() => {
@@ -190,10 +196,12 @@ async function copyToClipboard(text: string) {
 
                 <!-- 端点摘要 -->
                 <a-typography-title :level="5" style="margin-top: 0;">
-                  {{ endpoint.summary }}
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlight() 已做 HTML 转义 -->
+                  <span v-html="highlight(endpoint.summary)" />
                 </a-typography-title>
                 <a-typography-paragraph type="secondary">
-                  {{ endpoint.description }}
+                  <!-- eslint-disable-next-line vue/no-v-html -- highlight() 已做 HTML 转义 -->
+                  <span v-html="highlight(endpoint.description)" />
                 </a-typography-paragraph>
 
                 <!-- 认证标记 -->
@@ -398,6 +406,13 @@ async function copyToClipboard(text: string) {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+.api-docs-detail mark {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: #fff1b8;
+  color: inherit;
 }
 
 .code-block {

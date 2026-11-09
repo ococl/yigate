@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getTraffic } from '@/api/system'
 import LoadError from '@/components/LoadError.vue'
+import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import type { TrafficEntrySnapshot } from '@/types/api'
@@ -177,6 +178,7 @@ useVisiblePolling(() => fetchData(false), 15000)
 
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError && dataSource.length === 0" :retrying="loading" @retry="() => fetchData()" />
+        <MobileListSkeleton v-else-if="loading && mobileItems.length === 0" />
         <a-empty
           v-else-if="mobileItems.length === 0"
           :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'"

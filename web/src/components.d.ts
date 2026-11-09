@@ -41,6 +41,7 @@ declare module 'vue' {
     AResult: typeof import('antdv-next')['Result']
     ARow: typeof import('antdv-next')['Row']
     ASelect: typeof import('antdv-next')['Select']
+    ASkeleton: typeof import('antdv-next')['Skeleton']
     ASpace: typeof import('antdv-next')['Space']
     ASpin: typeof import('antdv-next')['Spin']
     AStatistic: typeof import('antdv-next')['Statistic']
@@ -54,6 +55,7 @@ declare module 'vue' {
     ATypographyText: typeof import('antdv-next')['TypographyText']
     ATypographyTitle: typeof import('antdv-next')['TypographyTitle']
     LoadError: typeof import('./components/LoadError.vue')['default']
+    MobileListSkeleton: typeof import('./components/MobileListSkeleton.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

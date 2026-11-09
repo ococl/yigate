@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
+import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { listRules, addRule, updateRule, moveRule, deleteRule } from '@/api/rules'
 import { listUpstreams } from '@/api/upstreams'
@@ -10,7 +11,7 @@ import type { RuleInfo, RuleRequest } from '@/types/api'
 const isMobile = useIsMobile()
 const dataSource = ref<RuleInfo[]>([])
 const upstreamOptions = ref<{ label: string; value: string }[]>([])
-const loading = ref(false)
+const loading = ref(true)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 const movingIndex = ref<number | null>(null)
@@ -267,6 +268,7 @@ onMounted(fetchData)
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+        <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理">
           <a-button type="primary" @click="openAddModal">新增规则</a-button>
         </a-empty>

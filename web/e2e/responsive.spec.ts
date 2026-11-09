@@ -113,3 +113,24 @@ test('mobile user list paginates instead of rendering every card', async ({ page
   await page.locator('.mobile-pagination .ant-pagination-item-2').click()
   await expect(page.locator('.mobile-card')).toHaveCount(1)
 })
+
+test('mobile list shows placeholders while loading instead of an empty state', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/config/users', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '{"users":[{"username":"zh-lazy"}]}',
+    })
+  })
+  await page.goto('/users')
+
+  // 移动端没有表格遮罩，加载期间应先给占位卡片，而不是「暂无用户」
+  await expect(page.locator('.mobile-skeleton')).toBeVisible()
+  await expect(page.getByText('暂无用户')).toHaveCount(0)
+
+  await expect(page.locator('.mobile-card').filter({ hasText: 'zh-lazy' })).toBeVisible()
+  await expect(page.locator('.mobile-skeleton')).toHaveCount(0)
+})

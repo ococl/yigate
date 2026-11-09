@@ -3,6 +3,7 @@ import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
+import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import {
@@ -28,7 +29,8 @@ const isMobile = useIsMobile()
 const route = useRoute()
 const router = useRouter()
 const dataSource = ref<UpstreamInfo[]>([])
-const loading = ref(false)
+// 与其它列表页一致：首帧即为加载中，避免「暂无数据」空态闪一帧
+const loading = ref(true)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 // 按名称跟踪进行中的操作：同时巡检或切换多行时，各行的 loading 不能互相覆盖
@@ -479,6 +481,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+        <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理">
           <a-button type="primary" @click="showAddModal">新增上游</a-button>
         </a-empty>

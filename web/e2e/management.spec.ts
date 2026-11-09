@@ -547,3 +547,15 @@ test('moving a rule reveals where it landed', async ({ page, request }) => {
 
   await cleanup()
 })
+
+test('api docs highlight the searched keyword', async ({ page }) => {
+  await login(page)
+  await page.goto('/docs/api')
+
+  await page.getByRole('textbox', { name: '搜索端点路径、名称或描述' }).fill('健康检查')
+
+  // 描述里不标出命中位置，一屏十几条结果看不出为什么被匹配
+  const mark = page.locator('.api-docs-detail mark').first()
+  await expect(mark).toBeVisible()
+  await expect(mark).toHaveText('健康检查')
+})
