@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getTraffic } from '@/api/system'
+import LoadError from '@/components/LoadError.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import type { TrafficEntrySnapshot } from '@/types/api'
@@ -10,6 +11,8 @@ import { formatBytes } from '@/utils/format'
 const isMobile = useIsMobile()
 const mobilePage = ref(1)
 const dataSource = ref<TrafficEntrySnapshot[]>([])
+// 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
+const loadError = ref(false)
 const enabled = ref(false)
 const retentionDays = ref(30)
 const loading = ref(false)
@@ -86,6 +89,10 @@ async function fetchData(showLoading = true) {
     enabled.value = !!res.enabled
     retentionDays.value = res.retention_days || 30
     dataSource.value = res.entries || []
+    loadError.value = false
+  } catch {
+    // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -156,7 +163,8 @@ useVisiblePolling(() => fetchData(false), 15000)
       </a-row>
 
       <div v-if="isMobile" class="mobile-list">
-        <a-empty v-if="mobileItems.length === 0" :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
+        <LoadError v-if="loadError && dataSource.length === 0" :retrying="loading" @retry="() => fetchData()" />
+        <a-empty v-else-if="mobileItems.length === 0" :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
         <a-card v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-space size="small" wrap>
@@ -216,7 +224,8 @@ useVisiblePolling(() => fetchData(false), 15000)
       </template>
     </template>
         <template #emptyText>
-          <a-empty :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
+          <LoadError v-if="loadError" :retrying="loading" @retry="() => fetchData()" />
+          <a-empty v-else :description="enabled ? '暂无流量统计数据' : '流量审计未启用，暂无数据'" />
         </template>
         </a-table>
       </div>

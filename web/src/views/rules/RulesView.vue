@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
+import LoadError from '@/components/LoadError.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { listRules, addRule, updateRule, moveRule, deleteRule } from '@/api/rules'
 import { listUpstreams } from '@/api/upstreams'
@@ -10,6 +11,8 @@ const isMobile = useIsMobile()
 const dataSource = ref<RuleInfo[]>([])
 const upstreamOptions = ref<{ label: string; value: string }[]>([])
 const loading = ref(false)
+// 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
+const loadError = ref(false)
 const movingIndex = ref<number | null>(null)
 const modalVisible = ref(false)
 const submitting = ref(false)
@@ -75,6 +78,10 @@ async function fetchData() {
     dataSource.value = rules.rules || []
     mobilePage.value = 1
     upstreamOptions.value = (ups.upstreams || []).map((u) => ({ label: u.name, value: u.name }))
+    loadError.value = false
+  } catch {
+    // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -199,7 +206,8 @@ onMounted(fetchData)
 
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
-        <a-empty v-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理" />
+        <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+        <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理" />
         <a-card v-for="record in mobileItems" :key="record.index" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-space size="small">
@@ -321,7 +329,8 @@ onMounted(fetchData)
       </template>
     </template>
         <template #emptyText>
-          <a-empty description="暂无路由规则，所有请求将按全局 default_action 处理" />
+          <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+          <a-empty v-else description="暂无路由规则，所有请求将按全局 default_action 处理" />
         </template>
         </a-table>
       </div>

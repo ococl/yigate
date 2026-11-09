@@ -2,6 +2,7 @@
 import { ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'antdv-next'
+import LoadError from '@/components/LoadError.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import {
@@ -28,6 +29,8 @@ const route = useRoute()
 const router = useRouter()
 const dataSource = ref<UpstreamInfo[]>([])
 const loading = ref(false)
+// 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
+const loadError = ref(false)
 const checking = ref<string | null>(null)
 const checkingAll = ref(false)
 const toggling = ref<string | null>(null)
@@ -138,6 +141,10 @@ async function fetchData() {
   try {
     const [res] = await Promise.all([listUpstreams(), fetchRuntimeStatus()])
     dataSource.value = res.upstreams || []
+    loadError.value = false
+  } catch {
+    // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -443,7 +450,8 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
-        <a-empty v-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理" />
+        <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+        <a-empty v-else-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理" />
         <a-card v-for="record in mobileItems" :key="record.name" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-typography-text strong>{{ record.name }}</a-typography-text>
@@ -581,7 +589,8 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
       </template>
     </template>
         <template #emptyText>
-          <a-empty description="暂无上游，请先新增一个上游代理" />
+          <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+          <a-empty v-else description="暂无上游，请先新增一个上游代理" />
         </template>
         </a-table>
       </div>

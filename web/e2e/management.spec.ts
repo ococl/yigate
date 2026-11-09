@@ -66,7 +66,9 @@ test('upstream list paginates, keeps page in the URL and resets on page-size cha
   }
 })
 
-test('upstream page stays usable and shows an error when the API fails', async ({ page }) => {
+test('upstream list shows a retryable error state instead of an empty list when the API fails', async ({
+  page,
+}) => {
   await login(page)
 
   await page.route('**/api/v1/config/upstreams', (route) =>
@@ -74,12 +76,23 @@ test('upstream page stays usable and shows an error when the API fails', async (
   )
   await page.goto('/upstreams')
   await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
-  await expect(page.getByText(/失败|错误|异常/).first()).toBeVisible()
+  // 失败时不能显示「暂无上游」，否则会被误读为没有配置
+  await expect(page.getByText('数据加载失败')).toBeVisible()
+  await expect(page.getByText('暂无上游，请先新增一个上游代理')).toHaveCount(0)
+  await expect(page.getByText('服务器错误').first()).toBeVisible()
 
-  // 断网（请求直接失败）时同样给出提示而不是白屏
+  // 恢复接口后点击重试，错误态消失
   await page.unroute('**/api/v1/config/upstreams')
+  await page.locator('.ant-result-extra .ant-btn').click()
+  await expect(page.getByText('数据加载失败')).toHaveCount(0)
+})
+
+test('upstream page survives a network outage', async ({ page }) => {
+  await login(page)
+
   await page.route('**/api/v1/config/upstreams', (route) => route.abort())
-  await page.reload()
+  await page.goto('/upstreams')
   await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
-  await expect(page.getByText(/失败|错误|异常|网络/).first()).toBeVisible()
+  await expect(page.getByText('数据加载失败')).toBeVisible()
+  await expect(page.getByText('网络错误').first()).toBeVisible()
 })

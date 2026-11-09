@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
+import LoadError from '@/components/LoadError.vue'
 import { listUsers, addUser, updateUserPassword, deleteUser } from '@/api/users'
 import type { UserInfo } from '@/types/api'
 
 const dataSource = ref<UserInfo[]>([])
 const loading = ref(false)
+// 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
+const loadError = ref(false)
 const submitting = ref(false)
 const modalVisible = ref(false)
 const passwordModalVisible = ref(false)
@@ -36,6 +39,10 @@ async function fetchData() {
   try {
     const res = await listUsers()
     dataSource.value = res.users || []
+    loadError.value = false
+  } catch {
+    // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -151,7 +158,8 @@ onMounted(fetchData)
       </template>
     </template>
         <template #emptyText>
-          <a-empty description="暂无用户，未配置用户时表示不启用代理认证" />
+          <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
+          <a-empty v-else description="暂无用户，未配置用户时表示不启用代理认证" />
         </template>
         </a-table>
       </div>
