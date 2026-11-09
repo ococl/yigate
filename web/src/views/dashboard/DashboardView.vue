@@ -610,7 +610,11 @@ useVisiblePolling(() => fetchData(true), 10000)
             </div>
           </div>
         </div>
-        <a-empty v-else description="未探测到可用地址，请先在系统设置中检查代理监听地址" />
+        <a-empty v-else description="未探测到可用地址，请先在系统设置中检查代理监听地址">
+          <RouterLink to="/settings?section=basic">
+            <a-button type="primary" size="small">前往基础设置</a-button>
+          </RouterLink>
+        </a-empty>
       </div>
 
       <div class="proxy-section">

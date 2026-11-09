@@ -64,6 +64,10 @@ const methodColor: Record<string, string> = {
   DELETE: 'red',
 }
 
+function clearSearch() {
+  searchKeyword.value = ''
+}
+
 const filteredGroups = computed(() => {
   if (!searchKeyword.value.trim()) return apiGroups
   const kw = searchKeyword.value.toLowerCase()
@@ -320,9 +324,11 @@ async function copyToClipboard(text: string) {
           <!-- 无搜索结果 -->
           <a-empty
             v-if="filteredGroups.length === 0"
-            description="未找到匹配的端点"
+            :description="searchKeyword ? `未找到匹配「${searchKeyword}」的端点` : '未找到匹配的端点'"
             style="margin-top: 60px;"
-          />
+          >
+            <a-button v-if="searchKeyword" size="small" @click="clearSearch">清除搜索</a-button>
+          </a-empty>
         </div>
       </section>
     </div>

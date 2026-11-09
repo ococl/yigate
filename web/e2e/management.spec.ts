@@ -238,3 +238,32 @@ test('traffic card offers retry instead of a settings link when loading fails', 
   await card.getByRole('button', { name: /重\s*试/ }).click()
   await expect.poll(() => calls).toBeGreaterThan(1)
 })
+
+test('proxy link modal points to basic settings when no address is detected', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/status', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ listen: '', proxy_endpoints: [] }),
+    }),
+  )
+  await page.goto('/dashboard')
+  await page.getByRole('button', { name: '代理链接' }).click()
+
+  await expect(page.getByText('未探测到可用地址')).toBeVisible()
+  await page.getByRole('dialog').getByRole('button', { name: '前往基础设置' }).click()
+  await expect(page).toHaveURL(/\/settings\?section=basic/)
+})
+
+test('api doc search offers a clear action when nothing matches', async ({ page }) => {
+  await login(page)
+  await page.goto('/docs/api')
+
+  await page.getByPlaceholder('搜索端点路径、名称或描述...').fill('zzz-no-such-endpoint')
+  await expect(page.getByText('未找到匹配「zzz-no-such-endpoint」的端点')).toBeVisible()
+
+  await page.getByRole('button', { name: '清除搜索' }).click()
+  await expect(page.getByText('未找到匹配')).toHaveCount(0)
+})
