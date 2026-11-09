@@ -41,7 +41,7 @@ async function copyAll() {
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-llmx">
     <div class="page-header">
       <div class="page-header-text">
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.llmx.title') }}</a-typography-title>

@@ -1,15 +1,7 @@
-import { expect, test, type Page } from '@playwright/test'
-
-const token = process.env.YIGATE_E2E_TOKEN ?? 'yigate-webui-e2e-token'
+import { expect, test } from '@playwright/test'
+import { copy, expectPage, login, navItem } from './support'
 
 test.use({ viewport: { width: 390, height: 844 } })
-
-async function login(page: Page): Promise<void> {
-  await page.goto('/login')
-  await page.getByPlaceholder('请输入 management_auth_token').fill(token)
-  await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page).toHaveURL(/\/dashboard$/)
-}
 
 test('mobile layout uses drawer navigation and keeps content usable', async ({ page }) => {
   await login(page)
@@ -25,39 +17,39 @@ test('mobile layout uses drawer navigation and keeps content usable', async ({ p
   expect(viewportOverflow).toBeLessThanOrEqual(1)
 
   // 顶部菜单按钮打开抽屉，选择菜单后自动关闭
-  await page.getByRole('button', { name: '打开导航菜单' }).click()
+  await page.getByTestId('nav-toggle').click()
   const drawer = page.getByRole('dialog')
   await expect(drawer).toBeVisible()
-  await drawer.getByText('上游管理').click()
+  await navItem(page, 'upstreams').click()
   await expect(page).toHaveURL(/\/upstreams$/)
   await expect(page.getByRole('dialog')).toBeHidden()
-  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+  await expectPage(page, 'upstreams')
 })
 
 test('every management page fits the mobile viewport', async ({ page }) => {
   await login(page)
 
   const routes = [
-    ['/upstreams', '上游管理'],
-    ['/rules', '路由规则'],
-    ['/users', '用户管理'],
-    ['/traffic', '流量审计'],
-    ['/settings', '系统设置'],
-    ['/geosite', 'GeoSite 数据'],
-    ['/pprof', 'pprof 性能分析'],
-    ['/docs/auth', '认证机制'],
-    ['/docs/api', 'API 文档'],
-    ['/about', '关于'],
+    ['/upstreams', 'upstreams'],
+    ['/rules', 'rules'],
+    ['/users', 'users'],
+    ['/traffic', 'traffic'],
+    ['/settings', 'settings'],
+    ['/geosite', 'geosite'],
+    ['/pprof', 'pprof'],
+    ['/docs/auth', 'auth-doc'],
+    ['/docs/api', 'api-doc'],
+    ['/about', 'about'],
   ] as const
 
-  for (const [path, heading] of routes) {
+  for (const [path, anchor] of routes) {
     await page.goto(path)
-    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+    await expectPage(page, anchor)
     // 页面本身不应横向滚动；宽表格/代码块应在容器内部滚动。
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth,
     )
-    expect(overflow, `${path} 出现横向滚动`).toBeLessThanOrEqual(1)
+    expect(overflow, `${path} overflows the viewport horizontally`).toBeLessThanOrEqual(1)
   }
 })
 
@@ -65,16 +57,16 @@ test('settings switches to a section picker on mobile', async ({ page }) => {
   await login(page)
   await page.goto('/settings')
 
-  const picker = page.getByRole('combobox', { name: '设置分类' })
+  const picker = page.locator('#settings-section-select')
   await expect(picker).toBeVisible()
   await expect(page.locator('.settings-aside')).toBeHidden()
 
   await picker.click()
   await page
     .locator('.ant-select-dropdown:visible .ant-select-item-option')
-    .filter({ hasText: '流量审计与配额' })
+    .filter({ hasText: copy.pages.settings.sections.quota.title })
     .click()
-  await expect(page.getByRole('heading', { name: '流量审计与配额' })).toBeVisible()
+  await expect(page.locator('.settings-detail')).toContainText(copy.pages.settings.sections.quota.title)
 })
 
 test('mobile empty list keeps the create action reachable', async ({ page }) => {
@@ -84,9 +76,8 @@ test('mobile empty list keeps the create action reachable', async ({ page }) => 
   )
   await page.goto('/upstreams')
 
-  const empty = page.locator('.ant-empty').filter({ hasText: '暂无上游' })
-  await expect(empty).toBeVisible()
-  await empty.getByRole('button', { name: '新增上游' }).click()
+  await expect(page.locator('.ant-empty')).toContainText(copy.pages.upstreams.emptyDescription)
+  await page.getByTestId('empty-create').click()
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -127,9 +118,9 @@ test('mobile list shows placeholders while loading instead of an empty state', a
   })
   await page.goto('/users')
 
-  // 移动端没有表格遮罩，加载期间应先给占位卡片，而不是「暂无用户」
+  // 移动端没有表格遮罩，加载期间应先给占位卡片，而不是空态文案
   await expect(page.locator('.mobile-skeleton')).toBeVisible()
-  await expect(page.getByText('暂无用户')).toHaveCount(0)
+  await expect(page.getByText(copy.pages.users.emptyDescription)).toHaveCount(0)
 
   await expect(page.locator('.mobile-card').filter({ hasText: 'zh-lazy' })).toBeVisible()
   await expect(page.locator('.mobile-skeleton')).toHaveCount(0)

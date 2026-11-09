@@ -543,7 +543,7 @@ onMounted(fetchAll)
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-settings">
     <div class="page-header">
       <div class="page-header-text">
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.settings.title') }}</a-typography-title>
@@ -576,6 +576,7 @@ onMounted(fetchAll)
         <a-button @click="resetForm">{{ t('pages.settings.actions.reset') }}</a-button>
         <a-button
           type="primary"
+          data-testid="settings-save"
           :loading="saving"
           :disabled="!isDirty || loadError || !settings"
           :title="t('pages.settings.actions.saveTitle')"
@@ -601,7 +602,7 @@ onMounted(fetchAll)
       "
     >
       <template #action>
-        <a-button size="small" :loading="loading" @click="fetchAll">
+        <a-button size="small" data-testid="settings-retry" :loading="loading" @click="fetchAll">
           {{ t('pages.settings.loadError.retry') }}
         </a-button>
       </template>
@@ -621,6 +622,7 @@ onMounted(fetchAll)
               <a-menu-item
                 v-for="section in group.items"
                 :key="section.key"
+                :data-testid="`settings-section-${section.key}`"
                 @click="selectSection(section.key)"
               >
                 {{ section.title }}

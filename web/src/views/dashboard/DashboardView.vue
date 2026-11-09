@@ -353,7 +353,7 @@ useVisiblePolling(() => fetchData(true), 10000)
 </script>
 
 <template>
-  <a-spin :spinning="loading">
+  <a-spin :spinning="loading" data-testid="page-dashboard">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.dashboard.title') }}</a-typography-title>
@@ -366,7 +366,9 @@ useVisiblePolling(() => fetchData(true), 10000)
       </div>
       <a-space wrap>
         <a-tag color="blue">{{ status?.version || 'dev' }}</a-tag>
-        <a-button @click="proxyModalOpen = true">{{ t('pages.dashboard.proxyLinks') }}</a-button>
+        <a-button data-testid="dashboard-proxy-link" @click="proxyModalOpen = true">
+          {{ t('pages.dashboard.proxyLinks') }}
+        </a-button>
         <a-button @click="() => fetchData()" :loading="loading">{{ t('pages.dashboard.refresh') }}</a-button>
       </a-space>
     </div>
@@ -390,6 +392,7 @@ useVisiblePolling(() => fetchData(true), 10000)
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
+            data-testid="stat-status"
             :title="t('pages.dashboard.status')"
             :value="health ? health.status || '-' : '—'"
             :value-style="{ color: statusColor }"
@@ -399,6 +402,7 @@ useVisiblePolling(() => fetchData(true), 10000)
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
+            data-testid="stat-upstreams"
             :title="t('pages.dashboard.availableUpstreams')"
             :value="status ? aliveCount : '—'"
             :suffix="status ? `/ ${upstreams.length || health?.upstream_count || 0}` : ''"
@@ -415,6 +419,7 @@ useVisiblePolling(() => fetchData(true), 10000)
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
+            data-testid="stat-ready"
             :title="t('pages.dashboard.routerReady')"
             :value="
               health
@@ -471,7 +476,12 @@ useVisiblePolling(() => fetchData(true), 10000)
       </a-col>
 
       <a-col :xs="24" :lg="16">
-        <a-card size="small" :title="t('pages.dashboard.trafficOverview')" style="height: 100%;">
+        <a-card
+          size="small"
+          data-testid="dashboard-traffic-card"
+          :title="t('pages.dashboard.trafficOverview')"
+          style="height: 100%;"
+        >
           <template v-if="traffic && (traffic.enabled || traffic.entries.length > 0)">
             <a-alert
               v-if="!traffic.enabled"
@@ -587,7 +597,14 @@ useVisiblePolling(() => fetchData(true), 10000)
             <RouterLink v-if="traffic" to="/settings?section=quota">
               <a-button type="primary" size="small">{{ t('pages.dashboard.goSettings') }}</a-button>
             </RouterLink>
-            <a-button v-else type="primary" size="small" :loading="loading" @click="fetchData()">
+            <a-button
+              v-else
+              type="primary"
+              size="small"
+              data-testid="traffic-retry"
+              :loading="loading"
+              @click="fetchData()"
+            >
               {{ t('pages.dashboard.retry') }}
             </a-button>
           </a-empty>

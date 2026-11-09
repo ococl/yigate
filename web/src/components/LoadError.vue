@@ -24,7 +24,9 @@ const emit = defineEmits<{ retry: [] }>()
     :sub-title="description || t('common.loadFailedHint')"
   >
     <template #extra>
-      <a-button type="primary" :loading="retrying" @click="emit('retry')">{{ t('common.retry') }}</a-button>
+      <a-button type="primary" data-testid="load-error-retry" :loading="retrying" @click="emit('retry')">
+        {{ t('common.retry') }}
+      </a-button>
     </template>
   </a-result>
 </template>

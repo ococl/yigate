@@ -115,6 +115,7 @@ const localeMenu = computed(() => ({
         <div class="header-left">
           <a-button
             type="text"
+            data-testid="nav-toggle"
             :aria-label="isMobile ? t('layout.openNav') : t('layout.toggleSidebar')"
             @click="toggleNavigation"
           >

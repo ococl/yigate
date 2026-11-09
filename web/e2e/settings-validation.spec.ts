@@ -1,13 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-
-const token = process.env.YIGATE_E2E_TOKEN ?? 'yigate-webui-e2e-token'
-
-async function login(page: Page): Promise<void> {
-  await page.goto('/login')
-  await page.getByPlaceholder('请输入 management_auth_token').fill(token)
-  await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page).toHaveURL(/\/dashboard$/)
-}
+import { copy, expectPage, login } from './support'
 
 /** 打开指定章节，并等待设置加载完成，避免默认值被服务端值覆盖导致脏状态回退。 */
 async function openSection(page: Page, section: string): Promise<void> {
@@ -16,7 +8,7 @@ async function openSection(page: Page, section: string): Promise<void> {
   )
   await page.goto(`/settings?section=${section}`)
   await loaded
-  await expect(page.getByRole('heading', { name: '系统设置' })).toBeVisible()
+  await expectPage(page, 'settings')
 }
 
 async function pickDnsType(page: Page, value: string): Promise<void> {
@@ -27,7 +19,7 @@ async function pickDnsType(page: Page, value: string): Promise<void> {
 
 const fieldErrors = (page: Page) =>
   page.evaluate(() =>
-    [...document.querySelectorAll('.ant-form-item [class*="explain"]')]
+    [...document.querySelectorAll<HTMLElement>('.ant-form-item [class*="explain"]')]
       .map((el) => el.innerText.trim())
       .filter(Boolean),
   )
@@ -38,15 +30,15 @@ test('settings validates DoH fields inline and jumps to the section', async ({ p
 
   await pickDnsType(page, 'doh')
   await page.locator('#stg-doh-url').fill('')
-  await page.getByRole('button', { name: '保存设置' }).click()
+  await page.getByTestId('settings-save').click()
 
-  await expect(page.getByText('请填写 DoH URL').first()).toBeVisible()
+  await expect(page.getByText(copy.pages.settings.validation.dohRequired).first()).toBeVisible()
   await expect(page).toHaveURL(/section=dns/)
-  await expect(page.getByText('设置已保存')).toHaveCount(0)
+  await expect(page.getByText(copy.pages.settings.messages.saved)).toHaveCount(0)
 
   await page.locator('#stg-doh-url').fill('ftp://dns.example/dns-query')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText('DoH URL 需以 http:// 或 https:// 开头').first()).toBeVisible()
+  await page.getByTestId('settings-save').click()
+  await expect(page.getByText(copy.pages.settings.validation.dohInvalid).first()).toBeVisible()
 
   // 修改后内联错误自动清除（toast 可能仍在，只看字段区域）
   await page.locator('#stg-doh-url').fill('https://dns.example/dns-query')
@@ -54,8 +46,8 @@ test('settings validates DoH fields inline and jumps to the section', async ({ p
 
   await pickDnsType(page, 'dot')
   await page.locator('#stg-dot-addr').fill('1.1.1.1')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText(/DoT 地址格式为 host:port/).first()).toBeVisible()
+  await page.getByTestId('settings-save').click()
+  await expect(page.getByText(copy.pages.settings.validation.dotInvalid).first()).toBeVisible()
 })
 
 test('settings jumps to the section holding the first invalid field', async ({ page }) => {
@@ -63,14 +55,14 @@ test('settings jumps to the section holding the first invalid field', async ({ p
 
   await openSection(page, 'destination')
   await page.locator('#stg-deny-ports-text').fill('25, abc')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText(/端口需为 1-65535 的整数/).first()).toBeVisible()
+  await page.getByTestId('settings-save').click()
+  await expect(page.getByText(copy.pages.settings.validation.portsInvalid.split('：')[0]).first()).toBeVisible()
   await expect(page).toHaveURL(/section=destination/)
 
   await openSection(page, 'panel')
   await page.locator('#stg-token-input').fill('short')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText(/管理令牌至少 8 位/).first()).toBeVisible()
+  await page.getByTestId('settings-save').click()
+  await expect(page.getByText(copy.pages.settings.validation.tokenTooShort).first()).toBeVisible()
   await expect(page).toHaveURL(/section=panel/)
 })
 
@@ -80,14 +72,14 @@ test('settings saves once the invalid fields are corrected', async ({ page }) =>
 
   await pickDnsType(page, 'doh')
   await page.locator('#stg-doh-url').fill('https://dns.example/dns-query')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText('设置已保存')).toBeVisible()
+  await page.getByTestId('settings-save').click()
+  await expect(page.getByText(copy.pages.settings.messages.saved)).toBeVisible()
 
   // 还原为 system，避免影响其它用例
   await openSection(page, 'dns')
   await pickDnsType(page, 'system')
-  await page.getByRole('button', { name: '保存设置' }).click()
-  await expect(page.getByText('设置已保存')).toBeVisible()
+  await page.getByTestId('settings-save').click()
+  await expect(page.getByText(copy.pages.settings.messages.saved)).toBeVisible()
 })
 
 test('settings shows inline errors only after save, not while typing', async ({ page }) => {
@@ -108,14 +100,13 @@ test('settings reports a load failure instead of showing an empty form', async (
   await page.goto('/settings')
 
   // 读不到配置时不能摆出一份空表单，更不能允许保存覆盖服务端配置
-  await expect(page.getByText('设置加载失败')).toBeVisible()
-  await expect(page.getByText('无法读取服务端配置')).toBeVisible()
-  await expect(page.getByRole('button', { name: '保存设置' })).toBeDisabled()
+  await expect(page.getByText(copy.pages.settings.loadError.loadTitle)).toBeVisible()
+  await expect(page.getByText(copy.pages.settings.loadError.loadDescription)).toBeVisible()
+  await expect(page.getByTestId('settings-save')).toBeDisabled()
   await expect(page.locator('.settings-body')).toHaveCount(0)
 
-  // antd 会在两个汉字间插空格，可访问名称是「重 试」
-  await page.getByRole('button', { name: /重\s*试/ }).click()
-  await expect(page.getByText('设置加载失败')).toBeVisible()
+  await page.getByTestId('settings-retry').click()
+  await expect(page.getByText(copy.pages.settings.loadError.loadTitle)).toBeVisible()
 })
 
 test('retention 0 stays "use default" instead of becoming one day', async ({ page }) => {
@@ -131,9 +122,8 @@ test('retention 0 stays "use default" instead of becoming one day', async ({ pag
   })
 
   await page.goto('/settings?section=quota')
-  // 字段名后面会跟一个 tooltip 图标，用正则匹配即可
-  await page.getByRole('spinbutton', { name: /流量保留天数/ }).fill('0')
-  await page.getByRole('button', { name: '保存设置' }).click()
+  await page.locator('#stg-traffic-retention-days').fill('0')
+  await page.getByTestId('settings-save').click()
 
   // 0 的语义是「使用默认 30 天」，被强转成 1 会让流量明细一天后就被清掉
   await expect.poll(() => sent?.traffic_retention_days).toBe(0)

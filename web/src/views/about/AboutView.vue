@@ -23,7 +23,7 @@ onMounted(loadVersion)
 </script>
 
 <template>
-  <div class="page-header">
+  <div class="page-header" data-testid="page-about">
     <div>
       <a-typography-title :level="4" style="margin: 0;">{{ t('pages.about.title') }}</a-typography-title>
       <a-typography-text type="secondary">{{ t('pages.about.tagline') }}</a-typography-text>
@@ -32,7 +32,9 @@ onMounted(loadVersion)
 
   <a-alert v-if="error" type="warning" show-icon :message="error" style="margin-bottom: 16px;">
     <template #action>
-      <a-button size="small" @click="loadVersion">{{ t('common.retry') }}</a-button>
+      <a-button size="small" data-testid="about-retry" @click="loadVersion">
+        {{ t('common.retry') }}
+      </a-button>
     </template>
   </a-alert>
 

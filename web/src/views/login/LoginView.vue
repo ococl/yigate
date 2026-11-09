@@ -35,7 +35,7 @@ async function handleLogin() {
 </script>
 
 <template>
-  <a-card class="login-card" variant="borderless">
+  <a-card class="login-card" variant="borderless" data-testid="page-login">
     <div class="login-header">
       <h1 class="login-title">YiGate</h1>
       <p class="login-subtitle">{{ t('login.subtitle') }}</p>
@@ -51,6 +51,7 @@ async function handleLogin() {
         <a-input-password
           id="login-token"
           v-model:value="token"
+          data-testid="login-token"
           :placeholder="t('login.tokenPlaceholder')"
           size="large"
           autocomplete="current-password"
@@ -63,6 +64,7 @@ async function handleLogin() {
           type="primary"
           size="large"
           block
+          data-testid="login-submit"
           :loading="authStore.loading"
           @click="handleLogin"
         >

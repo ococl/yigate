@@ -526,7 +526,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-upstreams">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.upstreams.title') }}</a-typography-title>
@@ -536,8 +536,12 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
       </div>
       <a-space>
         <a-button @click="fetchData" :loading="loading">{{ t('common.refresh') }}</a-button>
-        <a-button @click="handleCheckAll" :loading="checkingAll">{{ t('pages.upstreams.checkAll') }}</a-button>
-        <a-button type="primary" @click="showAddModal">{{ t('pages.upstreams.addUpstream') }}</a-button>
+        <a-button data-testid="upstreams-check-all" @click="handleCheckAll" :loading="checkingAll">
+          {{ t('pages.upstreams.checkAll') }}
+        </a-button>
+        <a-button type="primary" data-testid="upstreams-add" @click="showAddModal">
+          {{ t('pages.upstreams.addUpstream') }}
+        </a-button>
       </a-space>
     </div>
 
@@ -546,7 +550,9 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" :description="t('pages.upstreams.emptyDescription')">
-          <a-button type="primary" @click="showAddModal">{{ t('pages.upstreams.addUpstream') }}</a-button>
+          <a-button type="primary" data-testid="empty-create" @click="showAddModal">
+            {{ t('pages.upstreams.addUpstream') }}
+          </a-button>
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="record.name">
           <template #head>
@@ -580,20 +586,23 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
           <template #actions>
             <a-button
               size="small"
+              data-testid="row-check"
               :disabled="record.enabled === false"
               :loading="checking.includes(record.name)"
               @click="handleCheck(record.name)"
             >
               {{ t('common.check') }}
             </a-button>
-            <a-button size="small" @click="showEditModal(record)">{{ t('common.edit') }}</a-button>
+            <a-button size="small" data-testid="row-edit" @click="showEditModal(record)">
+              {{ t('common.edit') }}
+            </a-button>
             <a-popconfirm
               :title="t('pages.upstreams.form.deleteConfirm')"
               :ok-text="t('common.delete')"
               :cancel-text="t('common.cancel')"
               @confirm="handleDelete(record.name)"
             >
-              <a-button type="link" size="small" danger :loading="deleting === record.name">
+              <a-button type="link" size="small" danger data-testid="row-delete" :loading="deleting === record.name">
                 {{ t('common.delete') }}
               </a-button>
             </a-popconfirm>
@@ -623,7 +632,9 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             :cancel-text="t('common.cancel')"
             @confirm="handleBulkDelete"
           >
-            <a-button size="small" danger :loading="bulkDeleting">{{ t('pages.upstreams.bulkDelete') }}</a-button>
+            <a-button size="small" danger data-testid="upstreams-bulk-delete" :loading="bulkDeleting">
+              {{ t('pages.upstreams.bulkDelete') }}
+            </a-button>
           </a-popconfirm>
         </div>
         <a-table
@@ -675,20 +686,23 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
           <a-button
             type="link"
             size="small"
+            data-testid="row-check"
             :disabled="record.enabled === false"
             :loading="checking.includes(record.name)"
             @click="handleCheck(record.name)"
           >
             {{ t('common.check') }}
           </a-button>
-          <a-button type="link" size="small" @click="showEditModal(record)">{{ t('common.edit') }}</a-button>
+          <a-button type="link" size="small" data-testid="row-edit" @click="showEditModal(record)">
+            {{ t('common.edit') }}
+          </a-button>
           <a-popconfirm
             :title="t('pages.upstreams.form.deleteConfirm')"
             :ok-text="t('common.delete')"
             :cancel-text="t('common.cancel')"
             @confirm="handleDelete(record.name)"
           >
-            <a-button type="link" size="small" danger :loading="deleting === record.name">
+            <a-button type="link" size="small" danger data-testid="row-delete" :loading="deleting === record.name">
               {{ t('common.delete') }}
             </a-button>
           </a-popconfirm>
@@ -698,7 +712,9 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
           <a-empty v-else :description="t('pages.upstreams.emptyDescription')">
-            <a-button type="primary" @click="showAddModal">{{ t('pages.upstreams.addUpstream') }}</a-button>
+            <a-button type="primary" data-testid="empty-create" @click="showAddModal">
+              {{ t('pages.upstreams.addUpstream') }}
+            </a-button>
           </a-empty>
         </template>
         </a-table>

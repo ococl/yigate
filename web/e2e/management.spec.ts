@@ -1,15 +1,8 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext } from '@playwright/test'
+import { copy, expectPage, fmt, login, prefix, token } from './support'
 
-const token = process.env.YIGATE_E2E_TOKEN ?? 'yigate-webui-e2e-token'
 const auth = { Authorization: `Bearer ${token}` }
 const PREFIX = 'e2e-pg-'
-
-async function login(page: Page): Promise<void> {
-  await page.goto('/login')
-  await page.getByPlaceholder('请输入 management_auth_token').fill(token)
-  await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page).toHaveURL(/\/dashboard$/)
-}
 
 async function cleanUpstreams(request: APIRequestContext): Promise<void> {
   const resp = await request.get('/api/v1/config/upstreams', { headers: auth })
@@ -43,7 +36,7 @@ test('upstream list paginates, keeps page in the URL and resets on page-size cha
     await page.goto('/upstreams')
     const rows = page.locator('.ant-table-tbody tr.ant-table-row')
     await expect(rows).toHaveCount(10)
-    await expect(page.getByText('共 25 条')).toBeVisible()
+    await expect(page.getByText(fmt(copy.common.total, { count: 25 }))).toBeVisible()
 
     await page.locator('.ant-pagination-item-2').click()
     await expect(page).toHaveURL(/[?&]page=2/)
@@ -75,16 +68,18 @@ test('upstream list shows a retryable error state instead of an empty list when 
     route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
   )
   await page.goto('/upstreams')
-  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+  await expectPage(page, 'upstreams')
   // 失败时不能显示「暂无上游」，否则会被误读为没有配置
-  await expect(page.getByText('数据加载失败')).toBeVisible()
-  await expect(page.getByText('暂无上游，请先新增一个上游代理')).toHaveCount(0)
-  await expect(page.getByText('服务器错误').first()).toBeVisible()
+  await expect(page.getByText(copy.common.loadFailed)).toBeVisible()
+  await expect(page.getByText(copy.pages.upstreams.emptyDescription)).toHaveCount(0)
+  await expect(
+    page.getByText(fmt(copy.feedback.serverError, { status: 500, detail: 'boom' })).first(),
+  ).toBeVisible()
 
   // 恢复接口后点击重试，错误态消失
   await page.unroute('**/api/v1/config/upstreams')
-  await page.locator('.ant-result-extra .ant-btn').click()
-  await expect(page.getByText('数据加载失败')).toHaveCount(0)
+  await page.getByTestId('load-error-retry').click()
+  await expect(page.getByText(copy.common.loadFailed)).toHaveCount(0)
 })
 
 test('upstream page survives a network outage', async ({ page }) => {
@@ -92,9 +87,9 @@ test('upstream page survives a network outage', async ({ page }) => {
 
   await page.route('**/api/v1/config/upstreams', (route) => route.abort())
   await page.goto('/upstreams')
-  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
-  await expect(page.getByText('数据加载失败')).toBeVisible()
-  await expect(page.getByText('网络错误').first()).toBeVisible()
+  await expectPage(page, 'upstreams')
+  await expect(page.getByText(copy.common.loadFailed)).toBeVisible()
+  await expect(page.getByText(copy.feedback.networkError).first()).toBeVisible()
 })
 
 test('dashboard warns instead of reporting a false outage when the health API fails', async ({ page }) => {
@@ -106,30 +101,30 @@ test('dashboard warns instead of reporting a false outage when the health API fa
   )
   await page.goto('/dashboard')
 
-  await expect(page.getByText('无法获取网关运行状态')).toBeVisible()
-  const ready = page.locator('.ant-statistic').filter({ hasText: '路由 / 管理就绪' })
-  const runState = page.locator('.ant-statistic').filter({ hasText: '运行状态' })
+  await expect(page.getByText(copy.pages.dashboard.healthUnavailableTitle)).toBeVisible()
+  const ready = page.getByTestId('stat-ready')
+  const runState = page.getByTestId('stat-status')
   // 读不到健康状态时展示「—」，而不是误报「异常」
   await expect(ready).toContainText('—')
-  await expect(ready).not.toContainText('异常')
+  await expect(ready).not.toContainText(copy.pages.dashboard.abnormal)
   await expect(runState).toContainText('—')
 })
 
-test('geosite status failure shows an error state instead of "未找到"', async ({ page }) => {
+test('geosite status failure shows an error state instead of a missing summary', async ({ page }) => {
   await login(page)
 
   await page.route('**/api/v1/geosite', (route) =>
     route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
   )
   await page.goto('/geosite')
-  await expect(page.getByRole('heading', { name: 'GeoSite 数据' })).toBeVisible()
-  await expect(page.getByText('数据加载失败')).toBeVisible()
+  await expectPage(page, 'geosite')
+  await expect(page.getByText(copy.common.loadFailed)).toBeVisible()
   // 读不到状态时不能显示成「未找到」，否则会被当成数据未下载
-  await expect(page.getByText('未找到')).toHaveCount(0)
+  await expect(page.getByText(copy.pages.geosite.summary.missing)).toHaveCount(0)
 
   await page.unroute('**/api/v1/geosite')
-  await page.locator('.ant-result-extra .ant-btn').click()
-  await expect(page.getByText('数据加载失败')).toHaveCount(0)
+  await page.getByTestId('load-error-retry').click()
+  await expect(page.getByText(copy.common.loadFailed)).toHaveCount(0)
 })
 
 test('dashboard shows placeholders when the status API fails', async ({ page }) => {
@@ -140,11 +135,10 @@ test('dashboard shows placeholders when the status API fails', async ({ page }) 
   )
   await page.goto('/dashboard')
 
-  const upCard = page.locator('.ant-statistic').filter({ hasText: '可用上游' })
-  // 读不到状态时展示「—」，而不是 0 个可用上游
+  const upCard = page.getByTestId('stat-upstreams')
+  // 读不到状态时展示「—」而不是 0 个可用上游，另用提示说明接口不可用
   await expect(upCard).toContainText('—')
-  await expect(upCard).not.toContainText('不可用 0')
-  await expect(page.getByText('状态接口不可用')).toBeVisible()
+  await expect(page.getByText(copy.pages.dashboard.statusUnavailable)).toBeVisible()
 })
 
 test('upstream delete shows a loading state and sends only one request', async ({ page, request }) => {
@@ -158,7 +152,7 @@ test('upstream delete shows a loading state and sends only one request', async (
 
   await login(page)
   await page.goto('/upstreams')
-  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+  await expectPage(page, 'upstreams')
 
   // 拖慢 DELETE，观察按钮 loading 与并发保护
   let deletes = 0
@@ -173,7 +167,7 @@ test('upstream delete shows a loading state and sends only one request', async (
   })
 
   const row = page.locator('.ant-table-tbody tr.ant-table-row').filter({ hasText: name })
-  await row.getByText('删除', { exact: true }).click()
+  await row.getByTestId('row-delete').click()
   await page.locator('.ant-popover .ant-btn-primary').click()
 
   await expect(page.locator('.ant-btn-loading').first()).toBeVisible()
@@ -191,9 +185,9 @@ test('dashboard does not claim a fresh update when every API fails', async ({ pa
   }
   await page.goto('/dashboard')
 
-  await expect(page.getByText('无法获取网关运行状态')).toBeVisible()
+  await expect(page.getByText(copy.pages.dashboard.healthUnavailableTitle)).toBeVisible()
   // 全部接口失败时不能显示「最近更新」，否则等于宣称数据是新的
-  await expect(page.getByText('最近更新')).toHaveCount(0)
+  await expect(page.getByText(prefix(copy.pages.dashboard.lastUpdated))).toHaveCount(0)
 })
 
 test('empty upstream list offers a create action', async ({ page }) => {
@@ -203,9 +197,8 @@ test('empty upstream list offers a create action', async ({ page }) => {
   )
   await page.goto('/upstreams')
 
-  const empty = page.locator('.ant-empty').filter({ hasText: '暂无上游' })
-  await expect(empty).toBeVisible()
-  await empty.getByRole('button', { name: '新增上游' }).click()
+  await expect(page.locator('.ant-empty')).toContainText(copy.pages.upstreams.emptyDescription)
+  await page.getByTestId('empty-create').click()
   await expect(page.getByRole('dialog')).toBeVisible()
 })
 
@@ -216,9 +209,8 @@ test('empty rule list offers a create action', async ({ page }) => {
   )
   await page.goto('/rules')
 
-  const empty = page.locator('.ant-empty').filter({ hasText: '暂无路由规则' })
-  await expect(empty).toBeVisible()
-  await empty.getByRole('button', { name: '新增规则' }).click()
+  await expect(page.locator('.ant-empty')).toContainText(copy.pages.rules.emptyDescription)
+  await page.getByTestId('empty-create').click()
   await expect(page.getByRole('dialog')).toBeVisible()
 })
 
@@ -232,10 +224,8 @@ test('traffic card offers retry instead of a settings link when loading fails', 
   })
   await page.goto('/dashboard')
 
-  await expect(page.getByText('流量数据加载失败')).toBeVisible()
-  const card = page.locator('.ant-card').filter({ hasText: '流量数据加载失败' })
-  // antd 会在两个汉字间插入空格，可访问名称是「重 试」
-  await card.getByRole('button', { name: /重\s*试/ }).click()
+  await expect(page.getByText(copy.pages.dashboard.trafficLoadFailed)).toBeVisible()
+  await page.getByTestId('dashboard-traffic-card').getByTestId('traffic-retry').click()
   await expect.poll(() => calls).toBeGreaterThan(1)
 })
 
@@ -250,10 +240,13 @@ test('proxy link modal points to basic settings when no address is detected', as
     }),
   )
   await page.goto('/dashboard')
-  await page.getByRole('button', { name: '代理链接' }).click()
+  await page.getByTestId('dashboard-proxy-link').click()
 
-  await expect(page.getByText('未探测到可用地址')).toBeVisible()
-  await page.getByRole('dialog').getByRole('button', { name: '前往基础设置' }).click()
+  await expect(page.getByText(copy.pages.dashboard.proxyModal.noTargets)).toBeVisible()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: copy.pages.dashboard.proxyModal.goBasic })
+    .click()
   await expect(page).toHaveURL(/\/settings\?section=basic/)
 })
 
@@ -261,11 +254,13 @@ test('api doc search offers a clear action when nothing matches', async ({ page 
   await login(page)
   await page.goto('/docs/api')
 
-  await page.getByPlaceholder('搜索端点路径、名称或描述...').fill('zzz-no-such-endpoint')
-  await expect(page.getByText('未找到匹配「zzz-no-such-endpoint」的端点')).toBeVisible()
+  await page.getByTestId('api-doc-search').fill('zzz-no-such-endpoint')
+  await expect(
+    page.getByText(fmt(copy.pages.apiDoc.emptyWithKeyword, { keyword: 'zzz-no-such-endpoint' })),
+  ).toBeVisible()
 
-  await page.getByRole('button', { name: '清除搜索' }).click()
-  await expect(page.getByText('未找到匹配')).toHaveCount(0)
+  await page.getByTestId('api-doc-clear').click()
+  await expect(page.getByText(prefix(copy.pages.apiDoc.emptyWithKeyword))).toHaveCount(0)
 })
 
 test('pprof page explains why the switch is disabled when the read fails', async ({ page }) => {
@@ -276,7 +271,7 @@ test('pprof page explains why the switch is disabled when the read fails', async
   )
   await page.goto('/pprof')
 
-  await expect(page.getByText('读取开关状态失败')).toBeVisible()
+  await expect(page.getByText(copy.pages.pprof.aside.loadError)).toBeVisible()
   await expect(page.getByRole('switch')).toBeDisabled()
 })
 
@@ -293,7 +288,7 @@ test('rendering errors surface a visible message instead of a blank page', async
   )
   await page.goto('/dashboard')
 
-  await expect(page.getByText('页面渲染出现异常')).toBeVisible()
+  await expect(page.getByText(prefix(copy.feedback.renderError))).toBeVisible()
 })
 
 test('check-all names the upstreams that failed', async ({ page }) => {
@@ -314,10 +309,19 @@ test('check-all names the upstreams that failed', async ({ page }) => {
     }),
   )
   await page.goto('/upstreams')
-  await page.getByRole('button', { name: '一键巡检' }).click()
+  await page.getByTestId('upstreams-check-all').click()
 
   // 只说 1/3 可用还得自己找是哪个，直接点名失败的
-  await expect(page.getByText(/1\/3 个可用/)).toBeVisible()
+  await expect(
+    page.getByText(
+      fmt(copy.pages.upstreams.messages.partial, {
+        alive: 1,
+        total: 3,
+        names: 'zh-check-bad-1',
+        rest: '',
+      }),
+    ),
+  ).toBeVisible()
   await expect(page.getByText(/zh-check-bad-1/)).toBeVisible()
   await expect(page.getByText(/zh-check-bad-2/)).toBeVisible()
 })
@@ -335,7 +339,7 @@ test('toggling two upstreams keeps both rows loading', async ({ page, request })
 
   await login(page)
   await page.goto('/upstreams')
-  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+  await expectPage(page, 'upstreams')
 
   // 拖慢 PUT，制造两行同时进行中的窗口
   await page.route('**/api/v1/config/upstreams/*', async (route) => {
@@ -394,9 +398,8 @@ test('empty user list offers a create action', async ({ page }) => {
   )
   await page.goto('/users')
 
-  const empty = page.locator('.ant-empty').filter({ hasText: '暂无用户' })
-  await expect(empty).toBeVisible()
-  await empty.getByRole('button', { name: '新增用户' }).click()
+  await expect(page.locator('.ant-empty')).toContainText(copy.pages.users.emptyDescription)
+  await page.getByTestId('empty-create').click()
   await expect(page.getByRole('dialog')).toBeVisible()
 })
 
@@ -419,7 +422,7 @@ test('user page falls back a page after deleting the last row', async ({ page })
   await page.locator('.ant-pagination-item-2').click()
   await expect(page.locator('.ant-table-tbody tr.ant-table-row')).toHaveCount(1)
 
-  await page.getByText('删除', { exact: true }).first().click()
+  await page.getByTestId('row-delete').first().click()
   await page.locator('.ant-popover .ant-btn-primary').click()
 
   // 第 2 页删空后应回到第 1 页：20 条只剩一页，分页器随之隐藏
@@ -463,9 +466,8 @@ test('traffic disabled state links to the settings section', async ({ page }) =>
   await page.goto('/traffic')
 
   // 未启用的事实由顶部 alert 说明，空态只报「暂无数据」，不再重复同一句话
-  const empty = page.locator('.ant-empty').filter({ hasText: '暂无流量统计数据' })
-  await expect(empty).toBeVisible()
-  await empty.getByRole('button', { name: '前往系统设置' }).click()
+  await expect(page.locator('.ant-empty')).toContainText(copy.pages.traffic.empty)
+  await page.getByTestId('empty-action').click()
   await expect(page).toHaveURL(/\/settings\?section=quota/)
 })
 
@@ -505,11 +507,10 @@ test('about page can retry the version read', async ({ page }) => {
   })
   await page.goto('/about')
 
-  await expect(page.getByText('无法获取版本信息')).toBeVisible()
-  // antd 会在两个汉字间插空格，可访问名称是「重 试」
-  await page.getByRole('button', { name: /重\s*试/ }).click()
+  await expect(page.getByText(copy.pages.about.loadError)).toBeVisible()
+  await page.getByTestId('about-retry').click()
   await expect(page.getByText('v9.9.9')).toBeVisible()
-  await expect(page.getByText('无法获取版本信息')).toHaveCount(0)
+  await expect(page.getByText(copy.pages.about.loadError)).toHaveCount(0)
 })
 
 test('moving a rule reveals where it landed', async ({ page, request }) => {
@@ -540,7 +541,7 @@ test('moving a rule reveals where it landed', async ({ page, request }) => {
   const rows = page.locator('.ant-table-tbody tr.ant-table-row')
   await expect(rows).toHaveCount(3)
 
-  await rows.filter({ hasText: 'zh-move-2' }).getByRole('button', { name: '下移' }).click()
+  await rows.filter({ hasText: 'zh-move-2' }).getByTestId('row-move-down').click()
 
   // 顺序变成 1、3、2，且落点行被高亮，长列表里不用自己找
   await expect(rows.nth(2)).toContainText('zh-move-2')
@@ -553,12 +554,12 @@ test('api docs highlight the searched keyword', async ({ page }) => {
   await login(page)
   await page.goto('/docs/api')
 
-  await page.getByRole('textbox', { name: '搜索端点路径、名称或描述' }).fill('健康检查')
+  await page.getByTestId('api-doc-search').fill('健康检查') // copy-ok: 接口文档正文关键词
 
   // 描述里不标出命中位置，一屏十几条结果看不出为什么被匹配
   const mark = page.locator('.api-docs-detail mark').first()
   await expect(mark).toBeVisible()
-  await expect(mark).toHaveText('健康检查')
+  await expect(mark).toHaveText('健康检查') // copy-ok: 同上
 })
 
 test('bulk delete sends one batch request and keeps failed items selected', async ({ page }) => {
@@ -592,16 +593,18 @@ test('bulk delete sends one batch request and keeps failed items selected', asyn
   await rows.filter({ hasText: 'zh-bulk-1' }).locator('.ant-checkbox').click()
   await rows.filter({ hasText: 'zh-bulk-2' }).locator('.ant-checkbox').click()
 
-  await expect(page.locator('.bulk-bar')).toContainText('已选 2 项')
-  await page.getByRole('button', { name: '批量删除' }).click()
+  await expect(page.locator('.bulk-bar')).toContainText(fmt(copy.common.selected, { count: 2 }))
+  await page.getByTestId('users-bulk-delete').click()
   await page.locator('.ant-popconfirm-buttons .ant-btn-primary').click()
 
-  await expect(page.locator('.ant-message')).toContainText('已删除 1 个，失败 1 个：zh-bulk-2')
+  await expect(page.locator('.ant-message')).toContainText(
+    fmt(copy.pages.users.messages.deletedPartial, { deleted: 1, failed: 1, names: 'zh-bulk-2' }),
+  )
   // 一个请求办完一批，不再逐条 DELETE
   expect(batchCalls).toBe(1)
   expect(sent.sort()).toEqual(['zh-bulk-1', 'zh-bulk-2'])
   // 失败项留在选中里，用户可以再点一次重试
-  await expect(page.locator('.bulk-bar')).toContainText('已选 1 项')
+  await expect(page.locator('.bulk-bar')).toContainText(fmt(copy.common.selected, { count: 1 }))
 })
 
 test('keyboard shortcuts focus search and save settings', async ({ page }) => {
@@ -609,7 +612,7 @@ test('keyboard shortcuts focus search and save settings', async ({ page }) => {
 
   await page.goto('/traffic')
   // 快捷键在 onMounted 里注册，等搜索框渲染出来再按，否则按键会落在挂载前
-  const search = page.getByRole('textbox', { name: '搜索用户、上游或目标' })
+  const search = page.getByTestId('traffic-search')
   await expect(search).toBeVisible()
   await page.keyboard.press('/')
   await expect(search).toBeFocused()

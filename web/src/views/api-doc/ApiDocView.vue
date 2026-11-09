@@ -122,7 +122,7 @@ const statusColumns = computed(() => [
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-api-doc">
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="page-header-text">
@@ -140,6 +140,7 @@ const statusColumns = computed(() => [
       ref="searchInputRef"
       v-model:value="searchKeyword"
       class="api-docs-search"
+      data-testid="api-doc-search"
       :placeholder="t('pages.apiDoc.searchPlaceholder')"
       allow-clear
       :aria-label="t('pages.apiDoc.searchAria')"
@@ -310,7 +311,7 @@ const statusColumns = computed(() => [
             "
             style="margin-top: 60px;"
           >
-            <a-button v-if="searchKeyword" size="small" @click="clearSearch">
+            <a-button v-if="searchKeyword" size="small" data-testid="api-doc-clear" @click="clearSearch">
               {{ t('pages.apiDoc.clearSearch') }}
             </a-button>
           </a-empty>

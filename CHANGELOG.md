@@ -3,6 +3,17 @@
 本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
 
+## [Unreleased]
+
+### Changed
+
+- WebUI E2E 改为 `data-testid` 定位：页面根节点 `page-<route>`、侧栏 `nav-<route>`、
+  表格行内操作 `row-delete` / `row-edit` / `row-move-up` / `row-move-down`，登录、分页、
+  空状态、重试按钮等也都有稳定钩子；文案断言统一引用 `web/e2e/support.ts` 导出的词条，
+  五个 spec 的重复登录逻辑收敛为 `login()`。
+- `npm run check` 新增门禁：`web/e2e` 里出现中文字面量（注释与标注 `copy-ok` 的后端正文除外）
+  直接失败，避免界面文案再次变成选择器。
+
 ## [0.5.0] - 2026-11-09
 
 本次为路由控制与界面本地化版本。规则新增优先型动作与停用开关，管理界面支持中英文切换。

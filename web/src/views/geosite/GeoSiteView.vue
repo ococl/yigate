@@ -257,7 +257,7 @@ onMounted(fetchInfo)
 </script>
 
 <template>
-  <div class="page-shell geosite-view">
+  <div class="page-shell geosite-view" data-testid="page-geosite">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.geosite.title') }}</a-typography-title>

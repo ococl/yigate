@@ -80,7 +80,7 @@ onMounted(fetchSettings)
 </script>
 
 <template>
-  <div class="page-shell pprof-view">
+  <div class="page-shell pprof-view" data-testid="page-pprof">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.pprof.title') }}</a-typography-title>
@@ -113,7 +113,13 @@ onMounted(fetchSettings)
                 />
                 <a-typography-text v-if="loadError" type="danger" class="switch-hint">
                   {{ t('pages.pprof.aside.loadError') }}
-                  <a-button type="link" size="small" style="padding: 0 4px;" @click="fetchSettings">
+                  <a-button
+                    type="link"
+                    size="small"
+                    data-testid="pprof-retry"
+                    style="padding: 0 4px;"
+                    @click="fetchSettings"
+                  >
                     {{ t('common.retry') }}
                   </a-button>
                 </a-typography-text>

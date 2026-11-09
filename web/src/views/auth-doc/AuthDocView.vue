@@ -71,7 +71,7 @@ watch(activeSection, () => {
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-auth-doc">
     <div class="page-header">
       <div class="page-header-text">
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.authDoc.title') }}</a-typography-title>

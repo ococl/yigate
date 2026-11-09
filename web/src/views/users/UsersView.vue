@@ -183,7 +183,7 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-users">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.users.title') }}</a-typography-title>
@@ -193,7 +193,7 @@ onMounted(fetchData)
       </div>
       <a-space>
         <a-button @click="fetchData" :loading="loading">{{ t('common.refresh') }}</a-button>
-        <a-button type="primary" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
+        <a-button type="primary" data-testid="users-add" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
       </a-space>
     </div>
 
@@ -211,7 +211,9 @@ onMounted(fetchData)
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" :description="t('pages.users.emptyDescription')">
-          <a-button type="primary" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
+          <a-button type="primary" data-testid="empty-create" @click="showAddModal">
+            {{ t('pages.users.addUser') }}
+          </a-button>
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="record.username">
           <template #head>
@@ -227,7 +229,7 @@ onMounted(fetchData)
               :cancel-text="t('common.cancel')"
               @confirm="handleDelete(record.username)"
             >
-              <a-button type="link" size="small" danger :loading="deleting === record.username">
+              <a-button type="link" size="small" danger data-testid="row-delete" :loading="deleting === record.username">
                 {{ t('common.delete') }}
               </a-button>
             </a-popconfirm>
@@ -256,7 +258,9 @@ onMounted(fetchData)
             :cancel-text="t('common.cancel')"
             @confirm="handleBulkDelete"
           >
-            <a-button size="small" danger :loading="bulkDeleting">{{ t('pages.users.bulkDelete') }}</a-button>
+            <a-button size="small" danger data-testid="users-bulk-delete" :loading="bulkDeleting">
+              {{ t('pages.users.bulkDelete') }}
+            </a-button>
           </a-popconfirm>
         </div>
         <a-table
@@ -280,7 +284,7 @@ onMounted(fetchData)
             :cancel-text="t('common.cancel')"
             @confirm="handleDelete(record.username)"
           >
-            <a-button type="link" size="small" danger :loading="deleting === record.username">
+            <a-button type="link" size="small" danger data-testid="row-delete" :loading="deleting === record.username">
               {{ t('common.delete') }}
             </a-button>
           </a-popconfirm>
@@ -290,7 +294,9 @@ onMounted(fetchData)
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
           <a-empty v-else :description="t('pages.users.emptyDescription')">
-            <a-button type="primary" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
+            <a-button type="primary" data-testid="empty-create" @click="showAddModal">
+              {{ t('pages.users.addUser') }}
+            </a-button>
           </a-empty>
         </template>
         </a-table>

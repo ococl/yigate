@@ -179,7 +179,21 @@ GOPROXY=https://goproxy.cn,direct go test ./...
 cd web
 npm run type-check  # TypeScript 类型检查
 npm run build       # 构建即验证
+npm test            # 词条引用、工具函数等单测
+npm run check       # 源码门禁（禁止 as any、超大文件、E2E 写死文案）
 ```
+
+WebUI 端到端测试（Playwright，需要先构建带内嵌前端的二进制）：
+
+```bash
+node web/scripts/embed-dist.mjs web/dist src/proxy/webui_dist
+(cd src && go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
+cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
+```
+
+写 E2E 时：元素一律用 `data-testid` 定位（页面根节点是 `page-<route>`，侧栏导航是 `nav-<route>`，
+表格行内操作是 `row-delete` / `row-edit` / `row-move-up` 等），文案断言引用 `e2e/support.ts`
+导出的 `copy` 词条，不要在用例里写死中文——`npm run check` 会直接拒绝。新增交互控件时同步补 `data-testid`。
 
 ## 配置要点
 

@@ -7,11 +7,13 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="not-found">
+  <div class="not-found" data-testid="page-not-found">
     <a-result status="404" title="404" :sub-title="t('pages.notFound.title')">
       <template #extra>
         <a-space>
-          <a-button type="primary" @click="router.push('/dashboard')">{{ t('common.backHome') }}</a-button>
+          <a-button type="primary" data-testid="not-found-home" @click="router.push('/dashboard')">
+            {{ t('common.backHome') }}
+          </a-button>
           <a-button @click="router.back()">{{ t('pages.notFound.back') }}</a-button>
         </a-space>
       </template>

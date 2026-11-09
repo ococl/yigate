@@ -135,7 +135,7 @@ useVisiblePolling(() => fetchData(false), 15000)
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-traffic">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.traffic.title') }}</a-typography-title>
@@ -148,6 +148,7 @@ useVisiblePolling(() => fetchData(false), 15000)
           ref="searchInputRef"
           v-model:value="keyword"
           class="traffic-search"
+          data-testid="traffic-search"
           :placeholder="t('pages.traffic.searchPlaceholder')"
           allow-clear
           :aria-label="t('pages.traffic.searchAria')"
@@ -215,7 +216,9 @@ useVisiblePolling(() => fetchData(false), 15000)
           :description="t('pages.traffic.empty')"
         >
           <RouterLink v-if="!enabled" to="/settings?section=quota">
-            <a-button type="primary" size="small">{{ t('pages.traffic.goSettings') }}</a-button>
+            <a-button type="primary" size="small" data-testid="empty-action">
+              {{ t('pages.traffic.goSettings') }}
+            </a-button>
           </RouterLink>
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`">
@@ -276,7 +279,9 @@ useVisiblePolling(() => fetchData(false), 15000)
           <LoadError v-if="loadError" :retrying="loading" @retry="() => fetchData()" />
           <a-empty v-else :description="t('pages.traffic.empty')">
             <RouterLink v-if="!enabled" to="/settings?section=quota">
-              <a-button type="primary" size="small">{{ t('pages.traffic.goSettings') }}</a-button>
+              <a-button type="primary" size="small" data-testid="empty-action">
+                {{ t('pages.traffic.goSettings') }}
+              </a-button>
             </RouterLink>
           </a-empty>
         </template>

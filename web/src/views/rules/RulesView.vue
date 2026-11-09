@@ -611,7 +611,7 @@ onMounted(fetchData)
 </script>
 
 <template>
-  <div class="page-shell">
+  <div class="page-shell" data-testid="page-rules">
     <div class="page-header">
       <div>
         <a-typography-title :level="4" style="margin: 0;">{{ t('pages.rules.title') }}</a-typography-title>
@@ -628,7 +628,7 @@ onMounted(fetchData)
           @update:value="onViewModeChange"
         />
         <a-button @click="fetchData" :loading="loading">{{ t('common.refresh') }}</a-button>
-        <a-button v-if="viewMode === 'visual'" type="primary" @click="openAddModal">
+        <a-button v-if="viewMode === 'visual'" type="primary" data-testid="rules-add" @click="openAddModal">
           {{ t('pages.rules.addRule') }}
         </a-button>
       </a-space>
@@ -692,7 +692,9 @@ onMounted(fetchData)
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
         <a-empty v-else-if="dataSource.length === 0" :description="t('pages.rules.emptyDescription')">
-          <a-button type="primary" @click="openAddModal">{{ t('pages.rules.addRule') }}</a-button>
+          <a-button type="primary" data-testid="empty-create" @click="openAddModal">
+            {{ t('pages.rules.addRule') }}
+          </a-button>
         </a-empty>
         <MobileCard
           v-for="record in mobileItems"
@@ -733,6 +735,7 @@ onMounted(fetchData)
           <template #actions>
             <a-button
               size="small"
+              data-testid="row-move-up"
               :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
               :loading="movingIndex === record.index"
               @click="handleMove(record.index, 'up')"
@@ -741,6 +744,7 @@ onMounted(fetchData)
             </a-button>
             <a-button
               size="small"
+              data-testid="row-move-down"
               :disabled="
                 record.index === dataSource.length - 1 || (movingIndex !== null && movingIndex !== record.index)
               "
@@ -838,6 +842,7 @@ onMounted(fetchData)
             <a-button
               type="link"
               size="small"
+              data-testid="row-move-up"
               :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
               :loading="movingIndex === record.index"
               :aria-label="t('pages.rules.moveUp')"
@@ -848,6 +853,7 @@ onMounted(fetchData)
             <a-button
               type="link"
               size="small"
+              data-testid="row-move-down"
               :disabled="
                 record.index === dataSource.length - 1 || (movingIndex !== null && movingIndex !== record.index)
               "
@@ -856,14 +862,16 @@ onMounted(fetchData)
               @click="handleMove(record.index, 'down')"
             >↓</a-button>
           </a-tooltip>
-          <a-button type="link" size="small" @click="openEditModal(record)">{{ t('common.edit') }}</a-button>
+          <a-button type="link" size="small" data-testid="row-edit" @click="openEditModal(record)">
+            {{ t('common.edit') }}
+          </a-button>
           <a-popconfirm
             :title="t('pages.rules.deleteConfirmShort')"
             :ok-text="t('common.delete')"
             :cancel-text="t('common.cancel')"
             @confirm="handleDelete(record.index)"
           >
-            <a-button type="link" size="small" danger :loading="deleting === record.index">
+            <a-button type="link" size="small" danger data-testid="row-delete" :loading="deleting === record.index">
               {{ t('common.delete') }}
             </a-button>
           </a-popconfirm>
@@ -873,7 +881,9 @@ onMounted(fetchData)
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
           <a-empty v-else :description="t('pages.rules.emptyDescription')">
-            <a-button type="primary" @click="openAddModal">{{ t('pages.rules.addRule') }}</a-button>
+            <a-button type="primary" data-testid="empty-create" @click="openAddModal">
+              {{ t('pages.rules.addRule') }}
+            </a-button>
           </a-empty>
         </template>
         </a-table>
