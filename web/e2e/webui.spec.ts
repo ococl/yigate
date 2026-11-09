@@ -42,6 +42,7 @@ test('logs in and renders every management page', async ({ page }) => {
     ['/pprof', 'pprof 性能分析'],
     ['/docs/auth', '认证机制'],
     ['/docs/api', 'API 文档'],
+    ['/docs/llmx', 'llmx.txt'],
     ['/about', '关于'],
   ] as const
 
@@ -116,4 +117,19 @@ test('document title follows the current page', async ({ page }) => {
 
   await page.getByRole('link', { name: '路由规则' }).click()
   await expect(page).toHaveTitle('路由规则 · YiGate')
+})
+
+test('llmx.txt is served for AI clients and mirrored in the help page', async ({ page, request }) => {
+  // AI 客户端直接取原文：匿名可读，Content-Type 要能正确解码中文
+  const resp = await request.get('/llmx.txt')
+  expect(resp.status()).toBe(200)
+  expect(resp.headers()['content-type']).toContain('text/plain')
+  const raw = await resp.text()
+  expect(raw).toContain('# YiGate')
+  expect(raw).toContain('先读后写')
+
+  await page.goto('/dashboard')
+  await login(page)
+  await page.goto('/docs/llmx')
+  await expect(page.locator('.llmx-text')).toContainText('先读后写')
 })

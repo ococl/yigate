@@ -68,6 +68,9 @@ const selectedKeys = computed(() => {
           <a-menu-item key="docs-api">
             <RouterLink to="/docs/api">API 文档</RouterLink>
           </a-menu-item>
+          <a-menu-item key="docs-llmx">
+            <RouterLink to="/docs/llmx">llmx.txt</RouterLink>
+          </a-menu-item>
           <a-menu-item key="about">
             <RouterLink to="/about">关于</RouterLink>
           </a-menu-item>

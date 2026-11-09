@@ -73,6 +73,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/api-doc/ApiDocView.vue'),
       },
       {
+        path: 'docs/llmx',
+        name: 'docs-llmx',
+        component: () => import('@/views/llmx/LlmxView.vue'),
+      },
+      {
         path: 'about',
         name: 'about',
         component: () => import('@/views/about/AboutView.vue'),
@@ -134,6 +139,7 @@ const PAGE_TITLES: Record<string, string> = {
   pprof: 'pprof 性能分析',
   'docs-auth': '认证文档',
   'docs-api': 'API 文档',
+  'docs-llmx': 'llmx.txt',
   about: '关于',
   'not-found': '页面不存在',
 }

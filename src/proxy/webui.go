@@ -208,7 +208,14 @@ func setWebUICacheControl(w http.ResponseWriter, name string) {
 }
 
 func setWebUIContentType(w http.ResponseWriter, name string) {
-	if contentType := mime.TypeByExtension(path.Ext(name)); contentType != "" {
+	ext := path.Ext(name)
+	// Go 内置 mime 表不含 .txt，精简容器里也常没有 /etc/mime.types；
+	// 显式带上 charset，避免中文在浏览器和 AI 客户端里被按 latin-1 解码。
+	if ext == ".txt" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		return
+	}
+	if contentType := mime.TypeByExtension(ext); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
 }

@@ -1,0 +1,116 @@
+# YiGate
+
+> YiGate 是一个 HTTP(S) 正向代理网关：默认在 1080 端口收流量，按路由规则分发给多个上游，
+> 自带管理 API 与内置 WebUI。本文件写给 AI 助手：先看「认证」和「先读后写」，
+> 再从「常见任务」找对应接口。人也可以直接看，内容与 API 文档一致但更偏操作。
+
+- 管理 API 前缀：/api/v1
+- WebUI：/（用 management_auth_token 登录）
+- 本文件在线地址：/llmx.txt
+- 完整的字段级文档：/docs/api（WebUI 内的 API 文档页）
+
+## 认证
+
+- management_auth_token 为空时，所有管理接口允许匿名访问；非空时每个请求都要带
+  Authorization: Bearer <token>。
+- 管理端口绑定非回环地址时，token 必填。
+- 401 表示令牌缺失或错误。单 IP 连续失败 10 次封禁 5 分钟，不要连续重试。
+- token 是凭据：不要写进回答、日志、提交、工单或截图里。
+
+## 先读后写
+
+1. GET /api/v1/status 确认进程在跑、看监听地址与 upstream_count。
+2. 改之前先 GET 当前配置（upstreams / rules / settings），不要凭记忆覆盖。
+3. 写操作会持久化到 YAML 并自动热加载，不需要再调 /api/v1/reload；
+   reload 只用于有人在外部改了 YAML 文件之后。
+4. 删除、覆盖、改 token 这类不可逆操作，先把目标复述给用户确认再执行。
+
+## 端点速查
+
+状态与系统
+- GET  /health                       健康检查（无需认证）
+- GET  /metrics                      Prometheus 指标
+- GET  /api/v1/status                运行状态摘要
+- GET  /api/v1/version               版本信息
+- GET  /api/v1/traffic               流量审计快照（按 user/upstream/target 聚合）
+- POST /api/v1/reload                重新读取 YAML（外部改文件后用）
+
+上游
+- GET    /api/v1/config/upstreams
+- POST   /api/v1/config/upstreams
+- PUT    /api/v1/config/upstreams/{name}
+- DELETE /api/v1/config/upstreams/{name}
+- POST   /api/v1/config/upstreams/{name}/check   单个健康检查
+- POST   /api/v1/config/upstreams/check          全量健康检查
+
+上游字段：name、url、types[]、priority、weight、strategy、enabled、health_check
+- types 可选：http、https、socks5、socks5h（socks5h 表示远端 DNS）
+- strategy 可选：weighted_round_robin、least_connections、consistent_hash、source_ip_hash
+- 同一优先级组内按 strategy 选，least_connections 不看 weight
+
+路由规则（自上而下匹配，首个命中生效）
+- GET    /api/v1/config/rules
+- POST   /api/v1/config/rules
+- PUT    /api/v1/config/rules/{index}
+- DELETE /api/v1/config/rules/{index}
+- POST   /api/v1/config/rules/{index}/move    {"direction":"up"} 或 {"direction":"down"}
+
+规则字段：type、values[]、action、upstreams[]
+- type 可选：domain、domain_suffix、domain_keyword、domain_regex、ip_cidr、geosite、match
+- action 可选：direct、proxy、auto
+- index 是当前位置，增删或移动后都会变；要批量删除就倒序删，或每删一条重新 GET
+
+代理认证用户
+- GET    /api/v1/config/users
+- POST   /api/v1/config/users              {"username":"alice","password":"..."}
+- PUT    /api/v1/config/users/{username}   {"password":"..."}
+- DELETE /api/v1/config/users/{username}
+
+用户列表非空后，所有代理连接都必须提供用户名密码；删空则回到匿名代理。
+
+全局设置
+- GET /api/v1/config/settings
+- PUT /api/v1/config/settings    部分更新，只传要改的字段
+
+GeoSite 数据
+- GET  /api/v1/geosite
+- POST /api/v1/geosite/update
+- GET  /api/v1/geosite/sync-token
+- POST /api/v1/geosite/sync-token
+- GET  /api/v1/geosite/dat
+
+## 常见任务
+
+加一个上游并把流量切过去
+1. GET /api/v1/config/upstreams，确认名字没被占用
+2. POST /api/v1/config/upstreams，例如
+   {"name":"us-1","url":"http://10.0.0.5:8080","types":["http"],"priority":1,"weight":1,"strategy":"weighted_round_robin"}
+3. POST /api/v1/config/upstreams/us-1/check，确认可用
+4. GET /api/v1/config/rules，找到目标规则后 PUT 改 upstreams，或新增一条规则
+5. GET /api/v1/status，复核 upstream_count 已变化
+
+排查「某个站点打不开」
+1. GET /api/v1/status，看 router_ready、manager_ready
+2. GET /api/v1/config/rules，看有没有命中规则、upstreams 是否指向存在的上游
+3. POST /api/v1/config/upstreams/check，看上游健康状态
+4. GET /api/v1/traffic，看流量有没有落到预期上游
+5. 都没命中时请求走全局 routing_final（在 settings 里）
+
+调整规则顺序
+- POST /api/v1/config/rules/{index}/move   {"direction":"up"}
+- 移完重新 GET /api/v1/config/rules 确认顺序，index 已经变了
+
+## 响应约定
+
+- 成功：{"status":"ok"}，部分接口附带 name / username / index
+- 失败：4xx / 5xx，body 形如 {"status":"error","error":"原因"}
+- 请求体上限 1 MiB，未知字段会被拒绝（严格模式），字段名照抄本文件
+- PUT /api/v1/config/settings 校验失败时不写文件，运行时保持原配置
+
+## 边界
+
+- 只在用户明确要求时做写操作；不确定就先问，不要「顺手」清理不认识的上游或规则。
+- 不要尝试猜测或读取 management_auth_token 的值。
+- 不要并发批量删规则或上游：规则索引会漂移，上游可能被规则引用。
+- listen / management 是启动参数，改了也要重启才生效；其余多数字段热加载。
+- 流量审计数据按自然日持久化，默认保留 30 天，重启或热加载都不会清空。

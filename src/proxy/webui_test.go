@@ -95,6 +95,56 @@ func TestServeWebUIFileFallsBackToRawAsset(t *testing.T) {
 	}
 }
 
+func TestServeWebUIFileServesPlainTextAsUTF8(t *testing.T) {
+	// AI 客户端按 Content-Type 解码，缺 charset 时中文说明会变乱码
+	const content = "# YiGate\n\n认证方式：Bearer Token\n"
+	fsys := fstest.MapFS{
+		"llmx.txt": {Data: []byte(content)},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/llmx.txt", nil)
+	rec := httptest.NewRecorder()
+
+	serveWebUIFile(fsys, "/llmx.txt", rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	if rec.Body.String() != content {
+		t.Fatalf("body = %q, want %q", rec.Body.String(), content)
+	}
+}
+
+func TestServeWebUIFileServesCompressedPlainTextAsUTF8(t *testing.T) {
+	// 构建时体积够大的文本会被预压缩，gzip 客户端走的是另一条分支
+	const content = "# YiGate\n\n认证方式：Bearer Token\n"
+	fsys := fstest.MapFS{
+		"llmx.txt.gz": {Data: gzipAsset(t, content)},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/llmx.txt", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	serveWebUIFile(fsys, "/llmx.txt", rec, req)
+
+	if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want text/plain; charset=utf-8", got)
+	}
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != content {
+		t.Fatalf("body = %q, want %q", string(body), content)
+	}
+}
+
 func TestServeWebUIFileCachesHashedAssetImmutably(t *testing.T) {
 	const content = "console.log('hashed')"
 	fsys := fstest.MapFS{
