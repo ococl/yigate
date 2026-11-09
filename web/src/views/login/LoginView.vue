@@ -2,10 +2,12 @@
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'antdv-next'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const { t } = useI18n()
 
 const token = ref('')
 // 登录失败直接标在字段下方，不依赖一闪而过的 toast
@@ -17,17 +19,17 @@ watch(token, () => {
 
 async function handleLogin() {
   if (!token.value.trim()) {
-    loginError.value = '请输入管理 Token'
+    loginError.value = t('login.errorEmpty')
     return
   }
   loginError.value = ''
 
   const success = await authStore.login(token.value.trim())
   if (success) {
-    message.success('登录成功')
+    message.success(t('login.success'))
     router.push('/dashboard')
   } else {
-    loginError.value = 'Token 验证失败，请检查 Token 或后端服务'
+    loginError.value = t('login.errorInvalid')
   }
 }
 </script>
@@ -36,20 +38,20 @@ async function handleLogin() {
   <a-card class="login-card" variant="borderless">
     <div class="login-header">
       <h1 class="login-title">YiGate</h1>
-      <p class="login-subtitle">统一代理网关管理后台</p>
+      <p class="login-subtitle">{{ t('login.subtitle') }}</p>
     </div>
 
     <a-form layout="vertical" @submit.prevent="handleLogin">
       <a-form-item
         html-for="login-token"
-        label="管理 Token"
+        :label="t('login.tokenLabel')"
         :validate-status="loginError ? 'error' : undefined"
         :help="loginError || undefined"
       >
         <a-input-password
           id="login-token"
           v-model:value="token"
-          placeholder="请输入 management_auth_token"
+          :placeholder="t('login.tokenPlaceholder')"
           size="large"
           autocomplete="current-password"
           @press-enter="handleLogin"
@@ -64,14 +66,13 @@ async function handleLogin() {
           :loading="authStore.loading"
           @click="handleLogin"
         >
-          登录
+          {{ t('login.submit') }}
         </a-button>
       </a-form-item>
     </a-form>
 
     <a-typography-text type="secondary" class="login-hint">
-      Token 对应配置文件中的 management_auth_token 字段。
-      如果后端未设置 Token，可输入任意值登录。
+      {{ t('login.hint') }}
     </a-typography-text>
   </a-card>
 </template>

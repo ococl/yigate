@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { authInfo } from '@/data/api-docs'
 
 interface DocSection {
@@ -8,21 +9,23 @@ interface DocSection {
   title: string
 }
 
-const sections: DocSection[] = [
-  { key: 'overview', title: '认证概览' },
-  { key: 'security', title: '安全防护' },
-  { key: 'usage', title: '使用示例' },
-  { key: 'config', title: '配置说明' },
-]
+const { t } = useI18n()
+
+// 章节标题走翻译，切换语言后目录与卡片标题同步更新
+const SECTION_KEYS = ['overview', 'security', 'usage', 'config'] as const
+
+const sections = computed<DocSection[]>(() =>
+  SECTION_KEYS.map((key) => ({ key, title: t(`pages.authDoc.sections.${key}`) })),
+)
 
 const route = useRoute()
 const router = useRouter()
 
-const fallbackSection = sections[0]?.key ?? 'overview'
+const fallbackSection = SECTION_KEYS[0]
 const detailRef = ref<HTMLElement | null>(null)
 
 function isSectionKey(value: unknown): value is string {
-  return typeof value === 'string' && sections.some((section) => section.key === value)
+  return typeof value === 'string' && sections.value.some((section) => section.key === value)
 }
 
 // 从路由 query 中解析当前章节，非法或缺失时回退到首个章节
@@ -71,8 +74,8 @@ watch(activeSection, () => {
   <div class="page-shell">
     <div class="page-header">
       <div class="page-header-text">
-        <a-typography-title :level="4" style="margin: 0;">认证机制</a-typography-title>
-        <a-typography-text type="secondary">YiGate 管理接口认证说明</a-typography-text>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.authDoc.title') }}</a-typography-title>
+        <a-typography-text type="secondary">{{ t('pages.authDoc.subtitle') }}</a-typography-text>
       </div>
     </div>
 
@@ -80,7 +83,7 @@ watch(activeSection, () => {
       <!-- 左侧章节菜单：固定宽度，保证标题完整显示 -->
       <aside class="auth-doc-aside">
         <a-card size="small" class="section-card">
-          <template #title>文档目录</template>
+          <template #title>{{ t('pages.authDoc.navTitle') }}</template>
           <a-menu :selected-keys="[activeSection]" mode="inline" style="border: none;">
             <a-menu-item
               v-for="section in sections"
@@ -97,82 +100,82 @@ watch(activeSection, () => {
       <section class="auth-doc-detail">
         <div ref="detailRef" class="auth-doc-detail-scroll">
           <!-- 认证概览 -->
-          <a-card v-show="activeSection === 'overview'" title="认证概览" size="small">
+          <a-card v-show="activeSection === 'overview'" :title="t('pages.authDoc.sections.overview')" size="small">
             <a-descriptions :column="1" size="small" bordered>
-              <a-descriptions-item label="认证方式">
+              <a-descriptions-item :label="t('pages.authDoc.overview.method')">
                 <a-tag color="blue">{{ authInfo.method }}</a-tag>
               </a-descriptions-item>
-              <a-descriptions-item label="请求头">
+              <a-descriptions-item :label="t('pages.authDoc.overview.header')">
                 <a-typography-text code copyable>{{ authInfo.header }}</a-typography-text>
               </a-descriptions-item>
-              <a-descriptions-item label="配置字段">
+              <a-descriptions-item :label="t('pages.authDoc.overview.configField')">
                 <a-typography-text code>{{ authInfo.configField }}</a-typography-text>
               </a-descriptions-item>
-              <a-descriptions-item label="说明">{{ authInfo.description }}</a-descriptions-item>
+              <a-descriptions-item :label="t('pages.authDoc.overview.description')">{{ authInfo.description }}</a-descriptions-item>
             </a-descriptions>
           </a-card>
 
           <!-- 安全防护 -->
-          <a-card v-show="activeSection === 'security'" title="安全防护" size="small">
+          <a-card v-show="activeSection === 'security'" :title="t('pages.authDoc.sections.security')" size="small">
             <a-descriptions :column="1" size="small" bordered>
-              <a-descriptions-item label="暴力破解防护">
+              <a-descriptions-item :label="t('pages.authDoc.security.bruteForce')">
                 <a-tag color="orange">{{ authInfo.bruteForceProtection }}</a-tag>
               </a-descriptions-item>
-              <a-descriptions-item label="未认证响应状态码">
+              <a-descriptions-item :label="t('pages.authDoc.security.unauthorizedStatus')">
                 <a-tag color="red">HTTP {{ authInfo.unauthorizedResponse.status }}</a-tag>
               </a-descriptions-item>
-              <a-descriptions-item label="WWW-Authenticate 响应头">
+              <a-descriptions-item :label="t('pages.authDoc.security.authenticateHeader')">
                 <a-typography-text code copyable>
                   {{ authInfo.unauthorizedResponse.headers['WWW-Authenticate'] }}
                 </a-typography-text>
               </a-descriptions-item>
-              <a-descriptions-item label="未认证响应体">
+              <a-descriptions-item :label="t('pages.authDoc.security.unauthorizedBody')">
                 <CodeBlock :code="authInfo.unauthorizedResponse.body" />
               </a-descriptions-item>
             </a-descriptions>
           </a-card>
 
           <!-- 使用示例 -->
-          <a-card v-show="activeSection === 'usage'" title="使用示例" size="small">
-            <a-typography-title :level="5">携带认证令牌的请求</a-typography-title>
+          <a-card v-show="activeSection === 'usage'" :title="t('pages.authDoc.sections.usage')" size="small">
+            <a-typography-title :level="5">{{ t('pages.authDoc.usage.withToken') }}</a-typography-title>
             <CodeBlock title="cURL">curl -H "Authorization: Bearer &lt;your-token&gt;" \
   http://127.0.0.1:8890/api/v1/status</CodeBlock>
 
-            <a-typography-title :level="5">未携带令牌的请求（token 非空时）</a-typography-title>
+            <a-typography-title :level="5">{{ t('pages.authDoc.usage.withoutToken') }}</a-typography-title>
             <CodeBlock title="cURL">curl http://127.0.0.1:8890/api/v1/status
 
-# 响应:
+{{ t('pages.authDoc.usage.responseComment') }}
 # HTTP/1.1 401 Unauthorized
 # WWW-Authenticate: Bearer realm="yigate-management"
 # {"status":"unauthorized"}</CodeBlock>
           </a-card>
 
           <!-- 配置说明 -->
-          <a-card v-show="activeSection === 'config'" title="配置说明" size="small">
+          <a-card v-show="activeSection === 'config'" :title="t('pages.authDoc.sections.config')" size="small">
             <a-alert type="warning" show-icon style="margin-bottom: 12px;">
-              <template #message>强制认证场景</template>
+              <template #message>{{ t('pages.authDoc.config.forceTitle') }}</template>
               <template #description>
-                管理端口绑定非回环地址时，<a-typography-text code>management_auth_token</a-typography-text>
-                必须配置。启用 pprof 且管理端口非回环时同样必填。
+                {{ t('pages.authDoc.config.forceBefore') }}<a-typography-text code>management_auth_token</a-typography-text>{{
+                  t('pages.authDoc.config.forceMid')
+                }}
               </template>
             </a-alert>
 
-            <a-typography-title :level="5">YAML 配置示例</a-typography-title>
+            <a-typography-title :level="5">{{ t('pages.authDoc.config.yamlTitle') }}</a-typography-title>
             <CodeBlock title="config.yml">management: 127.0.0.1:8890
 management_auth_token: "${YIGATE_MANAGEMENT_TOKEN}"</CodeBlock>
 
             <a-typography-paragraph type="secondary" style="margin-top: 12px;">
-              配置中的 <a-typography-text code>${YIGATE_MANAGEMENT_TOKEN}</a-typography-text>
-              会被环境变量展开。环境变量前缀为 <a-typography-text code>YIGATE_</a-typography-text>。
-              缺失或空值会导致启动失败。
+              {{ t('pages.authDoc.config.envBefore') }}<a-typography-text code>${YIGATE_MANAGEMENT_TOKEN}</a-typography-text>{{
+                t('pages.authDoc.config.envMid')
+              }}<a-typography-text code>YIGATE_</a-typography-text>{{ t('pages.authDoc.config.envAfter') }}
             </a-typography-paragraph>
 
-            <a-typography-title :level="5">令牌轮换</a-typography-title>
+            <a-typography-title :level="5">{{ t('pages.authDoc.config.rotateTitle') }}</a-typography-title>
             <a-typography-paragraph type="secondary">
-              令牌可在「系统设置 → 管理面板与安全」中修改，或通过
-              <a-typography-text code>PUT /api/v1/config/settings</a-typography-text> 传入
-              <a-typography-text code>management_auth_token</a-typography-text>。修改后立即生效且无需重启，
-              旧令牌当场失效，当前会话会被强制重新登录。清除令牌（传空字符串）仅在管理端口绑定回环地址时允许。
+              {{ t('pages.authDoc.config.rotateBefore') }}<a-typography-text code>PUT /api/v1/config/settings</a-typography-text>{{
+                t('pages.authDoc.config.rotateMid')
+              }}<a-typography-text code>management_auth_token</a-typography-text>{{ t('pages.authDoc.config.rotateAfter') }}
             </a-typography-paragraph>
           </a-card>
         </div>

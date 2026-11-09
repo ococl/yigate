@@ -1,0 +1,42 @@
+export default {
+  title: 'Users',
+  subtitle: 'Proxy authentication users. After a password change, new connections use the new credentials.',
+  addUser: 'Add user',
+  authNotice: {
+    message:
+      'Proxy authentication stays off while no user exists. Once any user is added, every proxy connection must supply credentials.',
+    description: 'With multiple listeners, adding or removing users applies to all of them.',
+  },
+  emptyDescription: 'No users. An empty list means proxy authentication is off.',
+  columns: {
+    username: 'Username',
+    actions: 'Actions',
+  },
+  changePassword: 'Change password',
+  deleteConfirm: 'The user will no longer authenticate through the proxy. Delete anyway?',
+  bulkDelete: 'Delete selected',
+  bulkDeleteConfirm: 'Delete the {count} selected users? This cannot be undone.',
+  form: {
+    addTitle: 'Add user',
+    username: 'Username',
+    usernamePlaceholder: 'Username',
+    password: 'Password',
+    passwordPlaceholder: 'Password',
+    okAdd: 'Add',
+    resetTitle: 'Change password: {name}',
+    newPassword: 'New password',
+    newPasswordPlaceholder: 'At least 4 characters',
+    okSave: 'Save',
+  },
+  messages: {
+    usernameRequired: 'Enter a username',
+    passwordRequired: 'Enter a password',
+    passwordTooShort: 'Password must be at least 4 characters',
+    added: 'User added',
+    passwordUpdated: 'Password updated for {name}',
+    deleted: 'User deleted',
+    deletedCount: 'Deleted {count} users',
+    deletedPartial: 'Deleted {deleted}, {failed} failed: {names}',
+    listSeparator: ', ',
+  },
+}

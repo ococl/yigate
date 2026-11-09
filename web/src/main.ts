@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { message } from 'antdv-next'
 import App from './App.vue'
 import router from './router'
+import i18n from './locales'
 import './assets/styles/main.css'
 
 const app = createApp(App)
@@ -14,10 +15,11 @@ app.config.errorHandler = (err, _instance, info) => {
   const now = Date.now()
   if (now - lastErrorReportAt < 3000) return
   lastErrorReportAt = now
-  message.error('页面渲染出现异常，若持续出现请刷新页面')
+  message.error(i18n.global.t('feedback.renderError'))
 }
 
 app.use(createPinia())
+app.use(i18n)
 app.use(router)
 
 app.mount('#app')

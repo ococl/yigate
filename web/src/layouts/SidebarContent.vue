@@ -2,10 +2,12 @@
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { theme } from 'antdv-next'
+import { useI18n } from 'vue-i18n'
 
 withDefaults(defineProps<{ collapsed?: boolean }>(), { collapsed: false })
 
 const route = useRoute()
+const { t } = useI18n()
 const { token } = theme.useToken()
 const openKeys = ref<string[]>(['manage', 'system', 'help'])
 
@@ -22,57 +24,57 @@ const selectedKeys = computed(() => {
         {{ collapsed ? 'Y' : 'YiGate' }}
       </span>
       <span v-if="!collapsed" class="logo-sub" :style="{ color: token.colorTextTertiary }">
-        管理后台
+        {{ t('nav.subtitle') }}
       </span>
     </div>
     <div class="nav-scroll">
       <a-menu :selected-keys="selectedKeys" v-model:open-keys="openKeys" mode="inline" class="nav-menu">
         <a-menu-item key="dashboard">
-          <RouterLink to="/dashboard">仪表盘</RouterLink>
+          <RouterLink to="/dashboard">{{ t('nav.dashboard') }}</RouterLink>
         </a-menu-item>
 
         <a-sub-menu key="manage">
-          <template #title>管理</template>
+          <template #title>{{ t('nav.manage') }}</template>
           <a-menu-item key="upstreams">
-            <RouterLink to="/upstreams">上游管理</RouterLink>
+            <RouterLink to="/upstreams">{{ t('nav.upstreams') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="rules">
-            <RouterLink to="/rules">路由规则</RouterLink>
+            <RouterLink to="/rules">{{ t('nav.rules') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="users">
-            <RouterLink to="/users">用户管理</RouterLink>
+            <RouterLink to="/users">{{ t('nav.users') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="traffic">
-            <RouterLink to="/traffic">流量审计</RouterLink>
+            <RouterLink to="/traffic">{{ t('nav.traffic') }}</RouterLink>
           </a-menu-item>
         </a-sub-menu>
 
         <a-sub-menu key="system">
-          <template #title>系统</template>
+          <template #title>{{ t('nav.system') }}</template>
           <a-menu-item key="settings">
-            <RouterLink to="/settings">系统设置</RouterLink>
+            <RouterLink to="/settings">{{ t('nav.settings') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="geosite">
-            <RouterLink to="/geosite">GeoSite 数据</RouterLink>
+            <RouterLink to="/geosite">{{ t('nav.geosite') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="pprof">
-            <RouterLink to="/pprof">pprof 性能分析</RouterLink>
+            <RouterLink to="/pprof">{{ t('nav.pprof') }}</RouterLink>
           </a-menu-item>
         </a-sub-menu>
 
         <a-sub-menu key="help">
-          <template #title>帮助</template>
+          <template #title>{{ t('nav.help') }}</template>
           <a-menu-item key="docs-auth">
-            <RouterLink to="/docs/auth">认证机制</RouterLink>
+            <RouterLink to="/docs/auth">{{ t('nav.authDoc') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="docs-api">
-            <RouterLink to="/docs/api">API 文档</RouterLink>
+            <RouterLink to="/docs/api">{{ t('nav.apiDoc') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="docs-llmx">
-            <RouterLink to="/docs/llmx">llmx.txt</RouterLink>
+            <RouterLink to="/docs/llmx">{{ t('nav.llmx') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="about">
-            <RouterLink to="/about">关于</RouterLink>
+            <RouterLink to="/about">{{ t('nav.about') }}</RouterLink>
           </a-menu-item>
         </a-sub-menu>
       </a-menu>

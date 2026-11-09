@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { getTraffic } from '@/api/system'
 import type { InputRef } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
@@ -11,6 +12,7 @@ import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import type { TrafficEntrySnapshot } from '@/types/api'
 import { formatBytes } from '@/utils/format'
 
+const { t } = useI18n()
 const isMobile = useIsMobile()
 const mobilePage = ref(1)
 const dataSource = ref<TrafficEntrySnapshot[]>([])
@@ -27,14 +29,20 @@ const searchInputRef = ref<InputRef | null>(null)
 // 按 `/` 直接跳到搜索框，不用先拿鼠标点一下
 useHotkeys([{ key: '/', handler: () => searchInputRef.value?.focus() }])
 
-const columns = [
-  { title: '用户', dataIndex: 'user', key: 'user', width: 140 },
-  { title: '上游', dataIndex: 'upstream', key: 'upstream', width: 160 },
-  { title: '目标', dataIndex: 'target', key: 'target', ellipsis: true },
-  { title: '流入', dataIndex: 'bytes_in', key: 'bytes_in', width: 120 },
-  { title: '流出', dataIndex: 'bytes_out', key: 'bytes_out', width: 120 },
-  { title: '合计', dataIndex: 'total', key: 'total', width: 120, sorter: (a: TrafficEntrySnapshot, b: TrafficEntrySnapshot) => a.total - b.total },
-]
+const columns = computed(() => [
+  { title: t('pages.traffic.columns.user'), dataIndex: 'user', key: 'user', width: 140 },
+  { title: t('pages.traffic.columns.upstream'), dataIndex: 'upstream', key: 'upstream', width: 160 },
+  { title: t('pages.traffic.columns.target'), dataIndex: 'target', key: 'target', ellipsis: true },
+  { title: t('pages.traffic.columns.bytesIn'), dataIndex: 'bytes_in', key: 'bytes_in', width: 120 },
+  { title: t('pages.traffic.columns.bytesOut'), dataIndex: 'bytes_out', key: 'bytes_out', width: 120 },
+  {
+    title: t('pages.traffic.columns.total'),
+    dataIndex: 'total',
+    key: 'total',
+    width: 120,
+    sorter: (a: TrafficEntrySnapshot, b: TrafficEntrySnapshot) => a.total - b.total,
+  },
+])
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -75,7 +83,7 @@ const tablePagination = computed(() => ({
   pageSize: Number(route.query.size) || 20,
   pageSizeOptions: ['20', '50', '100'],
   showSizeChanger: true,
-  showTotal: (total: number) => `共 ${total} 条`,
+  showTotal: (total: number) => t('common.total', { count: total }),
   onChange: (page: number, size: number) => {
     router.replace({ query: { ...route.query, page: String(page), size: String(size) } })
   },
@@ -96,8 +104,12 @@ const summary = computed(() => {
     total,
     entries: dataSource.value.length,
     userCount: users.size,
-    topUser: topUser ? `${topUser[0]}（${formatBytes(topUser[1])}）` : '—',
-    topUpstream: topUpstream ? `${topUpstream[0]}（${formatBytes(topUpstream[1])}）` : '—',
+    topUser: topUser
+      ? t('pages.traffic.topEntry', { name: topUser[0], size: formatBytes(topUser[1]) })
+      : '—',
+    topUpstream: topUpstream
+      ? t('pages.traffic.topEntry', { name: topUpstream[0], size: formatBytes(topUpstream[1]) })
+      : '—',
   }
 })
 
@@ -126,9 +138,9 @@ useVisiblePolling(() => fetchData(false), 15000)
   <div class="page-shell">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">流量审计</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.traffic.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          按用户 / 上游 / 目标聚合最近 {{ retentionDays }} 天的流量，每 15 秒自动刷新。
+          {{ t('pages.traffic.subtitle', { days: retentionDays }) }}
         </a-typography-text>
       </div>
       <a-space wrap class="traffic-actions">
@@ -136,11 +148,11 @@ useVisiblePolling(() => fetchData(false), 15000)
           ref="searchInputRef"
           v-model:value="keyword"
           class="traffic-search"
-          placeholder="搜索用户、上游或目标"
+          :placeholder="t('pages.traffic.searchPlaceholder')"
           allow-clear
-          aria-label="搜索用户、上游或目标"
+          :aria-label="t('pages.traffic.searchAria')"
         />
-        <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
+        <a-button @click="() => fetchData()" :loading="loading">{{ t('common.refresh') }}</a-button>
       </a-space>
     </div>
 
@@ -151,34 +163,46 @@ useVisiblePolling(() => fetchData(false), 15000)
         type="warning"
         show-icon
         style="margin-bottom: 16px;"
-        message="流量审计未启用"
+        :message="t('pages.traffic.disabled.title')"
       >
         <template #description>
-          未开启时不再记录新流量，已有历史数据仍会保留。请前往
-          <RouterLink to="/settings" class="link">系统设置</RouterLink>
-          开启「流量审计」。
+          {{ t('pages.traffic.disabled.before') }}
+          <RouterLink to="/settings" class="link">{{ t('pages.traffic.disabled.link') }}</RouterLink>
+          {{ t('pages.traffic.disabled.after') }}
         </template>
       </a-alert>
 
       <a-row class="fill-card-toolbar" :gutter="16" style="margin-bottom: 16px;">
         <a-col :xs="12" :sm="12" :lg="6">
           <a-card size="small" class="stat-card" style="height: 100%;">
-            <a-statistic title="总流量" :value="formatBytes(summary.total)" />
+            <a-statistic :title="t('pages.traffic.stats.total')" :value="formatBytes(summary.total)" />
           </a-card>
         </a-col>
         <a-col :xs="12" :sm="12" :lg="6">
           <a-card size="small" class="stat-card" style="height: 100%;">
-            <a-statistic title="统计条目" :value="summary.entries" :suffix="`条 / ${summary.userCount} 个用户`" />
+            <a-statistic
+              :title="t('pages.traffic.stats.entries')"
+              :value="summary.entries"
+              :suffix="t('pages.traffic.stats.entriesSuffix', { count: summary.userCount })"
+            />
           </a-card>
         </a-col>
         <a-col :xs="12" :sm="12" :lg="6">
           <a-card size="small" class="stat-card" style="height: 100%;">
-            <a-statistic title="流量最大用户" :value="summary.topUser" :value-style="{ fontSize: '16px' }" />
+            <a-statistic
+              :title="t('pages.traffic.stats.topUser')"
+              :value="summary.topUser"
+              :value-style="{ fontSize: '16px' }"
+            />
           </a-card>
         </a-col>
         <a-col :xs="12" :sm="12" :lg="6">
           <a-card size="small" class="stat-card" style="height: 100%;">
-            <a-statistic title="流量最大上游" :value="summary.topUpstream" :value-style="{ fontSize: '16px' }" />
+            <a-statistic
+              :title="t('pages.traffic.stats.topUpstream')"
+              :value="summary.topUpstream"
+              :value-style="{ fontSize: '16px' }"
+            />
           </a-card>
         </a-col>
       </a-row>
@@ -188,25 +212,25 @@ useVisiblePolling(() => fetchData(false), 15000)
         <MobileListSkeleton v-else-if="loading && mobileItems.length === 0" />
         <a-empty
           v-else-if="mobileItems.length === 0"
-          description="暂无流量统计数据"
+          :description="t('pages.traffic.empty')"
         >
           <RouterLink v-if="!enabled" to="/settings?section=quota">
-            <a-button type="primary" size="small">前往系统设置</a-button>
+            <a-button type="primary" size="small">{{ t('pages.traffic.goSettings') }}</a-button>
           </RouterLink>
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="`${record.user}|${record.upstream}|${record.target}`">
           <template #head>
             <a-space size="small" wrap>
               <a-tag v-if="record.user">{{ record.user }}</a-tag>
-              <span v-else class="muted">匿名</span>
+              <span v-else class="muted">{{ t('pages.traffic.anonymous') }}</span>
               <a-tag color="purple">{{ record.upstream || '—' }}</a-tag>
             </a-space>
           </template>
           <template #extra>
             <a-typography-text strong>{{ formatBytes(record.total) }}</a-typography-text>
           </template>
-          <MobileCardRow label="目标">{{ record.target }}</MobileCardRow>
-          <MobileCardRow label="流入/流出">
+          <MobileCardRow :label="t('pages.traffic.target')">{{ record.target }}</MobileCardRow>
+          <MobileCardRow :label="t('pages.traffic.inOut')">
             {{ formatBytes(record.bytes_in) }} / {{ formatBytes(record.bytes_out) }}
           </MobileCardRow>
         </MobileCard>
@@ -233,7 +257,7 @@ useVisiblePolling(() => fetchData(false), 15000)
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'user'">
         <a-tag v-if="record.user">{{ record.user }}</a-tag>
-        <span v-else class="muted">匿名</span>
+        <span v-else class="muted">{{ t('pages.traffic.anonymous') }}</span>
       </template>
       <template v-else-if="column.key === 'upstream'">
         <a-tag color="purple">{{ record.upstream || '—' }}</a-tag>
@@ -250,9 +274,9 @@ useVisiblePolling(() => fetchData(false), 15000)
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="() => fetchData()" />
-          <a-empty v-else description="暂无流量统计数据">
+          <a-empty v-else :description="t('pages.traffic.empty')">
             <RouterLink v-if="!enabled" to="/settings?section=quota">
-              <a-button type="primary" size="small">前往系统设置</a-button>
+              <a-button type="primary" size="small">{{ t('pages.traffic.goSettings') }}</a-button>
             </RouterLink>
           </a-empty>
         </template>

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { AUTH_EXPIRED_EVENT, getToken } from '@/api/request'
+import { i18n } from '@/locales'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -126,27 +127,33 @@ router.beforeEach((to) => {
   return true
 })
 
-// 路由标题：多标签页并排时能区分页面，也便于浏览器历史识别
-const PAGE_TITLES: Record<string, string> = {
-  login: '登录',
-  dashboard: '仪表盘',
-  upstreams: '上游管理',
-  rules: '路由规则',
-  geosite: 'GeoSite 数据',
-  users: '用户管理',
-  traffic: '流量审计',
-  settings: '系统设置',
-  pprof: 'pprof 性能分析',
-  'docs-auth': '认证文档',
-  'docs-api': 'API 文档',
-  'docs-llmx': 'llmx.txt',
-  about: '关于',
-  'not-found': '页面不存在',
+// 路由标题：多标签页并排时能区分页面，也便于浏览器历史识别。
+// 这里只存 i18n key，切换语言时由 applyRouterTitle 重新求值。
+const PAGE_TITLE_KEYS: Record<string, string> = {
+  login: 'router.login',
+  dashboard: 'router.dashboard',
+  upstreams: 'router.upstreams',
+  rules: 'router.rules',
+  geosite: 'router.geosite',
+  users: 'router.users',
+  traffic: 'router.traffic',
+  settings: 'router.settings',
+  pprof: 'router.pprof',
+  'docs-auth': 'router.docsAuth',
+  'docs-api': 'router.docsApi',
+  'docs-llmx': 'router.docsLlmx',
+  about: 'router.about',
+  'not-found': 'router.notFound',
+}
+
+export function applyRouterTitle(name?: string | symbol | null) {
+  const key = PAGE_TITLE_KEYS[String(name ?? '')]
+  const title = key ? i18n.global.t(key) : ''
+  document.title = title ? `${title} · YiGate` : 'YiGate'
 }
 
 router.afterEach((to) => {
-  const title = PAGE_TITLES[String(to.name ?? '')]
-  document.title = title ? `${title} · YiGate` : 'YiGate'
+  applyRouterTitle(to.name)
 })
 
 // API 层收到 401 后清除凭据并广播事件；这里完成 SPA 内跳转，

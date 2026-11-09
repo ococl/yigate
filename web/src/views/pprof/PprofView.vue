@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import { getSettings, updateSettings } from '@/api/settings'
 
@@ -9,78 +10,39 @@ interface PprofLink {
   description: string
 }
 
-const pprofGroups: { title: string; items: PprofLink[] }[] = [
-  {
-    title: '概览',
-    items: [
-      {
-        label: 'pprof 首页',
-        path: '/debug/pprof/',
-        description: '查看所有可用的运行时 profile 与当前 goroutine 概览',
-      },
-    ],
-  },
-  {
-    title: 'CPU 与执行追踪',
-    items: [
-      {
-        label: 'CPU Profile',
-        path: '/debug/pprof/profile?seconds=30',
-        description: '采集 30 秒 CPU 使用情况，适合定位计算热点',
-      },
-      {
-        label: '执行追踪',
-        path: '/debug/pprof/trace?seconds=5',
-        description: '采集 5 秒运行时事件，适合分析调度与阻塞',
-      },
-    ],
-  },
-  {
-    title: '内存',
-    items: [
-      {
-        label: '堆内存',
-        path: '/debug/pprof/heap',
-        description: '当前堆内存分配快照，定位内存驻留',
-      },
-      {
-        label: '内存分配',
-        path: '/debug/pprof/allocs',
-        description: '累计内存分配采样，定位频繁分配',
-      },
-    ],
-  },
-  {
-    title: '并发与阻塞',
-    items: [
-      {
-        label: 'Goroutine',
-        path: '/debug/pprof/goroutine',
-        description: '全部 goroutine 调用栈，排查泄漏与卡死',
-      },
-      {
-        label: '阻塞分析',
-        path: '/debug/pprof/block',
-        description: '同步原语导致的阻塞事件',
-      },
-      {
-        label: '互斥锁',
-        path: '/debug/pprof/mutex',
-        description: '互斥锁竞争情况',
-      },
-    ],
-  },
-  {
-    title: '运行时',
-    items: [
-      {
-        label: '线程创建',
-        path: '/debug/pprof/threadcreate',
-        description: '操作系统线程创建情况',
-      },
-    ],
-  },
-]
+const { t } = useI18n()
+
+// 端点与分组走翻译，切换语言后标题与说明同步更新
+const PPROF_GROUPS = [
+  { title: 'overview', items: ['index'] },
+  { title: 'cpu', items: ['profile', 'trace'] },
+  { title: 'memory', items: ['heap', 'allocs'] },
+  { title: 'concurrency', items: ['goroutine', 'block', 'mutex'] },
+  { title: 'runtime', items: ['threadcreate'] },
+] as const
+
+const PPROF_PATHS: Record<string, string> = {
+  index: '/debug/pprof/',
+  profile: '/debug/pprof/profile?seconds=30',
+  trace: '/debug/pprof/trace?seconds=5',
+  heap: '/debug/pprof/heap',
+  allocs: '/debug/pprof/allocs',
+  goroutine: '/debug/pprof/goroutine',
+  block: '/debug/pprof/block',
+  mutex: '/debug/pprof/mutex',
+  threadcreate: '/debug/pprof/threadcreate',
+}
+
+const pprofGroups = computed<{ title: string; items: PprofLink[] }[]>(() =>
+  PPROF_GROUPS.map((group) => ({
+    title: t(`pages.pprof.groups.${group.title}`),
+    items: group.items.map((key) => ({
+      label: t(`pages.pprof.endpoints.${key}.label`),
+      path: PPROF_PATHS[key],
+      description: t(`pages.pprof.endpoints.${key}.description`),
+    })),
+  })),
+)
 
 const loaded = ref(false)
 const saving = ref(false)
@@ -106,7 +68,7 @@ async function handleToggle(checked: boolean) {
   saving.value = true
   try {
     await updateSettings({ enable_pprof: checked })
-    message.success(checked ? 'pprof 调试端点已启用' : 'pprof 调试端点已关闭')
+    message.success(t(checked ? 'pages.pprof.messages.enabled' : 'pages.pprof.messages.disabled'))
   } catch {
     enabled.value = previous
   } finally {
@@ -121,34 +83,43 @@ onMounted(fetchSettings)
   <div class="page-shell pprof-view">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">pprof 性能分析</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.pprof.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          通过管理端口访问 Go 运行时性能采集端点，用于排查 CPU、内存与阻塞问题。
+          {{ t('pages.pprof.subtitle') }}
         </a-typography-text>
       </div>
-      <a-tag :color="enabled ? 'green' : 'default'">{{ enabled ? '已启用' : '未启用' }}</a-tag>
+      <a-tag :color="enabled ? 'green' : 'default'">
+        {{ enabled ? t('pages.pprof.enabledTag') : t('pages.pprof.disabledTag') }}
+      </a-tag>
     </div>
 
     <div class="pprof-body">
       <!-- 左侧：开关、安全提示与使用方式 -->
       <aside class="pprof-aside">
-        <a-card size="small" title="采集开关" class="aside-card">
+        <a-card size="small" :title="t('pages.pprof.aside.cardTitle')" class="aside-card">
           <a-form layout="vertical">
-            <a-form-item label="pprof 调试端点" tooltip="启用后可在管理端口访问 /debug/pprof/">
+            <a-form-item
+              :label="t('pages.pprof.aside.switchLabel')"
+              :tooltip="t('pages.pprof.aside.switchTooltip')"
+            >
               <div class="switch-row">
                 <a-switch
                   :checked="enabled"
                   :loading="saving"
                   :disabled="!loaded"
-                  checked-children="启用"
-                  un-checked-children="关闭"
+                  :checked-children="t('pages.pprof.aside.switchOn')"
+                  :un-checked-children="t('pages.pprof.aside.switchOff')"
                   @change="(value: boolean) => handleToggle(value)"
                 />
                 <a-typography-text v-if="loadError" type="danger" class="switch-hint">
-                  读取开关状态失败
-                  <a-button type="link" size="small" style="padding: 0 4px;" @click="fetchSettings">重试</a-button>
+                  {{ t('pages.pprof.aside.loadError') }}
+                  <a-button type="link" size="small" style="padding: 0 4px;" @click="fetchSettings">
+                    {{ t('common.retry') }}
+                  </a-button>
                 </a-typography-text>
-                <a-typography-text v-else type="secondary" class="switch-hint">保存后立即生效</a-typography-text>
+                <a-typography-text v-else type="secondary" class="switch-hint">
+                  {{ t('pages.pprof.aside.saveHint') }}
+                </a-typography-text>
               </div>
             </a-form-item>
           </a-form>
@@ -156,28 +127,32 @@ onMounted(fetchSettings)
           <a-alert
             type="warning"
             show-icon
-            message="pprof 属于敏感调试入口"
-            description="仅在管理端口绑定回环地址或受信网络时启用，请勿直接暴露到公网。采集期间会带来额外性能开销。"
+            :message="t('pages.pprof.aside.warningTitle')"
+            :description="t('pages.pprof.aside.warningDescription')"
           />
 
           <div class="usage">
-            <a-typography-text strong>使用方式</a-typography-text>
+            <a-typography-text strong>{{ t('pages.pprof.aside.usageTitle') }}</a-typography-text>
             <a-typography-paragraph type="secondary" class="usage-desc">
-              以本机管理端口 8890 为例，采集结果下载后可用
-              <a-typography-text code>go tool pprof</a-typography-text> 分析。
+              {{ t('pages.pprof.aside.usageDesc') }}
+              <a-typography-text code>go tool pprof</a-typography-text>
+              {{ t('pages.pprof.aside.usageDescTail') }}
             </a-typography-paragraph>
             <div class="code-block">
-              <div class="code-block-header"><span>采集 CPU Profile（30 秒）</span></div>
+              <div class="code-block-header">
+                <span>{{ t('pages.pprof.aside.cpuTitle') }}</span>
+              </div>
               <pre><code>curl -o cpu.pprof "http://127.0.0.1:8890/debug/pprof/profile?seconds=30"</code></pre>
             </div>
             <div class="code-block">
-              <div class="code-block-header"><span>本地分析</span></div>
+              <div class="code-block-header">
+                <span>{{ t('pages.pprof.aside.analyzeTitle') }}</span>
+              </div>
               <pre><code>go tool pprof -http=:8081 cpu.pprof</code></pre>
             </div>
             <a-typography-paragraph type="secondary" class="usage-desc">
-              若管理令牌已启用，请在请求中携带
-              <a-typography-text code>Authorization: Bearer &lt;token&gt;</a-typography-text>；
-              浏览器直接打开链接时需先通过管理端认证。
+              {{ t('pages.pprof.aside.tokenDesc') }}
+              <a-typography-text code>Authorization: Bearer &lt;token&gt;</a-typography-text>{{ t('pages.pprof.aside.tokenDescTail') }}
             </a-typography-paragraph>
           </div>
         </a-card>
@@ -191,8 +166,8 @@ onMounted(fetchSettings)
             type="info"
             show-icon
             style="margin-bottom: 16px;"
-            message="pprof 尚未启用"
-            description="开启左侧开关后，下方入口才可访问。"
+            :message="t('pages.pprof.notEnabled.title')"
+            :description="t('pages.pprof.notEnabled.description')"
           />
           <a-card
             v-for="group in pprofGroups"
@@ -211,7 +186,7 @@ onMounted(fetchSettings)
                 </div>
                 <div class="endpoint-actions">
                   <a-typography-text code class="endpoint-path">{{ item.path }}</a-typography-text>
-                  <a :href="item.path" target="_blank" rel="noopener noreferrer">打开</a>
+                  <a :href="item.path" target="_blank" rel="noopener noreferrer">{{ t('pages.pprof.open') }}</a>
                 </div>
               </div>
             </div>

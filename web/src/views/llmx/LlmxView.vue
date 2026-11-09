@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import { copyText } from '@/utils/clipboard'
+
+const { t } = useI18n()
 
 // 内容是 public/llmx.txt，随构建一起发布：AI 直接 GET 这个路径就能拿到同一份说明
 const docUrl = `${import.meta.env.BASE_URL}llmx.txt`
@@ -30,10 +33,10 @@ onMounted(fetchDoc)
 async function copyAll() {
   const copied = await copyText(content.value)
   if (copied) {
-    message.success('已复制全文，可直接粘贴给 AI 助手')
+    message.success(t('pages.llmx.copied'))
     return
   }
-  message.error('复制失败，请手动选择文本')
+  message.error(t('pages.llmx.copyFailed'))
 }
 </script>
 
@@ -41,15 +44,15 @@ async function copyAll() {
   <div class="page-shell">
     <div class="page-header">
       <div class="page-header-text">
-        <a-typography-title :level="4" style="margin: 0;">llmx.txt</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.llmx.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          写给 AI 助手的操作说明：复制给它，或让它直接读 /llmx.txt。
+          {{ t('pages.llmx.subtitle') }}
         </a-typography-text>
       </div>
       <a-space wrap>
-        <a-button :loading="loading" @click="fetchDoc">刷新</a-button>
-        <a-button type="primary" :disabled="!content" @click="copyAll">复制全文</a-button>
-        <a-button :href="docUrl" target="_blank" rel="noopener">打开原文</a-button>
+        <a-button :loading="loading" @click="fetchDoc">{{ t('common.refresh') }}</a-button>
+        <a-button type="primary" :disabled="!content" @click="copyAll">{{ t('pages.llmx.copyAll') }}</a-button>
+        <a-button :href="docUrl" target="_blank" rel="noopener">{{ t('pages.llmx.openRaw') }}</a-button>
       </a-space>
     </div>
 

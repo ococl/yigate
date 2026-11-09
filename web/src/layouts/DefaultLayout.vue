@@ -4,8 +4,11 @@ import { theme } from 'antdv-next'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { LOCALE_OPTIONS } from '@/locales'
 import SidebarContent from './SidebarContent.vue'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const router = useRouter()
@@ -66,6 +69,18 @@ function handleLogout() {
   authStore.logout()
   router.push('/login')
 }
+
+function handleLocaleSelect(info: { key: string | number }) {
+  const next = LOCALE_OPTIONS.find((item) => item.value === String(info.key))
+  if (next) appStore.setAppLocale(next.value)
+}
+
+// 语言下拉用 menu 数据结构传给 Dropdown，选中态跟随当前语言
+const localeMenu = computed(() => ({
+  items: LOCALE_OPTIONS.map((option) => ({ key: option.value, label: option.label })),
+  selectedKeys: [appStore.locale],
+  onClick: handleLocaleSelect,
+}))
 </script>
 
 <template>
@@ -100,7 +115,7 @@ function handleLogout() {
         <div class="header-left">
           <a-button
             type="text"
-            :aria-label="isMobile ? '打开导航菜单' : '收起或展开侧栏'"
+            :aria-label="isMobile ? t('layout.openNav') : t('layout.toggleSidebar')"
             @click="toggleNavigation"
           >
             ☰
@@ -109,10 +124,15 @@ function handleLogout() {
         </div>
 
         <div class="header-right">
-          <a-tooltip :title="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'">
+          <a-dropdown placement="bottomRight" :menu="localeMenu">
+            <a-button type="text" :aria-label="t('layout.language')">
+              {{ appStore.locale === 'zh-CN' ? '中' : 'EN' }}
+            </a-button>
+          </a-dropdown>
+          <a-tooltip :title="appStore.isDark ? t('layout.toLight') : t('layout.toDark')">
             <a-button
               type="text"
-              :aria-label="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
+              :aria-label="appStore.isDark ? t('layout.toLight') : t('layout.toDark')"
               @click="appStore.toggleTheme"
             >
               <span class="theme-icon" aria-hidden="true">
@@ -126,8 +146,13 @@ function handleLogout() {
               </span>
             </a-button>
           </a-tooltip>
-          <a-popconfirm title="确定要退出登录吗？" ok-text="退出" cancel-text="取消" @confirm="handleLogout">
-            <a-button type="text">退出</a-button>
+          <a-popconfirm
+            :title="t('layout.logoutConfirm')"
+            :ok-text="t('layout.logoutOk')"
+            :cancel-text="t('common.cancel')"
+            @confirm="handleLogout"
+          >
+            <a-button type="text">{{ t('layout.logout') }}</a-button>
           </a-popconfirm>
         </div>
       </a-layout-header>

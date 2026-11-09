@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
@@ -26,6 +27,7 @@ import type {
   HealthCheckConfig,
 } from '@/types/api'
 
+const { t } = useI18n()
 const isMobile = useIsMobile()
 const route = useRoute()
 const router = useRouter()
@@ -49,9 +51,12 @@ const lastChecks = ref<Map<string, UpstreamCheckResult>>(new Map())
 const runtimeStatus = ref<Map<string, UpstreamStatus>>(new Map())
 
 const modalVisible = ref(false)
-const modalTitle = ref('')
 const isEdit = ref(false)
 const editingName = ref('')
+// 弹窗标题随语言与编辑状态变化，不再手工维护字符串
+const modalTitle = computed(() =>
+  isEdit.value ? t('pages.upstreams.form.editTitle') : t('pages.upstreams.form.addTitle'),
+)
 // 编辑前列表中展示的脱敏 URL，用于判断用户是否真的修改了 URL。
 const originalUrl = ref('')
 const submitting = ref(false)
@@ -100,35 +105,35 @@ watch(
 const typeOptions = ['http', 'https', 'socks5', 'socks5h']
 const strategyOptions = ['weighted_round_robin', 'least_connections', 'consistent_hash', 'source_ip_hash']
 const strategySelectOptions = strategyOptions.map((s) => ({ label: s, value: s }))
-const healthCheckTypeOptions = [
-  { label: '继承默认（按上游类型推断）', value: '' },
-  { label: 'tcp（TCP 连接）', value: 'tcp' },
-  { label: 'http（HTTP GET）', value: 'http' },
-  { label: 'https（HTTPS GET）', value: 'https' },
-  { label: 'tls（TLS 握手）', value: 'tls' },
-  { label: 'socks5（SOCKS5 握手）', value: 'socks5' },
-  { label: 'socks5h（SOCKS5 远端 DNS 握手）', value: 'socks5h' },
-]
+const healthCheckTypeOptions = computed(() => [
+  { label: t('pages.upstreams.healthTypes.inherit'), value: '' },
+  { label: t('pages.upstreams.healthTypes.tcp'), value: 'tcp' },
+  { label: t('pages.upstreams.healthTypes.http'), value: 'http' },
+  { label: t('pages.upstreams.healthTypes.https'), value: 'https' },
+  { label: t('pages.upstreams.healthTypes.tls'), value: 'tls' },
+  { label: t('pages.upstreams.healthTypes.socks5'), value: 'socks5' },
+  { label: t('pages.upstreams.healthTypes.socks5h'), value: 'socks5h' },
+])
 
-const typeHelp = '该上游代理支持的协议类型。请求类型与上游类型匹配时才会被选中，socks5h 表示远端 DNS 解析。'
-const priorityHelp = '数值越小越优先。网关会先使用高优先级（小数字）组内的可用上游，只有该组全部不可用时才降级到低优先级组。适合主备场景。'
-const weightHelp = '同一优先级组内，按策略分配流量时的权重。数值越大被选中的概率越高；least_connections 策略不参考权重。'
-const strategyHelp = '同一优先级组内的选择算法。weighted_round_robin 按权重轮询；least_connections 选活动连接最少；consistent_hash 按目标地址哈希；source_ip_hash 按源地址哈希。'
-const healthCheckHelp = '留空的数值表示继承全局默认值。健康检查失败达到阈值后上游会被标记为不可用，恢复成功达到阈值后重新启用。'
+const typeHelp = computed(() => t('pages.upstreams.helps.type'))
+const priorityHelp = computed(() => t('pages.upstreams.helps.priority'))
+const weightHelp = computed(() => t('pages.upstreams.helps.weight'))
+const strategyHelp = computed(() => t('pages.upstreams.helps.strategy'))
+const healthCheckHelp = computed(() => t('pages.upstreams.helps.healthCheck'))
 
-const columns = [
-  { title: '启用', key: 'enabled', width: 80 },
-  { title: '名称', dataIndex: 'name', key: 'name', width: 140 },
-  { title: 'URL', dataIndex: 'url', key: 'url', ellipsis: true },
-  { title: '类型', dataIndex: 'types', key: 'types', width: 150 },
-  { title: '优先级', dataIndex: 'priority', key: 'priority', width: 80 },
-  { title: '权重', dataIndex: 'weight', key: 'weight', width: 70 },
-  { title: '策略', dataIndex: 'strategy', key: 'strategy', width: 170 },
-  { title: '健康检查', key: 'health_check', width: 120 },
-  { title: '健康状态', key: 'check_status', width: 120 },
-  { title: '最后检查', key: 'last_check', width: 180 },
-  { title: '操作', key: 'action', width: 190, fixed: 'right' as const },
-]
+const columns = computed(() => [
+  { title: t('pages.upstreams.columns.enabled'), key: 'enabled', width: 80 },
+  { title: t('pages.upstreams.columns.name'), dataIndex: 'name', key: 'name', width: 140 },
+  { title: t('pages.upstreams.columns.url'), dataIndex: 'url', key: 'url', ellipsis: true },
+  { title: t('pages.upstreams.columns.type'), dataIndex: 'types', key: 'types', width: 150 },
+  { title: t('pages.upstreams.columns.priority'), dataIndex: 'priority', key: 'priority', width: 80 },
+  { title: t('pages.upstreams.columns.weight'), dataIndex: 'weight', key: 'weight', width: 70 },
+  { title: t('pages.upstreams.columns.strategy'), dataIndex: 'strategy', key: 'strategy', width: 170 },
+  { title: t('pages.upstreams.columns.healthCheck'), key: 'health_check', width: 120 },
+  { title: t('pages.upstreams.columns.status'), key: 'check_status', width: 120 },
+  { title: t('pages.upstreams.columns.lastCheck'), key: 'last_check', width: 180 },
+  { title: t('pages.upstreams.columns.operations'), key: 'action', width: 190, fixed: 'right' as const },
+])
 
 // 从 /api/v1/status 拉取服务端运行时健康状态。
 // 状态由网关进程周期性健康检查维护，前端只做读取展示。
@@ -163,7 +168,6 @@ async function fetchData() {
 function showAddModal() {
   isEdit.value = false
   editingName.value = ''
-  modalTitle.value = '新增上游'
   originalUrl.value = ''
   resetFieldErrors()
   form.value = {
@@ -182,7 +186,6 @@ function showAddModal() {
 function showEditModal(record: UpstreamInfo) {
   isEdit.value = true
   editingName.value = record.name
-  modalTitle.value = '编辑上游'
   const hc = record.health_check || emptyHealthCheck()
   originalUrl.value = record.url
   resetFieldErrors()
@@ -213,15 +216,15 @@ function urlUnchanged(): boolean {
 
 function validateForm(): { name?: string; url?: string; types?: string; path?: string } {
   const errors: { name?: string; url?: string; types?: string; path?: string } = {}
-  if (!form.value.name.trim()) errors.name = '请输入名称'
-  if (!form.value.url.trim()) errors.url = '请输入 URL'
+  if (!form.value.name.trim()) errors.name = t('pages.upstreams.messages.nameRequired')
+  if (!form.value.url.trim()) errors.url = t('pages.upstreams.messages.urlRequired')
   else if (!urlUnchanged() && !/^(https?|socks5h?):\/\/.+/i.test(form.value.url.trim())) {
-    errors.url = 'URL 需以 http://、https://、socks5:// 或 socks5h:// 开头'
+    errors.url = t('pages.upstreams.messages.urlInvalid')
   }
-  if (form.value.types.length === 0) errors.types = '请选择至少一种类型'
+  if (form.value.types.length === 0) errors.types = t('pages.upstreams.messages.typesRequired')
   if (form.value.health_check.type === 'http' || form.value.health_check.type === 'https') {
     if (!form.value.health_check.path.trim()) {
-      errors.path = 'HTTP 健康检查需要填写探测路径'
+      errors.path = t('pages.upstreams.messages.pathRequired')
     }
   }
   return errors
@@ -263,7 +266,7 @@ async function handleSubmit() {
         health_check: healthCheck,
       }
       await updateUpstream(editingName.value, data)
-      message.success('更新成功')
+      message.success(t('pages.upstreams.messages.updated'))
       if (editingName.value !== data.name) {
         lastChecks.value.delete(editingName.value)
       }
@@ -279,7 +282,7 @@ async function handleSubmit() {
         health_check: healthCheck,
       }
       await addUpstream(data)
-      message.success('添加成功')
+      message.success(t('pages.upstreams.messages.added'))
     }
     modalVisible.value = false
     await fetchData()
@@ -295,7 +298,11 @@ async function handleToggle(record: UpstreamInfo, enabled: boolean) {
   toggling.value = [...toggling.value, record.name]
   try {
     await updateUpstream(record.name, { enabled })
-    message.success(enabled ? `已启用上游 ${record.name}` : `已禁用上游 ${record.name}`)
+    message.success(
+      t(enabled ? 'pages.upstreams.messages.enabled' : 'pages.upstreams.messages.disabled', {
+        name: record.name,
+      }),
+    )
     await fetchData()
   } catch {
     // 错误已由拦截器处理，重新拉取以还原开关状态
@@ -310,7 +317,7 @@ async function handleDelete(name: string) {
   deleting.value = name
   try {
     await deleteUpstream(name)
-    message.success('删除成功')
+    message.success(t('pages.upstreams.messages.deleted'))
     lastChecks.value.delete(name)
     await fetchData()
   } catch {
@@ -337,10 +344,16 @@ async function handleBulkDelete() {
     selectedRowKeys.value = failed
     await fetchData()
     if (failed.length === 0) {
-      message.success(`已删除 ${res.deleted.length} 个上游`)
+      message.success(t('pages.upstreams.messages.deletedCount', { count: res.deleted.length }))
       return
     }
-    message.warning(`已删除 ${res.deleted.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
+    message.warning(
+      t('pages.upstreams.messages.deletedPartial', {
+        deleted: res.deleted.length,
+        failed: failed.length,
+        names: failed.join(t('pages.upstreams.messages.listSeparator')),
+      }),
+    )
   } catch {
     // 整体失败（网络/500）已由请求层提示，保留当前选择
   } finally {
@@ -355,9 +368,14 @@ async function handleCheck(name: string) {
     const { result } = await checkUpstream(name)
     lastChecks.value.set(result.name, result)
     if (result.alive) {
-      message.success(`上游 ${result.name} 可用`)
+      message.success(t('pages.upstreams.messages.checkAlive', { name: result.name }))
     } else {
-      message.error(`上游 ${result.name} 不可用：${result.error || '未知原因'}`)
+      message.error(
+        t('pages.upstreams.messages.checkDead', {
+          name: result.name,
+          error: result.error || t('pages.upstreams.status.unknownReason'),
+        }),
+      )
     }
     await fetchData()
   } catch {
@@ -379,15 +397,22 @@ async function handleCheckAll() {
     }
     lastChecks.value = next
     if (results.length === 0) {
-      message.info('没有可巡检的上游')
+      message.info(t('pages.upstreams.messages.noTargets'))
     } else if (aliveCount === results.length) {
-      message.success(`巡检完成：${aliveCount} 个上游全部可用`)
+      message.success(t('pages.upstreams.messages.allAlive', { count: aliveCount }))
     } else {
       // 只报数字的话，用户还得自己在表格里找是哪一个坏了
       const failed = results.filter((r) => !r.alive).map((r) => r.name)
-      const shown = failed.slice(0, 3).join('、')
-      const rest = failed.length > 3 ? ` 等 ${failed.length} 个` : ''
-      message.warning(`巡检完成：${aliveCount}/${results.length} 个可用；不可用：${shown}${rest}`)
+      const shown = failed.slice(0, 3).join(t('pages.upstreams.messages.listSeparator'))
+      const rest = failed.length > 3 ? t('pages.upstreams.messages.restCount', { count: failed.length }) : ''
+      message.warning(
+        t('pages.upstreams.messages.partial', {
+          alive: aliveCount,
+          total: results.length,
+          names: shown,
+          rest,
+        }),
+      )
     }
     await fetchData()
   } catch {
@@ -409,13 +434,13 @@ function hasChecked(record: UpstreamInfo) {
 }
 
 function statusText(record: UpstreamInfo) {
-  if (record.enabled === false) return '已禁用'
+  if (record.enabled === false) return t('pages.upstreams.status.disabled')
   const rt = runtimeOf(record)
-  if (!rt) return '等待检测'
-  if (!hasChecked(record)) return '未检测'
-  if (!rt.dead) return '可用'
+  if (!rt) return t('pages.upstreams.status.waiting')
+  if (!hasChecked(record)) return t('pages.upstreams.status.unchecked')
+  if (!rt.dead) return t('pages.upstreams.status.alive')
   const err = lastChecks.value.get(record.name)?.error
-  return err ? `不可用：${err}` : '不可用'
+  return err ? t('pages.upstreams.status.deadWithError', { error: err }) : t('pages.upstreams.status.dead')
 }
 
 function statusColor(record: UpstreamInfo) {
@@ -426,20 +451,26 @@ function statusColor(record: UpstreamInfo) {
 }
 
 function statusTooltip(record: UpstreamInfo) {
-  if (record.enabled === false) return '上游已禁用，不参与流量调度与健康检查'
+  if (record.enabled === false) return t('pages.upstreams.status.disabledTooltip')
   const rt = runtimeOf(record)
-  if (!rt) return '尚未获取到运行时状态'
-  const parts = [`成功 ${rt.successes} 次`, `失败 ${rt.failures} 次`, `连续失败 ${rt.consecutive_dead} 次`]
-  if (rt.active_conns > 0) parts.push(`活动连接 ${rt.active_conns}`)
-  if (rt.dead && rt.dead_since) parts.push(`自 ${formatTime(rt.dead_since)} 起不可用`)
-  return parts.join('，')
+  if (!rt) return t('pages.upstreams.status.noRuntimeTooltip')
+  const parts = [
+    t('pages.upstreams.status.successCount', { count: rt.successes }),
+    t('pages.upstreams.status.failureCount', { count: rt.failures }),
+    t('pages.upstreams.status.consecutiveCount', { count: rt.consecutive_dead }),
+  ]
+  if (rt.active_conns > 0) parts.push(t('pages.upstreams.status.activeConnections', { count: rt.active_conns }))
+  if (rt.dead && rt.dead_since) {
+    parts.push(t('pages.upstreams.status.deadSince', { time: formatTime(rt.dead_since) }))
+  }
+  return parts.join(t('pages.upstreams.status.joiner'))
 }
 
 function formatTime(value?: string) {
   if (!value) return '—'
-  const t = new Date(value)
-  if (Number.isNaN(t.getTime()) || t.getTime() <= 0) return '—'
-  return formatDateTime(t)
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return '—'
+  return formatDateTime(date)
 }
 
 function lastCheckText(record: UpstreamInfo) {
@@ -448,7 +479,7 @@ function lastCheckText(record: UpstreamInfo) {
 
 function healthCheckText(record: UpstreamInfo) {
   const hc = record.health_check
-  if (!hc || !hc.type) return '默认'
+  if (!hc || !hc.type) return t('pages.upstreams.status.default')
   return hc.type
 }
 
@@ -458,7 +489,7 @@ const pagination = computed(() => ({
   pageSize: Number(route.query.size) || 10,
   pageSizeOptions: ['10', '20', '50'],
   showSizeChanger: true,
-  showTotal: (total: number) => `共 ${total} 条`,
+  showTotal: (total: number) => t('common.total', { count: total }),
   onChange: handlePageChange,
 }))
 
@@ -498,15 +529,15 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
   <div class="page-shell">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">上游管理</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.upstreams.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          配置上游代理、负载策略与健康检查；修改会立即生效。
+          {{ t('pages.upstreams.subtitle') }}
         </a-typography-text>
       </div>
       <a-space>
-        <a-button @click="fetchData" :loading="loading">刷新</a-button>
-        <a-button @click="handleCheckAll" :loading="checkingAll">一键巡检</a-button>
-        <a-button type="primary" @click="showAddModal">新增上游</a-button>
+        <a-button @click="fetchData" :loading="loading">{{ t('common.refresh') }}</a-button>
+        <a-button @click="handleCheckAll" :loading="checkingAll">{{ t('pages.upstreams.checkAll') }}</a-button>
+        <a-button type="primary" @click="showAddModal">{{ t('pages.upstreams.addUpstream') }}</a-button>
       </a-space>
     </div>
 
@@ -514,8 +545,8 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
-        <a-empty v-else-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理">
-          <a-button type="primary" @click="showAddModal">新增上游</a-button>
+        <a-empty v-else-if="dataSource.length === 0" :description="t('pages.upstreams.emptyDescription')">
+          <a-button type="primary" @click="showAddModal">{{ t('pages.upstreams.addUpstream') }}</a-button>
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="record.name">
           <template #head>
@@ -526,24 +557,26 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
               :checked="record.enabled !== false"
               :loading="toggling.includes(record.name)"
               size="small"
-              :aria-label="`启用或禁用上游 ${record.name}`"
+              :aria-label="t('pages.upstreams.status.toggleAria', { name: record.name })"
               @change="(checked: boolean) => handleToggle(record, checked)"
             />
           </template>
-          <MobileCardRow label="URL">{{ record.url }}</MobileCardRow>
-          <MobileCardRow label="类型">
+          <MobileCardRow :label="t('pages.upstreams.columns.url')">{{ record.url }}</MobileCardRow>
+          <MobileCardRow :label="t('pages.upstreams.columns.type')">
             <a-space wrap size="small">
-              <a-tag v-for="t in record.types" :key="t" color="blue">{{ t }}</a-tag>
+              <a-tag v-for="type in record.types" :key="type" color="blue">{{ type }}</a-tag>
               <span v-if="!record.types || record.types.length === 0" class="muted">—</span>
             </a-space>
           </MobileCardRow>
-          <MobileCardRow label="优先级/权重">{{ record.priority ?? 0 }} / {{ record.weight ?? 0 }}</MobileCardRow>
-          <MobileCardRow label="策略">{{ record.strategy || '—' }}</MobileCardRow>
-          <MobileCardRow label="健康">
+          <MobileCardRow :label="`${t('pages.upstreams.columns.priority')} / ${t('pages.upstreams.columns.weight')}`">
+            {{ record.priority ?? 0 }} / {{ record.weight ?? 0 }}
+          </MobileCardRow>
+          <MobileCardRow :label="t('pages.upstreams.columns.strategy')">{{ record.strategy || '—' }}</MobileCardRow>
+          <MobileCardRow :label="t('pages.upstreams.columns.healthCheck')">
             <a-tag>{{ healthCheckText(record) }}</a-tag>
             <a-tag :color="statusColor(record)">{{ statusText(record) }}</a-tag>
           </MobileCardRow>
-          <MobileCardRow label="最后检查">{{ lastCheckText(record) }}</MobileCardRow>
+          <MobileCardRow :label="t('pages.upstreams.columns.lastCheck')">{{ lastCheckText(record) }}</MobileCardRow>
           <template #actions>
             <a-button
               size="small"
@@ -551,16 +584,18 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
               :loading="checking.includes(record.name)"
               @click="handleCheck(record.name)"
             >
-              检查
+              {{ t('common.check') }}
             </a-button>
-            <a-button size="small" @click="showEditModal(record)">编辑</a-button>
+            <a-button size="small" @click="showEditModal(record)">{{ t('common.edit') }}</a-button>
             <a-popconfirm
-              title="删除后相关路由规则对该上游的引用也会被移除，确定删除？"
-              ok-text="删除"
-              cancel-text="取消"
+              :title="t('pages.upstreams.form.deleteConfirm')"
+              :ok-text="t('common.delete')"
+              :cancel-text="t('common.cancel')"
               @confirm="handleDelete(record.name)"
             >
-              <a-button type="link" size="small" danger :loading="deleting === record.name">删除</a-button>
+              <a-button type="link" size="small" danger :loading="deleting === record.name">
+                {{ t('common.delete') }}
+              </a-button>
             </a-popconfirm>
           </template>
         </MobileCard>
@@ -578,15 +613,17 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <div v-else class="fill-table">
         <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
-          <span>已选 {{ selectedRowKeys.length }} 项</span>
-          <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
+          <span>{{ t('common.selected', { count: selectedRowKeys.length }) }}</span>
+          <a-button size="small" type="text" @click="selectedRowKeys = []">
+            {{ t('common.clearSelection') }}
+          </a-button>
           <a-popconfirm
-            :title="`确定删除选中的 ${selectedRowKeys.length} 个上游？此操作不可撤销。`"
-            ok-text="删除"
-            cancel-text="取消"
+            :title="t('pages.upstreams.bulkDeleteConfirm', { count: selectedRowKeys.length })"
+            :ok-text="t('common.delete')"
+            :cancel-text="t('common.cancel')"
             @confirm="handleBulkDelete"
           >
-            <a-button size="small" danger :loading="bulkDeleting">批量删除</a-button>
+            <a-button size="small" danger :loading="bulkDeleting">{{ t('pages.upstreams.bulkDelete') }}</a-button>
           </a-popconfirm>
         </div>
         <a-table
@@ -600,19 +637,25 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
         >
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'enabled'">
-        <a-tooltip :title="record.enabled === false ? '已禁用：不参与流量调度与健康检查' : '启用中：点击可临时禁用'">
+        <a-tooltip
+          :title="
+            record.enabled === false
+              ? t('pages.upstreams.status.disableTooltip')
+              : t('pages.upstreams.status.enableTooltip')
+          "
+        >
           <a-switch
             :checked="record.enabled !== false"
             :loading="toggling.includes(record.name)"
             size="small"
-            :aria-label="`启用或禁用上游 ${record.name}`"
+            :aria-label="t('pages.upstreams.status.toggleAria', { name: record.name })"
             @change="(checked: boolean) => handleToggle(record, checked)"
           />
         </a-tooltip>
       </template>
       <template v-else-if="column.key === 'types'">
         <a-space wrap size="small">
-          <a-tag v-for="t in record.types" :key="t" color="blue">{{ t }}</a-tag>
+          <a-tag v-for="type in record.types" :key="type" color="blue">{{ type }}</a-tag>
           <span v-if="!record.types || record.types.length === 0" class="muted">—</span>
         </a-space>
       </template>
@@ -636,24 +679,26 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             :loading="checking.includes(record.name)"
             @click="handleCheck(record.name)"
           >
-            检查
+            {{ t('common.check') }}
           </a-button>
-          <a-button type="link" size="small" @click="showEditModal(record)">编辑</a-button>
+          <a-button type="link" size="small" @click="showEditModal(record)">{{ t('common.edit') }}</a-button>
           <a-popconfirm
-            title="删除后相关路由规则对该上游的引用也会被移除，确定删除？"
-            ok-text="删除"
-            cancel-text="取消"
+            :title="t('pages.upstreams.form.deleteConfirm')"
+            :ok-text="t('common.delete')"
+            :cancel-text="t('common.cancel')"
             @confirm="handleDelete(record.name)"
           >
-            <a-button type="link" size="small" danger :loading="deleting === record.name">删除</a-button>
+            <a-button type="link" size="small" danger :loading="deleting === record.name">
+              {{ t('common.delete') }}
+            </a-button>
           </a-popconfirm>
         </a-space>
       </template>
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-          <a-empty v-else description="暂无上游，请先新增一个上游代理">
-            <a-button type="primary" @click="showAddModal">新增上游</a-button>
+          <a-empty v-else :description="t('pages.upstreams.emptyDescription')">
+            <a-button type="primary" @click="showAddModal">{{ t('pages.upstreams.addUpstream') }}</a-button>
           </a-empty>
         </template>
         </a-table>
@@ -666,45 +711,54 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     v-model:open="modalVisible"
     :title="modalTitle"
     :confirm-loading="submitting"
-    :ok-text="isEdit ? '更新' : '添加'"
-    cancel-text="取消"
+    :ok-text="isEdit ? t('pages.upstreams.form.okUpdate') : t('pages.upstreams.form.okAdd')"
+    :cancel-text="t('common.cancel')"
     width="720px"
     @ok="handleSubmit"
   >
     <a-form layout="vertical">
-      <a-form-item html-for="up-enabled" label="启用" tooltip="关闭后该上游不参与流量调度与健康检查，配置保留，可随时重新启用。">
-        <a-switch id="up-enabled" v-model:checked="form.enabled" checked-children="启用" un-checked-children="禁用" />
+      <a-form-item
+        html-for="up-enabled"
+        :label="t('pages.upstreams.form.enable')"
+        :tooltip="t('pages.upstreams.form.enableTooltip')"
+      >
+        <a-switch
+          id="up-enabled"
+          v-model:checked="form.enabled"
+          :checked-children="t('pages.upstreams.form.enableOn')"
+          :un-checked-children="t('pages.upstreams.form.enableOff')"
+        />
       </a-form-item>
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
           <a-form-item
             html-for="up-name"
-            label="名称"
+            :label="t('pages.upstreams.form.name')"
             required
-            tooltip="上游唯一标识。编辑时可修改，修改后会同步更新路由规则中对该上游的引用。"
+            :tooltip="t('pages.upstreams.form.nameTooltip')"
             :validate-status="nameError ? 'error' : undefined"
             :help="nameError || undefined"
           >
-            <a-input id="up-name" v-model:value="form.name" placeholder="如 default、proxy-hk" />
+            <a-input id="up-name" v-model:value="form.name" :placeholder="t('pages.upstreams.form.namePlaceholder')" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
           <a-form-item
             html-for="up-url"
-            label="URL"
+            :label="t('pages.upstreams.form.url')"
             required
-            tooltip="上游代理地址，支持 http://、https://、socks5://、socks5h:// 协议。"
+            :tooltip="t('pages.upstreams.form.urlTooltip')"
             :validate-status="urlError ? 'error' : undefined"
             :help="urlError || undefined"
           >
-            <a-input id="up-url" v-model:value="form.url" placeholder="如 socks5://127.0.0.1:1080" />
+            <a-input id="up-url" v-model:value="form.url" :placeholder="t('pages.upstreams.form.urlPlaceholder')" />
           </a-form-item>
         </a-col>
       </a-row>
 
       <a-form-item
-        label="类型"
+        :label="t('pages.upstreams.form.type')"
         :tooltip="typeHelp"
         required
         :validate-status="typesError ? 'error' : undefined"
@@ -715,35 +769,43 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <a-row :gutter="16">
         <a-col :span="8">
-          <a-form-item html-for="up-priority" label="优先级" :tooltip="priorityHelp">
+          <a-form-item
+            html-for="up-priority"
+            :label="t('pages.upstreams.form.priority')"
+            :tooltip="priorityHelp"
+          >
             <a-input-number id="up-priority" v-model:value="form.priority" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :span="8">
-          <a-form-item html-for="up-weight" label="权重" :tooltip="weightHelp">
+          <a-form-item html-for="up-weight" :label="t('pages.upstreams.form.weight')" :tooltip="weightHelp">
             <a-input-number id="up-weight" v-model:value="form.weight" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :span="8">
-          <a-form-item html-for="up-strategy" label="策略" :tooltip="strategyHelp">
+          <a-form-item html-for="up-strategy" :label="t('pages.upstreams.form.strategy')" :tooltip="strategyHelp">
             <a-select id="up-strategy" v-model:value="form.strategy" :options="strategySelectOptions" />
           </a-form-item>
         </a-col>
       </a-row>
 
-      <a-divider style="margin: 4px 0 16px;">健康检查</a-divider>
+      <a-divider style="margin: 4px 0 16px;">{{ t('pages.upstreams.form.healthCheckSection') }}</a-divider>
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
-          <a-form-item html-for="up-type" label="探测方式" :tooltip="healthCheckHelp">
+          <a-form-item
+            html-for="up-type"
+            :label="t('pages.upstreams.form.probeType')"
+            :tooltip="healthCheckHelp"
+          >
             <a-select id="up-type" v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
           <a-form-item
             html-for="up-path"
-            label="探测路径"
-            :tooltip="'仅 http/https 探测方式需要，如 /health。'"
+            :label="t('pages.upstreams.form.probePath')"
+            :tooltip="t('pages.upstreams.form.probePathTooltip')"
             :validate-status="pathError ? 'error' : undefined"
             :help="pathError || undefined"
           >
@@ -759,33 +821,53 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
 
       <a-row :gutter="16">
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item html-for="up-interval-seconds" label="间隔（秒）" tooltip="0 表示使用全局默认间隔">
+          <a-form-item
+            html-for="up-interval-seconds"
+            :label="t('pages.upstreams.form.interval')"
+            :tooltip="t('pages.upstreams.form.intervalTooltip')"
+          >
             <a-input-number id="up-interval-seconds" v-model:value="form.health_check.interval_seconds" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item html-for="up-timeout-seconds" label="超时（秒）" tooltip="0 表示使用全局默认超时">
+          <a-form-item
+            html-for="up-timeout-seconds"
+            :label="t('pages.upstreams.form.timeout')"
+            :tooltip="t('pages.upstreams.form.timeoutTooltip')"
+          >
             <a-input-number id="up-timeout-seconds" v-model:value="form.health_check.timeout_seconds" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item html-for="up-failure-threshold" label="失败阈值" tooltip="连续失败多少次后标记为不可用，0 表示使用全局默认值">
+          <a-form-item
+            html-for="up-failure-threshold"
+            :label="t('pages.upstreams.form.failureThreshold')"
+            :tooltip="t('pages.upstreams.form.failureThresholdTooltip')"
+          >
             <a-input-number id="up-failure-threshold" v-model:value="form.health_check.failure_threshold" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item html-for="up-success-threshold" label="恢复阈值" tooltip="连续成功多少次后恢复可用，0 表示使用全局默认值">
+          <a-form-item
+            html-for="up-success-threshold"
+            :label="t('pages.upstreams.form.successThreshold')"
+            :tooltip="t('pages.upstreams.form.successThresholdTooltip')"
+          >
             <a-input-number id="up-success-threshold" v-model:value="form.health_check.success_threshold" :min="0" style="width: 100%;" />
           </a-form-item>
         </a-col>
       </a-row>
 
-      <a-form-item html-for="up-expected-codes" label="期望状态码" tooltip="仅 http/https 探测方式使用，留空表示使用默认 200-299">
+      <a-form-item
+        html-for="up-expected-codes"
+        :label="t('pages.upstreams.form.expectedCodes')"
+        :tooltip="t('pages.upstreams.form.expectedCodesTooltip')"
+      >
         <a-select id="up-expected-codes"
           v-model:value="form.health_check.expected_codes"
           mode="tags"
           :disabled="!showHealthCheckPath"
-          placeholder="例如 200,204"
+          :placeholder="t('pages.upstreams.form.expectedCodesPlaceholder')"
           style="width: 100%;"
         />
       </a-form-item>

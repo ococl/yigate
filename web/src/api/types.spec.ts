@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { i18n } from '@/locales'
 import { ApiError, parseApiError } from './types'
 
 describe('parseApiError', () => {
@@ -14,7 +15,9 @@ describe('parseApiError', () => {
 
   it('falls back to the status field and generic message', () => {
     expect(parseApiError({ response: { status: 401, data: { status: 'unauthorized' } } })?.detail).toBe('unauthorized')
-    expect(parseApiError({ response: { status: 502, data: null } })?.detail).toBe('请求错误 (502)')
+    expect(parseApiError({ response: { status: 502, data: null } })?.detail).toBe(
+      i18n.global.t('common.requestErrorStatus', { status: 502 }),
+    )
   })
 
   it('returns null for transport errors and cancellations', () => {

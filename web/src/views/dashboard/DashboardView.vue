@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message, theme } from 'antdv-next'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import { useAppStore } from '@/stores/app'
 import { getHealth, getStatus, getTraffic } from '@/api/system'
-import { formatDateTime, formatTimeOnly } from '@/utils/datetime'
+import { formatTimeOnly } from '@/utils/datetime'
 import { formatBytes, formatUptime } from '@/utils/format'
 import { copyText } from '@/utils/clipboard'
 import type { HealthStatus, ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
+
+const { t } = useI18n()
+// 「直连」既作为分组键也作为展示名，内部统一用常量，展示时再翻译
+const DIRECT_NAME = '直连'
 
 const health = ref<HealthStatus | null>(null)
 const status = ref<StatusSnapshot | null>(null)
@@ -42,9 +47,9 @@ async function fetchData(silent = false) {
 
 function formatTime(value?: string): string {
   if (!value) return '—'
-  const t = new Date(value)
-  if (Number.isNaN(t.getTime()) || t.getTime() <= 0) return '—'
-  return t.toLocaleString()
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return '—'
+  return date.toLocaleString()
 }
 
 const totals = computed(() => {
@@ -70,7 +75,7 @@ function formatPercent(value: number): string {
 const topUpstreams = computed(() => {
   const grouped = new Map<string, number>()
   // 直连始终参与 Top 5 比较，即使当前没有直连流量
-  grouped.set('直连', 0)
+  grouped.set(DIRECT_NAME, 0)
   // 纳入所有已配置上游，即使当前没有流量也占一个位置
   for (const upstream of status.value?.upstreams || []) {
     grouped.set(upstream.name, 0)
@@ -78,7 +83,7 @@ const topUpstreams = computed(() => {
   for (const entry of traffic.value?.entries || []) {
     const total = entry.bytes_in + entry.bytes_out
     if (total <= 0) continue
-    const name = entry.upstream || '直连'
+    const name = entry.upstream || DIRECT_NAME
     grouped.set(name, (grouped.get(name) || 0) + total)
   }
   const list = [...grouped.entries()]
@@ -86,8 +91,8 @@ const topUpstreams = computed(() => {
     .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
 
   // 始终保留一个“直连”名额：其余上游只取前 4 名参与比较。
-  const direct = list.find((item) => item.name === '直连') || { name: '直连', total: 0 }
-  const selected = list.filter((item) => item.name !== '直连').slice(0, 4)
+  const direct = list.find((item) => item.name === DIRECT_NAME) || { name: DIRECT_NAME, total: 0 }
+  const selected = list.filter((item) => item.name !== DIRECT_NAME).slice(0, 4)
   selected.push(direct)
   selected.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
 
@@ -141,6 +146,9 @@ const proxyProtocolOptions = [
   { label: 'HTTP(S)', value: 'http' },
   { label: 'SOCKS5', value: 'socks5' },
 ]
+
+// 模板里需要判断直连项，暴露给模板使用
+const DIRECT_LABEL = computed(() => t('pages.dashboard.direct'))
 
 interface ProxyTarget extends ProxyEndpoint {
   custom?: boolean
@@ -239,11 +247,11 @@ function buildProxyUrl(target: ProxyEndpoint): string {
 function validateProxyCredentials(): boolean {
   if (!includeProxyCredentials.value) return true
   if (!proxyUsername.value.trim()) {
-    message.warning('请输入代理用户名')
+    message.warning(t('pages.dashboard.messages.usernameRequired'))
     return false
   }
   if (!proxyPassword.value) {
-    message.warning('请输入代理密码')
+    message.warning(t('pages.dashboard.messages.passwordRequired'))
     return false
   }
   return true
@@ -252,23 +260,23 @@ function validateProxyCredentials(): boolean {
 async function copyProxyLink(target: ProxyEndpoint) {
   if (!validateProxyCredentials()) return
   if (await copyText(buildProxyUrl(target))) {
-    message.success('已复制')
+    message.success(t('pages.dashboard.messages.copied'))
     return
   }
-  message.error('复制失败，请手动选择链接复制')
+  message.error(t('pages.dashboard.messages.copyFailed'))
 }
 
 async function copyAllProxyLinks() {
   if (!proxyTargets.value.length) {
-    message.info('暂无可复制的代理地址')
+    message.info(t('pages.dashboard.messages.noTargets'))
     return
   }
   if (!validateProxyCredentials()) return
   if (await copyText(proxyTargets.value.map((target) => buildProxyUrl(target)).join('\n'))) {
-    message.success('已复制')
+    message.success(t('pages.dashboard.messages.copied'))
     return
   }
-  message.error('复制失败，请手动选择链接复制')
+  message.error(t('pages.dashboard.messages.copyFailed'))
 }
 
 function persistExtraProxyHosts() {
@@ -297,11 +305,11 @@ function normalizeProxyHost(value: string): string | null {
 function addProxyHost() {
   const host = normalizeProxyHost(proxyHostInput.value)
   if (!host) {
-    message.warning('请输入有效的 IP 或主机名，无需填写端口')
+    message.warning(t('pages.dashboard.messages.invalidHost'))
     return
   }
   if (extraProxyHosts.value.some((item) => item.toLowerCase() === host.toLowerCase())) {
-    message.info('该地址已存在')
+    message.info(t('pages.dashboard.messages.hostExists'))
     proxyHostInput.value = ''
     return
   }
@@ -348,16 +356,18 @@ useVisiblePolling(() => fetchData(true), 10000)
   <a-spin :spinning="loading">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">仪表盘</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.dashboard.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          网关实时状态概览 · 每 10 秒自动刷新
-          <span v-if="lastRefreshed"> · 最近更新 {{ formatTimeOnly(lastRefreshed) }}</span>
+          {{ t('pages.dashboard.subtitle') }}
+          <span v-if="lastRefreshed">
+            · {{ t('pages.dashboard.lastUpdated', { time: formatTimeOnly(lastRefreshed) }) }}
+          </span>
         </a-typography-text>
       </div>
       <a-space wrap>
         <a-tag color="blue">{{ status?.version || 'dev' }}</a-tag>
-        <a-button @click="proxyModalOpen = true">代理链接</a-button>
-        <a-button @click="() => fetchData()" :loading="loading">刷新</a-button>
+        <a-button @click="proxyModalOpen = true">{{ t('pages.dashboard.proxyLinks') }}</a-button>
+        <a-button @click="() => fetchData()" :loading="loading">{{ t('pages.dashboard.refresh') }}</a-button>
       </a-space>
     </div>
 
@@ -366,44 +376,60 @@ useVisiblePolling(() => fetchData(true), 10000)
       type="warning"
       show-icon
       style="margin-bottom: 16px;"
-      message="无法获取网关运行状态"
-      description="健康检查接口请求失败，下方指标不代表真实运行状态。请确认后端服务是否正常，然后重试。"
+      :message="t('pages.dashboard.healthUnavailableTitle')"
+      :description="t('pages.dashboard.healthUnavailableDesc')"
     >
       <template #action>
-        <a-button size="small" :loading="loading" @click="() => fetchData()">重试</a-button>
+        <a-button size="small" :loading="loading" @click="() => fetchData()">
+          {{ t('pages.dashboard.retry') }}
+        </a-button>
       </template>
     </a-alert>
 
     <a-row :gutter="16" style="margin-bottom: 16px;">
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
-          <a-statistic title="运行状态" :value="health ? health.status || '-' : '—'" :value-style="{ color: statusColor }" />
+          <a-statistic
+            :title="t('pages.dashboard.status')"
+            :value="health ? health.status || '-' : '—'"
+            :value-style="{ color: statusColor }"
+          />
         </a-card>
       </a-col>
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
-            title="可用上游"
+            :title="t('pages.dashboard.availableUpstreams')"
             :value="status ? aliveCount : '—'"
             :suffix="status ? `/ ${upstreams.length || health?.upstream_count || 0}` : ''"
           />
           <a-typography-text type="secondary" style="font-size: 12px;">
-            {{ status ? `不可用 ${deadCount} · 未检测 ${uncheckedCount}` : '状态接口不可用' }}
+            {{
+              status
+                ? t('pages.dashboard.upstreamDetail', { dead: deadCount, unchecked: uncheckedCount })
+                : t('pages.dashboard.statusUnavailable')
+            }}
           </a-typography-text>
         </a-card>
       </a-col>
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
-            title="路由 / 管理就绪"
-            :value="health ? (health.router_ready && health.manager_ready ? '就绪' : '异常') : '—'"
+            :title="t('pages.dashboard.routerReady')"
+            :value="
+              health
+                ? health.router_ready && health.manager_ready
+                  ? t('pages.dashboard.ready')
+                  : t('pages.dashboard.abnormal')
+                : '—'
+            "
             :value-style="{ color: readyColor }"
           />
         </a-card>
       </a-col>
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
-          <a-statistic title="运行时长" :value="formatUptime(status?.uptime_seconds || 0)" />
+          <a-statistic :title="t('pages.dashboard.uptime')" :value="formatUptime(status?.uptime_seconds || 0)" />
           <a-typography-text type="secondary" style="font-size: 12px;">
             {{ status?.go_version || '' }}
           </a-typography-text>
@@ -413,31 +439,31 @@ useVisiblePolling(() => fetchData(true), 10000)
 
     <a-row :gutter="16" style="margin-bottom: 16px;">
       <a-col :xs="24" :lg="8">
-        <a-card size="small" title="运行信息" style="height: 100%;">
+        <a-card size="small" :title="t('pages.dashboard.runningInfo')" style="height: 100%;">
           <a-descriptions :column="1" size="small">
-            <a-descriptions-item label="代理监听">
+            <a-descriptions-item :label="t('pages.dashboard.proxyListen')">
               <a-typography-text code>{{ status?.listen || '-' }}</a-typography-text>
             </a-descriptions-item>
-            <a-descriptions-item label="管理端口">
+            <a-descriptions-item :label="t('pages.dashboard.managementPort')">
               <a-typography-text code>{{ status?.management || '-' }}</a-typography-text>
             </a-descriptions-item>
-            <a-descriptions-item label="上游数量">
+            <a-descriptions-item :label="t('pages.dashboard.upstreamCount')">
               {{ status?.upstream_count ?? '-' }}
             </a-descriptions-item>
-            <a-descriptions-item label="pprof">
+            <a-descriptions-item :label="t('pages.dashboard.pprof')">
               <a-tag :color="status?.pprof_enabled ? 'green' : 'default'">
-                {{ status?.pprof_enabled ? '已启用' : '未启用' }}
+                {{ status?.pprof_enabled ? t('common.enabled') : t('common.disabled') }}
               </a-tag>
             </a-descriptions-item>
-            <a-descriptions-item label="内置 WebUI">
+            <a-descriptions-item :label="t('pages.dashboard.webui')">
               <a-tag :color="status?.webui_enabled === false ? 'default' : 'green'">
-                {{ status?.webui_enabled === false ? '已关闭' : '已启用' }}
+                {{ status?.webui_enabled === false ? t('common.disabled') : t('common.enabled') }}
               </a-tag>
             </a-descriptions-item>
-            <a-descriptions-item label="构建时间">
+            <a-descriptions-item :label="t('pages.dashboard.buildTime')">
               {{ status?.build_time && status.build_time !== 'unknown' ? status.build_time : '—' }}
             </a-descriptions-item>
-            <a-descriptions-item label="状态时间">
+            <a-descriptions-item :label="t('pages.dashboard.statusTime')">
               {{ formatTime(status?.timestamp) }}
             </a-descriptions-item>
           </a-descriptions>
@@ -445,28 +471,33 @@ useVisiblePolling(() => fetchData(true), 10000)
       </a-col>
 
       <a-col :xs="24" :lg="16">
-        <a-card size="small" title="流量概览" style="height: 100%;">
+        <a-card size="small" :title="t('pages.dashboard.trafficOverview')" style="height: 100%;">
           <template v-if="traffic && (traffic.enabled || traffic.entries.length > 0)">
             <a-alert
               v-if="!traffic.enabled"
               type="warning"
               show-icon
               style="margin-bottom: 12px;"
-              message="流量审计已关闭"
-              description="以下为已持久化的历史记录；重新开启审计后才会记录新流量。"
+              :message="t('pages.dashboard.trafficDisabledTitle')"
+              :description="t('pages.dashboard.trafficDisabledDesc')"
             />
             <div class="traffic-summary">
-              <span>共 <strong>{{ totals.count }}</strong> 条记录</span>
-              <span>覆盖 <strong>{{ totals.users }}</strong> 个用户</span>
-              <span v-if="totalBytes > 0">合计 <strong>{{ formatBytes(totalBytes) }}</strong></span>
+              <span>{{ t('pages.dashboard.records', { count: totals.count }) }}</span>
+              <span>{{ t('pages.dashboard.users', { count: totals.users }) }}</span>
+              <span v-if="totalBytes > 0">{{ t('pages.dashboard.total', { size: formatBytes(totalBytes) }) }}</span>
             </div>
 
             <template v-if="totalBytes > 0">
               <div class="traffic-charts">
                 <div class="traffic-donut">
-                  <div class="chart-caption">流入 / 流出占比</div>
+                  <div class="chart-caption">{{ t('pages.dashboard.inOutRatio') }}</div>
                   <div class="donut-wrap">
-                    <svg viewBox="0 0 120 120" class="donut-chart" role="img" aria-label="流入与流出流量占比">
+                    <svg
+                      viewBox="0 0 120 120"
+                      class="donut-chart"
+                      role="img"
+                      :aria-label="t('pages.dashboard.inOutAria')"
+                    >
                       <circle cx="60" cy="60" r="50" fill="none" :stroke="token.colorInfo" stroke-width="12" />
                       <circle
                         cx="60"
@@ -480,20 +511,20 @@ useVisiblePolling(() => fetchData(true), 10000)
                       />
                     </svg>
                     <div class="donut-center">
-                      <span>总流量</span>
+                      <span>{{ t('pages.dashboard.totalTraffic') }}</span>
                       <strong>{{ formatBytes(totalBytes) }}</strong>
                     </div>
                   </div>
                   <div class="donut-legend">
                     <div class="legend-item">
                       <span class="legend-dot" :style="{ backgroundColor: token.colorSuccess }" />
-                      <span class="legend-label">流入</span>
+                      <span class="legend-label">{{ t('pages.dashboard.inbound') }}</span>
                       <span class="legend-value">{{ formatBytes(totals.in) }}</span>
                       <span class="legend-percent">{{ formatPercent(inPercent) }}</span>
                     </div>
                     <div class="legend-item">
                       <span class="legend-dot" :style="{ backgroundColor: token.colorInfo }" />
-                      <span class="legend-label">流出</span>
+                      <span class="legend-label">{{ t('pages.dashboard.outbound') }}</span>
                       <span class="legend-value">{{ formatBytes(totals.out) }}</span>
                       <span class="legend-percent">{{ formatPercent(outPercent) }}</span>
                     </div>
@@ -501,7 +532,7 @@ useVisiblePolling(() => fetchData(true), 10000)
                 </div>
 
                 <div class="traffic-bars">
-                  <div class="chart-caption">流量 Top 5（含直连）</div>
+                  <div class="chart-caption">{{ t('pages.dashboard.top5') }}</div>
                   <div class="bar-list">
                     <div
                       v-for="(item, index) in chartRows"
@@ -512,18 +543,20 @@ useVisiblePolling(() => fetchData(true), 10000)
                       <div class="bar-head">
                         <template v-if="item.placeholder">
                           <span class="bar-name placeholder-name">
-                            {{ index === topUpstreams.length ? '未配置上游' : '空位' }}
+                            {{ index === topUpstreams.length ? t('pages.dashboard.noUpstream') : t('pages.dashboard.emptySlot') }}
                           </span>
                           <RouterLink
                             v-if="index === topUpstreams.length"
                             to="/upstreams"
                             class="bar-add"
                           >
-                            添加上游
+                            {{ t('pages.dashboard.addUpstream') }}
                           </RouterLink>
                         </template>
                         <template v-else>
-                          <span class="bar-name" :title="item.name">{{ item.name }}</span>
+                          <span class="bar-name" :title="item.name === DIRECT_NAME ? DIRECT_LABEL : item.name">
+                            {{ item.name === DIRECT_NAME ? DIRECT_LABEL : item.name }}
+                          </span>
                           <span class="bar-value">{{ formatBytes(item.total) }} · {{ formatPercent(item.ratio) }}</span>
                         </template>
                       </div>
@@ -543,13 +576,20 @@ useVisiblePolling(() => fetchData(true), 10000)
               </div>
             </template>
 
-            <a-typography-text v-else type="secondary" class="charts-empty">暂无流量数据</a-typography-text>
+            <a-typography-text v-else type="secondary" class="charts-empty">
+              {{ t('pages.dashboard.noTrafficData') }}
+            </a-typography-text>
           </template>
-          <a-empty v-else :description="traffic ? '暂无流量记录' : '流量数据加载失败'">
+          <a-empty
+            v-else
+            :description="traffic ? t('pages.dashboard.noTrafficRecord') : t('pages.dashboard.trafficLoadFailed')"
+          >
             <RouterLink v-if="traffic" to="/settings?section=quota">
-              <a-button type="primary" size="small">前往系统设置查看流量审计</a-button>
+              <a-button type="primary" size="small">{{ t('pages.dashboard.goSettings') }}</a-button>
             </RouterLink>
-            <a-button v-else type="primary" size="small" :loading="loading" @click="fetchData()">重试</a-button>
+            <a-button v-else type="primary" size="small" :loading="loading" @click="fetchData()">
+              {{ t('pages.dashboard.retry') }}
+            </a-button>
           </a-empty>
         </a-card>
       </a-col>
@@ -558,7 +598,7 @@ useVisiblePolling(() => fetchData(true), 10000)
 
   <a-modal
     :open="proxyModalOpen"
-    title="代理链接"
+    :title="t('pages.dashboard.proxyModal.title')"
     width="640px"
     :footer="null"
     @cancel="closeProxyModal"
@@ -567,32 +607,36 @@ useVisiblePolling(() => fetchData(true), 10000)
       <div class="proxy-modal-scroll">
         <div class="proxy-options">
         <div class="proxy-option">
-          <span class="proxy-label">协议</span>
+          <span class="proxy-label">{{ t('pages.dashboard.proxyModal.protocol') }}</span>
           <a-select v-model:value="proxyProtocol" :options="proxyProtocolOptions" style="width: 120px;" />
         </div>
         <div class="proxy-option">
           <a-switch v-model:checked="includeProxyCredentials" size="small" />
-          <span class="proxy-label">复制时包含账号密码</span>
+          <span class="proxy-label">{{ t('pages.dashboard.proxyModal.includeCredentials') }}</span>
         </div>
       </div>
 
       <div v-if="includeProxyCredentials" class="proxy-auth">
-        <a-input v-model:value="proxyUsername" placeholder="代理用户名" allow-clear />
+        <a-input
+          v-model:value="proxyUsername"
+          :placeholder="t('pages.dashboard.proxyModal.username')"
+          allow-clear
+        />
         <a-input-password
           v-model:value="proxyPassword"
-          placeholder="代理密码"
+          :placeholder="t('pages.dashboard.proxyModal.password')"
           autocomplete="new-password"
         />
       </div>
       <a-typography-text v-if="includeProxyCredentials" type="secondary" class="proxy-hint">
-        服务端不返回代理密码，请手动输入一次；密码只保留在当前页面，关闭弹窗后清除。
+        {{ t('pages.dashboard.proxyModal.passwordHint') }}
       </a-typography-text>
 
       <div class="proxy-section">
         <div class="proxy-section-head">
-          <span class="proxy-section-title">可用地址</span>
+          <span class="proxy-section-title">{{ t('pages.dashboard.proxyModal.available') }}</span>
           <a-typography-text type="secondary" class="proxy-section-desc">
-            已自动探测本机所有可用网卡地址，可逐条或全部复制
+            {{ t('pages.dashboard.proxyModal.availableDesc') }}
           </a-typography-text>
         </div>
 
@@ -604,40 +648,40 @@ useVisiblePolling(() => fetchData(true), 10000)
           >
             <div class="proxy-link-meta">
               <span class="proxy-address">{{ formatProxyAddress(target) }}</span>
-              <a-tag v-if="target.custom" color="blue">自定义</a-tag>
-              <a-tag v-else-if="target.loopback">本机</a-tag>
+              <a-tag v-if="target.custom" color="blue">{{ t('pages.dashboard.proxyModal.custom') }}</a-tag>
+              <a-tag v-else-if="target.loopback">{{ t('pages.dashboard.proxyModal.local') }}</a-tag>
               <a-tag v-if="target.interface_name" class="proxy-interface-tag">{{ target.interface_name }}</a-tag>
               <a-tag v-if="target.tls" color="gold">TLS</a-tag>
             </div>
             <div class="proxy-link-line">
               <span class="proxy-url">{{ buildProxyUrl(target) }}</span>
-              <a-button type="link" size="small" @click="copyProxyLink(target)">复制</a-button>
+              <a-button type="link" size="small" @click="copyProxyLink(target)">{{ t('common.copy') }}</a-button>
             </div>
           </div>
         </div>
-        <a-empty v-else description="未探测到可用地址，请先在系统设置中检查代理监听地址">
+        <a-empty v-else :description="t('pages.dashboard.proxyModal.noTargets')">
           <RouterLink to="/settings?section=basic">
-            <a-button type="primary" size="small">前往基础设置</a-button>
+            <a-button type="primary" size="small">{{ t('pages.dashboard.proxyModal.goBasic') }}</a-button>
           </RouterLink>
         </a-empty>
       </div>
 
       <div class="proxy-section">
         <div class="proxy-section-head">
-          <span class="proxy-section-title">额外地址</span>
+          <span class="proxy-section-title">{{ t('pages.dashboard.proxyModal.extra') }}</span>
           <a-typography-text type="secondary" class="proxy-section-desc">
-            可添加常用域名或公网 IP，端口沿用代理监听端口
+            {{ t('pages.dashboard.proxyModal.extraDesc') }}
           </a-typography-text>
         </div>
 
         <div class="proxy-host-form">
           <a-input
             v-model:value="proxyHostInput"
-            placeholder="例如 home.example.com 或 203.0.113.10"
+            :placeholder="t('pages.dashboard.proxyModal.hostPlaceholder')"
             allow-clear
             @keyup.enter="addProxyHost"
           />
-          <a-button @click="addProxyHost">添加</a-button>
+          <a-button @click="addProxyHost">{{ t('pages.dashboard.proxyModal.add') }}</a-button>
         </div>
 
         <div v-if="extraProxyHosts.length" class="proxy-extra-tags">
@@ -651,17 +695,19 @@ useVisiblePolling(() => fetchData(true), 10000)
           </a-tag>
         </div>
         <a-typography-text v-else type="secondary" class="proxy-empty-hint">
-          暂无额外地址
+          {{ t('pages.dashboard.proxyModal.noExtra') }}
         </a-typography-text>
       </div>
       </div>
 
       <div class="proxy-modal-footer">
-        <span class="proxy-footer-hint">共 {{ proxyTargets.length }} 个地址</span>
+        <span class="proxy-footer-hint">
+          {{ t('pages.dashboard.proxyModal.footerCount', { count: proxyTargets.length }) }}
+        </span>
         <a-space>
-          <a-button @click="closeProxyModal">关闭</a-button>
+          <a-button @click="closeProxyModal">{{ t('common.close') }}</a-button>
           <a-button type="primary" :disabled="!proxyTargets.length" @click="copyAllProxyLinks">
-            复制全部链接
+            {{ t('pages.dashboard.proxyModal.copyAll') }}
           </a-button>
         </a-space>
       </div>

@@ -1,0 +1,33 @@
+export default {
+  title: '流量审计',
+  subtitle: '按用户 / 上游 / 目标聚合最近 {days} 天的流量，每 15 秒自动刷新。',
+  searchPlaceholder: '搜索用户、上游或目标',
+  searchAria: '搜索用户、上游或目标',
+  anonymous: '匿名',
+  disabled: {
+    title: '流量审计未启用',
+    before: '未开启时不再记录新流量，已有历史数据仍会保留。请前往',
+    link: '系统设置',
+    after: '开启「流量审计」。',
+  },
+  stats: {
+    total: '总流量',
+    entries: '统计条目',
+    entriesSuffix: '条 / {count} 个用户',
+    topUser: '流量最大用户',
+    topUpstream: '流量最大上游',
+  },
+  empty: '暂无流量统计数据',
+  goSettings: '前往系统设置',
+  columns: {
+    user: '用户',
+    upstream: '上游',
+    target: '目标',
+    bytesIn: '流入',
+    bytesOut: '流出',
+    total: '合计',
+  },
+  target: '目标',
+  inOut: '流入/流出',
+  topEntry: '{name}（{size}）',
+}

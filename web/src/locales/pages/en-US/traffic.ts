@@ -1,0 +1,33 @@
+export default {
+  title: 'Traffic audit',
+  subtitle: 'Aggregated by user / upstream / target for the last {days} days, refreshed every 15 seconds.',
+  searchPlaceholder: 'Search user, upstream or target',
+  searchAria: 'Search user, upstream or target',
+  anonymous: 'Anonymous',
+  disabled: {
+    title: 'Traffic audit is off',
+    before: 'New traffic is no longer recorded, but existing history is kept. Open',
+    link: 'Settings',
+    after: 'and turn on "Traffic audit".',
+  },
+  stats: {
+    total: 'Total traffic',
+    entries: 'Entries',
+    entriesSuffix: 'entries / {count} users',
+    topUser: 'Top user by traffic',
+    topUpstream: 'Top upstream by traffic',
+  },
+  empty: 'No traffic data yet',
+  goSettings: 'Open settings',
+  columns: {
+    user: 'User',
+    upstream: 'Upstream',
+    target: 'Target',
+    bytesIn: 'In',
+    bytesOut: 'Out',
+    total: 'Total',
+  },
+  target: 'Target',
+  inOut: 'In / out',
+  topEntry: '{name} ({size})',
+}

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getVersion } from '@/api/system'
 import type { VersionInfo } from '@/types/api'
 import { formatUptime } from '@/utils/format'
+
+const { t } = useI18n()
 
 const info = ref<VersionInfo | null>(null)
 const error = ref('')
@@ -12,7 +15,7 @@ async function loadVersion() {
   try {
     info.value = await getVersion()
   } catch {
-    error.value = '无法获取版本信息'
+    error.value = t('pages.about.loadError')
   }
 }
 
@@ -22,29 +25,39 @@ onMounted(loadVersion)
 <template>
   <div class="page-header">
     <div>
-      <a-typography-title :level="4" style="margin: 0;">关于</a-typography-title>
-      <a-typography-text type="secondary">YiGate — 轻量级统一代理网关</a-typography-text>
+      <a-typography-title :level="4" style="margin: 0;">{{ t('pages.about.title') }}</a-typography-title>
+      <a-typography-text type="secondary">{{ t('pages.about.tagline') }}</a-typography-text>
     </div>
   </div>
 
   <a-alert v-if="error" type="warning" show-icon :message="error" style="margin-bottom: 16px;">
     <template #action>
-      <a-button size="small" @click="loadVersion">重试</a-button>
+      <a-button size="small" @click="loadVersion">{{ t('common.retry') }}</a-button>
     </template>
   </a-alert>
 
-  <a-descriptions title="运行版本" :column="{ xs: 1, sm: 2 }" bordered size="small">
-    <a-descriptions-item label="版本">{{ info?.version || '—' }}</a-descriptions-item>
-    <a-descriptions-item label="提交">{{ info?.commit || '—' }}</a-descriptions-item>
-    <a-descriptions-item label="构建时间">{{ info?.build_time || '—' }}</a-descriptions-item>
-    <a-descriptions-item label="Go 版本">{{ info?.go_version || '—' }}</a-descriptions-item>
-    <a-descriptions-item label="平台">{{ info?.platform || '—' }}</a-descriptions-item>
-    <a-descriptions-item label="运行时长">{{ formatUptime(info?.uptime_seconds || 0) }}</a-descriptions-item>
+  <a-descriptions :title="t('pages.about.versionTitle')" :column="{ xs: 1, sm: 2 }" bordered size="small">
+    <a-descriptions-item :label="t('pages.about.fields.version')">{{ info?.version || '—' }}</a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.fields.commit')">{{ info?.commit || '—' }}</a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.fields.buildTime')">
+      {{ info?.build_time || '—' }}
+    </a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.fields.goVersion')">{{ info?.go_version || '—' }}</a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.fields.platform')">{{ info?.platform || '—' }}</a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.fields.uptime')">
+      {{ formatUptime(info?.uptime_seconds || 0) }}
+    </a-descriptions-item>
   </a-descriptions>
 
-  <a-descriptions title="项目信息" :column="1" bordered size="small" style="margin-top: 24px;">
-    <a-descriptions-item label="技术栈">Go + Vue 3 + antdv-next</a-descriptions-item>
-    <a-descriptions-item label="协议支持">HTTP / HTTPS CONNECT / SOCKS5 / SOCKS5H</a-descriptions-item>
-    <a-descriptions-item label="管理能力">上游、路由规则、用户、流量审计与全局设置</a-descriptions-item>
+  <a-descriptions :title="t('pages.about.projectTitle')" :column="1" bordered size="small" style="margin-top: 24px;">
+    <a-descriptions-item :label="t('pages.about.project.stack')">
+      {{ t('pages.about.project.stackValue') }}
+    </a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.project.protocols')">
+      {{ t('pages.about.project.protocolsValue') }}
+    </a-descriptions-item>
+    <a-descriptions-item :label="t('pages.about.project.capabilities')">
+      {{ t('pages.about.project.capabilitiesValue') }}
+    </a-descriptions-item>
   </a-descriptions>
 </template>

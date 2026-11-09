@@ -1,3 +1,5 @@
+import { i18n } from '@/locales'
+
 /** 后端管理接口的错误响应体（字段名与 main/proxy 的 JSON 输出一致）。 */
 export interface ApiErrorBody {
   error?: string
@@ -12,7 +14,11 @@ export class ApiError extends Error {
   readonly detail: string
 
   constructor(status: number, body?: ApiErrorBody | null, fallback?: string) {
-    const detail = body?.error || body?.status || fallback || `请求错误 (${status})`
+    const detail =
+      body?.error ||
+      body?.status ||
+      fallback ||
+      i18n.global.t('common.requestErrorStatus', { status })
     super(detail)
     this.name = 'ApiError'
     this.status = status

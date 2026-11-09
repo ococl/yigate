@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import { copyText } from '@/utils/clipboard'
+
+const { t } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -14,10 +17,10 @@ const props = withDefaults(
 
 async function handleCopy() {
   if (await copyText(props.code)) {
-    message.success('已复制')
+    message.success(t('common.copied'))
     return
   }
-  message.error('复制失败，请手动选择内容复制')
+  message.error(t('common.copyFailed'))
 }
 </script>
 
@@ -25,7 +28,7 @@ async function handleCopy() {
   <div class="code-block">
     <div v-if="title" class="code-block-header">
       <span>{{ title }}</span>
-      <a-button v-if="copyable" type="link" size="small" @click="handleCopy">复制</a-button>
+      <a-button v-if="copyable" type="link" size="small" @click="handleCopy">{{ t('common.copy') }}</a-button>
     </div>
     <pre><code><slot>{{ code }}</slot></code></pre>
   </div>

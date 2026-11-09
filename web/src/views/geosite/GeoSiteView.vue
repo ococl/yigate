@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import axios from 'axios'
 import { generateGeoSiteSyncToken, getGeoSiteInfo, getGeoSiteSyncToken, updateGeoSite } from '@/api/geosite'
@@ -9,6 +10,8 @@ import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/datetime'
 import { formatBytes } from '@/utils/format'
 import type { GeoSiteInfo, SettingsPatch } from '@/types/api'
+
+const { t } = useI18n()
 
 const info = ref<GeoSiteInfo | null>(null)
 // unsupported 标记当前后端没有 GeoSite 管理接口（通常是服务端版本较旧）。
@@ -50,7 +53,7 @@ const syncSnippet = computed(() => {
     '    auto_update: true',
     `    update_url: "${downloadURL.value}"`,
     '    update_interval: 24h',
-    '    update_token: "<在此填写本节点的同步令牌>"',
+    `    update_token: "${t('pages.geosite.snippetTokenPlaceholder')}"`,
   ]
   return lines.join('\n')
 })
@@ -111,7 +114,11 @@ async function fetchInfo() {
       return
     }
     loadError.value = true
-    message.error(status ? `加载 GeoSite 状态失败（${status}）` : '加载 GeoSite 状态失败，请检查后端服务')
+    message.error(
+      status
+        ? t('pages.geosite.messages.loadFailedStatus', { status })
+        : t('pages.geosite.messages.loadFailed'),
+    )
   } finally {
     loading.value = false
   }
@@ -120,7 +127,7 @@ async function fetchInfo() {
 async function handleUpdate() {
   // 更新地址是必要条件，先做前置校验，避免落到服务端 4xx/5xx。
   if (!info.value?.update_url) {
-    message.warning('请先在「更新来源」中填写更新地址并保存，再执行更新')
+    message.warning(t('pages.geosite.messages.needUrl'))
     return
   }
   updating.value = true
@@ -128,9 +135,11 @@ async function handleUpdate() {
     const result = await updateGeoSite()
     applyInfo(result.info)
     if (result.changed) {
-      message.success(`GeoSite 数据已更新至版本 ${result.info.version || '—'}`)
+      message.success(
+        t('pages.geosite.messages.updated', { version: result.info.version || '—' }),
+      )
     } else {
-      message.info('已是最新版本，无需更新')
+      message.info(t('pages.geosite.messages.upToDate'))
     }
   } catch {
     // 错误提示由请求拦截器统一处理
@@ -142,7 +151,7 @@ async function handleUpdate() {
 function buildSourcePatch(): SettingsPatch | null {
   const form = sourceForm.value
   if (form.auto_update && form.update_interval_hours <= 0) {
-    message.warning('启用自动更新时，更新间隔必须大于 0')
+    message.warning(t('pages.geosite.messages.autoIntervalRequired'))
     return null
   }
   const patch: SettingsPatch = {
@@ -173,7 +182,7 @@ function handleRestoreDefaults() {
     update_token: '',
   }
   restoredDefaults.value = true
-  message.info('已填入默认值，点击「保存」后生效')
+  message.info(t('pages.geosite.messages.defaultsFilled'))
 }
 
 async function handleSaveSource() {
@@ -182,7 +191,7 @@ async function handleSaveSource() {
   savingSource.value = true
   try {
     await updateSettings(patch)
-    message.success('更新配置已保存并生效')
+    message.success(t('pages.geosite.messages.sourceSaved'))
     await fetchInfo()
   } catch {
     // 错误已统一提示
@@ -199,7 +208,11 @@ async function handleSaveSync() {
   try {
     await updateSettings(patch)
     await fetchInfo()
-    message.success(syncForm.value.enabled ? '下游同步已开启' : '下游同步已关闭')
+    message.success(
+      t(
+        syncForm.value.enabled ? 'pages.geosite.messages.syncEnabled' : 'pages.geosite.messages.syncDisabled',
+      ),
+    )
   } catch {
     // 错误已统一提示
   } finally {
@@ -216,7 +229,7 @@ async function handleRotateToken() {
     applyInfo(result.info)
     syncForm.value.token = result.token
     syncForm.value.enabled = enabled
-    message.success('已生成新的同步令牌，可直接复制')
+    message.success(t('pages.geosite.messages.tokenRotated'))
   } catch {
     // 错误已统一提示
   } finally {
@@ -237,7 +250,7 @@ async function copyValue(text: string, tip: string) {
     message.success(tip)
     return
   }
-  message.warning('复制失败，请手动选择复制')
+  message.warning(t('pages.geosite.messages.copyFailed'))
 }
 
 onMounted(fetchInfo)
@@ -247,20 +260,22 @@ onMounted(fetchInfo)
   <div class="page-shell geosite-view">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">GeoSite 数据</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.geosite.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          域名库版本、更新来源，以及供下游节点同步的只读数据端点。
+          {{ t('pages.geosite.subtitle') }}
         </a-typography-text>
       </div>
       <a-space>
-        <a-button :loading="loading" @click="fetchInfo">刷新</a-button>
+        <a-button :loading="loading" @click="fetchInfo">{{ t('common.refresh') }}</a-button>
         <a-popconfirm
-          title="立即从更新地址拉取最新 GeoSite 数据？"
-          ok-text="更新"
-          cancel-text="取消"
+          :title="t('pages.geosite.updateConfirm')"
+          :ok-text="t('pages.geosite.updateNow')"
+          :cancel-text="t('common.cancel')"
           @confirm="handleUpdate"
         >
-          <a-button type="primary" :loading="updating" :disabled="unsupported">立即更新</a-button>
+          <a-button type="primary" :loading="updating" :disabled="unsupported">
+            {{ t('pages.geosite.updateNow') }}
+          </a-button>
         </a-popconfirm>
       </a-space>
     </div>
@@ -270,13 +285,13 @@ onMounted(fetchInfo)
       type="error"
       show-icon
       class="geosite-alert"
-      message="当前后端未提供 GeoSite 管理接口"
-      description="请求 /api/v1/geosite 返回 404，说明所连接服务端的版本较旧。请重新构建并重启后端服务（make build），或把开发服务器代理的 VITE_API_TARGET 指向已升级的实例。"
+      :message="t('pages.geosite.unsupported.title')"
+      :description="t('pages.geosite.unsupported.description')"
     />
 
     <LoadError
       v-if="loadError && !unsupported"
-      description="无法读取 GeoSite 数据状态，请检查后端服务是否运行。"
+      :description="t('pages.geosite.loadError')"
       :retrying="loading"
       @retry="fetchInfo"
     />
@@ -285,33 +300,41 @@ onMounted(fetchInfo)
       <!-- 版本概要：横向铺开，避免占用左右分栏空间 -->
       <a-card size="small" class="summary-card">
         <a-descriptions :column="{ xs: 1, sm: 2, lg: 4 }" size="small" :colon="false">
-          <a-descriptions-item label="状态">
+          <a-descriptions-item :label="t('pages.geosite.summary.status')">
             <a-tag :color="info?.exists ? 'green' : 'red'">
-              {{ info?.exists ? '已加载' : '未找到' }}
+              {{ info?.exists ? t('pages.geosite.summary.loaded') : t('pages.geosite.summary.missing') }}
             </a-tag>
           </a-descriptions-item>
-          <a-descriptions-item label="版本">
+          <a-descriptions-item :label="t('pages.geosite.summary.version')">
             <span class="mono">{{ info?.version || '—' }}</span>
           </a-descriptions-item>
-          <a-descriptions-item label="文件大小">{{ formatBytes(info?.size || 0, '—') }}</a-descriptions-item>
-          <a-descriptions-item label="数据更新时间">{{ formatDateTime(info?.updated_at) }}</a-descriptions-item>
-          <a-descriptions-item label="上次检查">{{ formatDateTime(info?.last_checked_at) }}</a-descriptions-item>
-          <a-descriptions-item label="自动更新">{{ info?.auto_update ? '已启用' : '已关闭' }}</a-descriptions-item>
-          <a-descriptions-item label="来源" :span="2">
+          <a-descriptions-item :label="t('pages.geosite.summary.size')">
+            {{ formatBytes(info?.size || 0, '—') }}
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('pages.geosite.summary.updatedAt')">
+            {{ formatDateTime(info?.updated_at) }}
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('pages.geosite.summary.lastChecked')">
+            {{ formatDateTime(info?.last_checked_at) }}
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('pages.geosite.summary.autoUpdate')">
+            {{ info?.auto_update ? t('pages.geosite.summary.enabled') : t('pages.geosite.summary.disabled') }}
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('pages.geosite.summary.source')" :span="2">
             <span class="mono ellipsis" :title="info?.source_url || ''">{{ info?.source_url || '—' }}</span>
           </a-descriptions-item>
         </a-descriptions>
         <div class="summary-foot">
           <a-typography-text type="secondary" class="mono ellipsis" :title="info?.path || ''">
-            数据路径：{{ info?.path || '—' }}
+            {{ t('pages.geosite.summary.dataPath') }}{{ info?.path || '—' }}
           </a-typography-text>
           <a-button
             size="small"
             type="link"
             :disabled="!info?.sha256"
-            @click="copyValue(info?.sha256 || '', '完整校验值已复制')"
+            @click="copyValue(info?.sha256 || '', t('pages.geosite.messages.shaCopied'))"
           >
-            复制完整 SHA-256
+            {{ t('pages.geosite.summary.copySha') }}
           </a-button>
         </div>
       </a-card>
@@ -321,97 +344,121 @@ onMounted(fetchInfo)
         type="warning"
         show-icon
         class="geosite-alert"
-        message="未找到 GeoSite 数据文件"
-        description="引用 geosite 类型规则时匹配会被跳过。可配置更新地址后点击「立即更新」，或手动放置数据文件。"
+        :message="t('pages.geosite.alerts.missingTitle')"
+        :description="t('pages.geosite.alerts.missingDescription')"
       />
       <a-alert
         v-if="info?.last_error"
         type="error"
         show-icon
         class="geosite-alert"
-        message="最近一次更新失败"
+        :message="t('pages.geosite.alerts.lastErrorTitle')"
         :description="info.last_error"
       />
 
       <!-- 左右分栏：左侧更新来源，右侧下游同步 -->
       <div class="geosite-columns">
         <section class="geosite-column">
-          <a-card size="small" title="更新来源" class="column-card">
+          <a-card size="small" :title="t('pages.geosite.source.title')" class="column-card">
             <template #extra>
               <a-tag :color="info?.auto_update ? 'green' : 'default'">
-                {{ info?.auto_update ? '自动更新' : '手动更新' }}
+                {{ info?.auto_update ? t('pages.geosite.source.autoTag') : t('pages.geosite.source.manualTag') }}
               </a-tag>
             </template>
             <div class="column-scroll">
               <a-form layout="vertical">
-                <a-form-item html-for="geo-update-url" label="更新地址" tooltip="可填写官方 dlc.dat 下载地址，或其他 YiGate 节点的 /api/v1/geosite/dat">
+                <a-form-item
+                  html-for="geo-update-url"
+                  :label="t('pages.geosite.source.updateUrl')"
+                  :tooltip="t('pages.geosite.source.updateUrlTooltip')"
+                >
                   <a-input id="geo-update-url"
                     v-model:value="sourceForm.update_url"
-                    placeholder="https://..."
-                    aria-label="GeoSite 更新地址"
+                    :placeholder="t('pages.geosite.source.updateUrlPlaceholder')"
+                    :aria-label="t('pages.geosite.source.updateUrlAria')"
                   />
                 </a-form-item>
-                <a-form-item html-for="geo-update-token" label="更新令牌" tooltip="从启用了同步的 YiGate 节点拉取时，填写对方的同步令牌">
+                <a-form-item
+                  html-for="geo-update-token"
+                  :label="t('pages.geosite.source.token')"
+                  :tooltip="t('pages.geosite.source.tokenTooltip')"
+                >
                   <a-input-password id="geo-update-token"
                     v-model:value="sourceForm.update_token"
                     :placeholder="
                       restoredDefaults && info?.update_token_set
-                        ? '保存后将清除已设置的令牌'
+                        ? t('pages.geosite.source.tokenPlaceholderClear')
                         : info?.update_token_set
-                          ? '已设置，留空保持不变'
-                          : '可选，Bearer 令牌'
+                          ? t('pages.geosite.source.tokenPlaceholderSet')
+                          : t('pages.geosite.source.tokenPlaceholderEmpty')
                     "
                     autocomplete="new-password"
-                    aria-label="GeoSite 更新令牌"
+                    :aria-label="t('pages.geosite.source.tokenAria')"
                   />
                 </a-form-item>
 
                 <div class="field-row">
                   <div class="field-block">
-                    <a-form-item html-for="geo-auto-update" label="自动更新">
-                      <a-switch id="geo-auto-update" v-model:checked="sourceForm.auto_update" aria-label="自动更新" />
+                    <a-form-item html-for="geo-auto-update" :label="t('pages.geosite.source.autoUpdate')">
+                      <a-switch
+                        id="geo-auto-update"
+                        v-model:checked="sourceForm.auto_update"
+                        :aria-label="t('pages.geosite.source.autoUpdateAria')"
+                      />
                     </a-form-item>
                   </div>
                   <div class="field-block">
-                    <a-form-item html-for="geo-update-interval-hours" label="间隔（小时）">
+                    <a-form-item html-for="geo-update-interval-hours" :label="t('pages.geosite.source.interval')">
                       <a-input-number id="geo-update-interval-hours"
                         v-model:value="sourceForm.update_interval_hours"
                         :min="1"
                         :max="8760"
                         style="width: 100%;"
-                        aria-label="自动更新间隔（小时）"
+                        :aria-label="t('pages.geosite.source.intervalAria')"
                       />
                     </a-form-item>
                   </div>
                 </div>
 
                 <a-form-item html-for="geo-use-upstream"
-                  label="通过上游代理下载"
-                  tooltip="优先使用已配置且可用的上游代理，全部失败后回退直连；网络正常时可关闭"
+                  :label="t('pages.geosite.source.useUpstream')"
+                  :tooltip="t('pages.geosite.source.useUpstreamTooltip')"
                 >
-                  <a-switch id="geo-use-upstream" v-model:checked="sourceForm.use_upstream" aria-label="通过上游代理下载" />
+                  <a-switch
+                    id="geo-use-upstream"
+                    v-model:checked="sourceForm.use_upstream"
+                    :aria-label="t('pages.geosite.source.useUpstreamAria')"
+                  />
                   <a-typography-text type="secondary" class="foot-hint" style="margin-left: 8px;">
-                    {{ sourceForm.use_upstream ? '优先走上游' : '始终直连' }}
+                    {{
+                      sourceForm.use_upstream
+                        ? t('pages.geosite.source.useUpstreamOn')
+                        : t('pages.geosite.source.useUpstreamOff')
+                    }}
                   </a-typography-text>
                 </a-form-item>
               </a-form>
             </div>
             <div class="column-foot">
-              <a-typography-text type="secondary" class="foot-hint">保存后立即热加载</a-typography-text>
+              <a-typography-text type="secondary" class="foot-hint">
+                {{ t('pages.geosite.source.hotReloadHint') }}
+              </a-typography-text>
               <a-space>
-                <a-button :disabled="loading" @click="fetchInfo">还原</a-button>
-                <a-button @click="handleRestoreDefaults">恢复默认</a-button>
-                <a-button type="primary" :loading="savingSource" @click="handleSaveSource">保存</a-button>
+                <a-button :disabled="loading" @click="fetchInfo">{{ t('pages.geosite.source.restore') }}</a-button>
+                <a-button @click="handleRestoreDefaults">{{ t('pages.geosite.source.restoreDefaults') }}</a-button>
+                <a-button type="primary" :loading="savingSource" @click="handleSaveSource">
+                  {{ t('pages.geosite.source.save') }}
+                </a-button>
               </a-space>
             </div>
           </a-card>
         </section>
 
         <section class="geosite-column">
-          <a-card size="small" title="下游节点同步" class="column-card">
+          <a-card size="small" :title="t('pages.geosite.sync.title')" class="column-card">
             <template #extra>
               <a-tag :color="info?.sync_enabled ? 'green' : 'default'">
-                {{ info?.sync_enabled ? '已开启' : '未开启' }}
+                {{ info?.sync_enabled ? t('pages.geosite.sync.on') : t('pages.geosite.sync.off') }}
               </a-tag>
             </template>
             <div class="column-scroll">
@@ -419,63 +466,83 @@ onMounted(fetchInfo)
                 type="info"
                 show-icon
                 class="sync-tip"
-                message="只读同步"
-                description="下游使用同步令牌下载数据；响应带 ETag 与 X-GeoSite-Version，数据未变时返回 304，不重复传输。该令牌不能修改配置或触发更新。"
+                :message="t('pages.geosite.sync.tipTitle')"
+                :description="t('pages.geosite.sync.tipDescription')"
               />
 
               <a-form layout="vertical">
-                <a-form-item html-for="geo-enabled" label="允许下游同步">
+                <a-form-item html-for="geo-enabled" :label="t('pages.geosite.sync.allowLabel')">
                   <a-switch id="geo-enabled"
                     v-model:checked="syncForm.enabled"
-                    aria-label="允许下游同步"
+                    :aria-label="t('pages.geosite.sync.allowAria')"
                     @change="handleSyncToggle"
                   />
                 </a-form-item>
                 <a-form-item
-                  label="同步令牌"
-                  tooltip="由系统随机生成，仅授予读取 GeoSite 数据的权限；默认掩码显示，可复制后填入下游配置"
+                  :label="t('pages.geosite.sync.tokenLabel')"
+                  :tooltip="t('pages.geosite.sync.tokenTooltip')"
                 >
                   <div class="token-row">
                     <a-input-password
                       :value="syncForm.token"
                       readonly
-                      :placeholder="loading && info?.sync_token_set ? '正在加载…' : '尚未生成'"
-                      aria-label="GeoSite 同步令牌"
+                      :placeholder="
+                        loading && info?.sync_token_set
+                          ? t('pages.geosite.sync.tokenLoading')
+                          : t('pages.geosite.sync.tokenEmpty')
+                      "
+                      :aria-label="t('pages.geosite.sync.tokenAria')"
                     />
                     <a-button
                       :disabled="!syncForm.token"
-                      @click="copyValue(syncForm.token, '同步令牌已复制')"
+                      @click="copyValue(syncForm.token, t('pages.geosite.messages.syncTokenCopied'))"
                     >
-                      复制
+                      {{ t('pages.geosite.sync.copy') }}
                     </a-button>
                     <a-button :loading="rotating" @click="handleRotateToken">
-                      重新生成
+                      {{ t('pages.geosite.sync.regenerate') }}
                     </a-button>
                   </div>
                 </a-form-item>
               </a-form>
 
               <a-descriptions :column="1" size="small" bordered class="sync-endpoint">
-                <a-descriptions-item label="下载地址">
+                <a-descriptions-item :label="t('pages.geosite.sync.endpointDownload')">
                   <div class="copy-line">
                     <span class="mono ellipsis" :title="downloadURL">{{ downloadURL }}</span>
-                    <a-button type="link" size="small" @click="copyValue(downloadURL, '下载地址已复制')">复制</a-button>
+                    <a-button
+                      type="link"
+                      size="small"
+                      @click="copyValue(downloadURL, t('pages.geosite.messages.downloadUrlCopied'))"
+                    >
+                      {{ t('pages.geosite.sync.copy') }}
+                    </a-button>
                   </div>
                 </a-descriptions-item>
-                <a-descriptions-item label="当前版本">
+                <a-descriptions-item :label="t('pages.geosite.sync.endpointVersion')">
                   <span class="mono">{{ info?.version || '—' }}</span>
                 </a-descriptions-item>
               </a-descriptions>
 
               <div class="snippet-title">
-                <a-typography-text strong>下游接入配置</a-typography-text>
-                <a-button type="link" size="small" @click="copyValue(syncSnippet, '下游配置片段已复制')">复制</a-button>
+                <a-typography-text strong>{{ t('pages.geosite.sync.snippetTitle') }}</a-typography-text>
+                <a-button
+                  type="link"
+                  size="small"
+                  @click="copyValue(syncSnippet, t('pages.geosite.messages.snippetCopied'))"
+                >
+                  {{ t('pages.geosite.sync.copy') }}
+                </a-button>
               </div>
               <pre class="snippet">{{ syncSnippet }}</pre>
             </div>
             <div class="column-foot">
-              <a-typography-text type="secondary" class="foot-hint">关闭后端点仅接受管理令牌</a-typography-text>
-              <a-button type="primary" :loading="savingSync" @click="handleSaveSync">保存</a-button>
+              <a-typography-text type="secondary" class="foot-hint">
+                {{ t('pages.geosite.sync.footHint') }}
+              </a-typography-text>
+              <a-button type="primary" :loading="savingSync" @click="handleSaveSync">
+                {{ t('pages.geosite.sync.save') }}
+              </a-button>
             </div>
           </a-card>
         </section>

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
 withDefaults(
   defineProps<{
     /** 失败原因提示，留空时使用通用文案 */
@@ -16,11 +20,11 @@ const emit = defineEmits<{ retry: [] }>()
   <a-result
     class="load-error"
     status="warning"
-    title="数据加载失败"
-    :sub-title="description || '请检查后端服务是否运行，然后重试。'"
+    :title="t('common.loadFailed')"
+    :sub-title="description || t('common.loadFailedHint')"
   >
     <template #extra>
-      <a-button type="primary" :loading="retrying" @click="emit('retry')">重试</a-button>
+      <a-button type="primary" :loading="retrying" @click="emit('retry')">{{ t('common.retry') }}</a-button>
     </template>
   </a-result>
 </template>

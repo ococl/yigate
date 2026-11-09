@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
@@ -17,6 +18,7 @@ import {
 import { listUpstreams } from '@/api/upstreams'
 import type { RuleInfo, RuleRequest } from '@/types/api'
 
+const { t } = useI18n()
 const isMobile = useIsMobile()
 const dataSource = ref<RuleInfo[]>([])
 const upstreamOptions = ref<{ label: string; value: string }[]>([])
@@ -58,23 +60,23 @@ const form = ref<RuleRequest>({
 const valuesText = ref('')
 watch(valuesText, () => resetFieldErrors())
 
-const typeOptions = [
-  { label: 'domain（精确域名）', value: 'domain' },
-  { label: 'domain_suffix（域名后缀）', value: 'domain_suffix' },
-  { label: 'domain_keyword（域名关键字）', value: 'domain_keyword' },
-  { label: 'domain_regex（域名正则）', value: 'domain_regex' },
-  { label: 'ip_cidr（IP 网段）', value: 'ip_cidr' },
-  { label: 'geosite（GeoSite 分类）', value: 'geosite' },
-  { label: 'match（兜底匹配）', value: 'match' },
-]
-const actionOptions = [
-  { label: 'proxy（仅走上游）', value: 'proxy' },
-  { label: 'direct（仅直连）', value: 'direct' },
-  { label: 'proxy_first（代理优先，失败再直连）', value: 'proxy_first' },
-  { label: 'direct_first（直连优先，失败再代理）', value: 'direct_first' },
-  { label: 'auto（按全局 auto_mode 判断）', value: 'auto' },
-  { label: 'deny（拒绝）', value: 'deny' },
-]
+const typeOptions = computed(() => [
+  { label: t('pages.rules.typeOptions.domain'), value: 'domain' },
+  { label: t('pages.rules.typeOptions.domainSuffix'), value: 'domain_suffix' },
+  { label: t('pages.rules.typeOptions.domainKeyword'), value: 'domain_keyword' },
+  { label: t('pages.rules.typeOptions.domainRegex'), value: 'domain_regex' },
+  { label: t('pages.rules.typeOptions.ipCidr'), value: 'ip_cidr' },
+  { label: t('pages.rules.typeOptions.geosite'), value: 'geosite' },
+  { label: t('pages.rules.typeOptions.match'), value: 'match' },
+])
+const actionOptions = computed(() => [
+  { label: t('pages.rules.actionOptions.proxy'), value: 'proxy' },
+  { label: t('pages.rules.actionOptions.direct'), value: 'direct' },
+  { label: t('pages.rules.actionOptions.proxyFirst'), value: 'proxy_first' },
+  { label: t('pages.rules.actionOptions.directFirst'), value: 'direct_first' },
+  { label: t('pages.rules.actionOptions.auto'), value: 'auto' },
+  { label: t('pages.rules.actionOptions.deny'), value: 'deny' },
+])
 
 const needsValues = computed(() => form.value.type !== 'match')
 const needsUpstreams = computed(() => form.value.action !== 'direct' && form.value.action !== 'deny')
@@ -97,15 +99,15 @@ const mobileItems = computed(() =>
   dataSource.value.slice((mobilePage.value - 1) * MOBILE_PAGE_SIZE, mobilePage.value * MOBILE_PAGE_SIZE),
 )
 
-const columns = [
-  { title: '顺序', dataIndex: 'index', key: 'index', width: 70 },
-  { title: '启用', key: 'enabled', width: 80 },
-  { title: '类型', dataIndex: 'type', key: 'type', width: 150 },
-  { title: '值', dataIndex: 'values', key: 'values', ellipsis: true },
-  { title: '动作', dataIndex: 'action', key: 'action', width: 100 },
-  { title: '上游', dataIndex: 'upstreams', key: 'upstreams', width: 220 },
-  { title: '操作', key: 'operations', width: 230, fixed: 'right' as const },
-]
+const columns = computed(() => [
+  { title: t('pages.rules.columns.index'), dataIndex: 'index', key: 'index', width: 70 },
+  { title: t('pages.rules.columns.enabled'), key: 'enabled', width: 80 },
+  { title: t('pages.rules.columns.type'), dataIndex: 'type', key: 'type', width: 150 },
+  { title: t('pages.rules.columns.values'), dataIndex: 'values', key: 'values', ellipsis: true },
+  { title: t('pages.rules.columns.action'), dataIndex: 'action', key: 'action', width: 100 },
+  { title: t('pages.rules.columns.upstreams'), dataIndex: 'upstreams', key: 'upstreams', width: 220 },
+  { title: t('pages.rules.columns.operations'), key: 'operations', width: 230, fixed: 'right' as const },
+])
 
 // 删除/重排后页码可能越界，会停在空页；越界时回落到最后一页，其余情况保留当前页
 function clampPages() {
@@ -120,10 +122,10 @@ function clampPages() {
 
 type RuleViewMode = 'visual' | 'text'
 const viewMode = ref<RuleViewMode>('visual')
-const viewModeOptions = [
-  { label: '可视化', value: 'visual' },
-  { label: '文本', value: 'text' },
-]
+const viewModeOptions = computed(() => [
+  { label: t('pages.rules.viewVisual'), value: 'visual' },
+  { label: t('pages.rules.viewText'), value: 'text' },
+])
 const rulesText = ref('')
 // 已保存文本快照，用于判断是否有未保存修改
 const savedText = ref('')
@@ -229,13 +231,16 @@ function parseRulesText(text: string): { rules: RuleRequest[]; issues: TextRuleI
     const disabled = line.startsWith('!')
     if (disabled) line = line.slice(1).trim()
     if (!line) {
-      issues.push({ line: lineNo, message: '! 后面缺少规则内容' })
+      issues.push({ line: lineNo, message: t('pages.rules.issues.emptyAfterBang') })
       return
     }
     const parts = splitEscaped(line, ',')
     const type = normalizeRuleType(parts[0] || '')
     if (!type) {
-      issues.push({ line: lineNo, message: `未知类型 "${(parts[0] || '').trim()}"` })
+      issues.push({
+        line: lineNo,
+        message: t('pages.rules.issues.unknownType', { type: (parts[0] || '').trim() }),
+      })
       return
     }
     let actionIndex = -1
@@ -252,12 +257,12 @@ function parseRulesText(text: string): { rules: RuleRequest[]; issues: TextRuleI
         rules.push({ type, values: [], action: shorthand, upstreams: [], disabled })
         return
       }
-      issues.push({ line: lineNo, message: '缺少动作（如 direct / proxy / auto / deny）' })
+      issues.push({ line: lineNo, message: t('pages.rules.issues.missingAction') })
       return
     }
     const action = normalizeRuleAction(parts[actionIndex])
     if (type === 'match' && action === 'deny') {
-      issues.push({ line: lineNo, message: 'match 类型不能使用 deny 动作' })
+      issues.push({ line: lineNo, message: t('pages.rules.issues.matchDeny') })
       return
     }
     const rawValues = parts.slice(1, actionIndex).join(',')
@@ -268,7 +273,7 @@ function parseRulesText(text: string): { rules: RuleRequest[]; issues: TextRuleI
             .map((v) => v.trim())
             .filter((v) => v !== '' && v !== '-')
     if (type !== 'match' && values.length === 0) {
-      issues.push({ line: lineNo, message: `类型 ${type} 至少需要一个匹配值` })
+      issues.push({ line: lineNo, message: t('pages.rules.issues.needValues', { type }) })
       return
     }
     const rawUpstreams = parts.slice(actionIndex + 1).join(',')
@@ -297,10 +302,10 @@ function onViewModeChange(next: string | number) {
   if (mode === viewMode.value) return
   if (mode === 'visual' && textDirty.value) {
     Modal.confirm({
-      title: '放弃文本修改？',
-      content: '文本视图中有未保存的修改，切换到可视化视图会丢弃这些修改。',
-      okText: '放弃修改',
-      cancelText: '继续编辑',
+      title: t('pages.rules.messages.discardTitle'),
+      content: t('pages.rules.messages.discardContent'),
+      okText: t('pages.rules.messages.discardOk'),
+      cancelText: t('pages.rules.messages.keepEditing'),
       onOk: () => {
         viewMode.value = 'visual'
       },
@@ -313,7 +318,7 @@ function onViewModeChange(next: string | number) {
 
 async function saveRulesText() {
   if (textIssues.value.length > 0) {
-    message.error(`还有 ${textIssues.value.length} 处格式问题，请先修正`)
+    message.error(t('pages.rules.messages.fixIssues', { count: textIssues.value.length }))
     return
   }
   const rules = parsedText.value.rules
@@ -321,7 +326,7 @@ async function saveRulesText() {
     textSaving.value = true
     try {
       await replaceRules(rules)
-      message.success(`已保存 ${rules.length} 条规则`)
+      message.success(t('pages.rules.messages.saved', { count: rules.length }))
       await fetchData()
       loadRulesIntoText()
     } catch {
@@ -332,11 +337,11 @@ async function saveRulesText() {
   }
   if (rules.length === 0) {
     Modal.confirm({
-      title: '清空全部路由规则？',
-      content: '保存后会删除所有路由规则，未命中的请求将按全局 final 动作处理。',
-      okText: '清空',
+      title: t('pages.rules.messages.clearTitle'),
+      content: t('pages.rules.messages.clearContent'),
+      okText: t('pages.rules.messages.clearOk'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('common.cancel'),
       onOk: submit,
     })
     return
@@ -346,7 +351,7 @@ async function saveRulesText() {
 
 function formatTextNow() {
   if (textIssues.value.length > 0) {
-    message.warning('请先修正格式问题再格式化')
+    message.warning(t('pages.rules.messages.formatFirst'))
     return
   }
   rulesText.value = formatRulesText(parsedText.value.rules)
@@ -403,9 +408,9 @@ function syncValues(value?: string | number) {
 
 async function handleSubmit() {
   resetFieldErrors()
-  if (!form.value.type) fieldErrors.type = '请选择规则类型'
+  if (!form.value.type) fieldErrors.type = t('pages.rules.messages.typeRequired')
   if (needsValues.value && form.value.values.length === 0) {
-    fieldErrors.values = '请输入至少一个匹配值'
+    fieldErrors.values = t('pages.rules.messages.valuesRequired')
   }
   if (Object.keys(fieldErrors).length > 0) return
   // proxy 动作未指定上游时表示使用全部可用上游，无需强制选择
@@ -422,10 +427,10 @@ async function handleSubmit() {
   try {
     if (isEdit.value) {
       await updateRule(editingIndex.value, payload)
-      message.success('更新成功')
+      message.success(t('pages.rules.messages.updated'))
     } else {
       await addRule(payload)
-      message.success('添加成功')
+      message.success(t('pages.rules.messages.added'))
     }
     modalVisible.value = false
     await fetchData()
@@ -487,7 +492,7 @@ async function handleDelete(index: number) {
   deleting.value = index
   try {
     await deleteRule(index)
-    message.success('删除成功')
+    message.success(t('pages.rules.messages.deleted'))
     await fetchData()
   } catch {
     // 错误已由拦截器处理
@@ -527,11 +532,19 @@ async function handleBulkDelete() {
     await fetchData()
     const failed = res.failed ?? []
     if (failed.length === 0) {
-      message.success(`已删除 ${res.deleted.length} 条规则`)
+      message.success(t('pages.rules.messages.deletedCount', { count: res.deleted.length }))
       return
     }
-    const names = failed.map((item) => `第 ${Number(item.target) + 1} 条`).join('、')
-    message.warning(`已删除 ${res.deleted.length} 条，失败 ${failed.length} 条：${names}`)
+    const names = failed
+      .map((item) => t('pages.rules.messages.itemLabel', { index: Number(item.target) + 1 }))
+      .join(t('pages.rules.messages.listSeparator'))
+    message.warning(
+      t('pages.rules.messages.deletedPartial', {
+        deleted: res.deleted.length,
+        failed: failed.length,
+        names,
+      }),
+    )
   } catch {
     // 整体失败（网络/500）已由请求层提示，保留当前选择
   } finally {
@@ -551,7 +564,7 @@ async function handleToggle(record: RuleInfo, enabled: boolean) {
       upstreams: [...(record.upstreams || [])],
       disabled: !enabled,
     })
-    message.success(enabled ? '已启用' : '已禁用')
+    message.success(enabled ? t('pages.rules.messages.enabled') : t('pages.rules.messages.disabled'))
     await fetchData()
   } catch {
     // 错误已由拦截器处理
@@ -564,18 +577,29 @@ async function handleBulkToggle(disabled: boolean) {
   if (bulkToggling.value || selectedRowKeys.value.length === 0) return
   bulkToggling.value = true
   const targets = [...selectedRowKeys.value]
-  const label = disabled ? '禁用' : '启用'
+  const label = disabled
+    ? t('pages.rules.messages.toggleActionDisable')
+    : t('pages.rules.messages.toggleActionEnable')
   try {
     const res = await batchToggleRules(targets, disabled)
     selectedRowKeys.value = []
     await fetchData()
     const failed = res.failed ?? []
     if (failed.length === 0) {
-      message.success(`已${label} ${res.updated.length} 条规则`)
+      message.success(t('pages.rules.messages.toggledCount', { action: label, count: res.updated.length }))
       return
     }
-    const names = failed.map((item) => `第 ${Number(item.target) + 1} 条`).join('、')
-    message.warning(`已${label} ${res.updated.length} 条，失败 ${failed.length} 条：${names}`)
+    const names = failed
+      .map((item) => t('pages.rules.messages.itemLabel', { index: Number(item.target) + 1 }))
+      .join(t('pages.rules.messages.listSeparator'))
+    message.warning(
+      t('pages.rules.messages.toggledPartial', {
+        action: label,
+        count: res.updated.length,
+        failed: failed.length,
+        names,
+      }),
+    )
   } catch {
     // 整体失败已由请求层提示，保留当前选择
   } finally {
@@ -590,9 +614,9 @@ onMounted(fetchData)
   <div class="page-shell">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">路由规则</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.rules.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          规则自上而下匹配，命中即停止；顺序会影响最终路由结果。
+          {{ t('pages.rules.subtitle') }}
         </a-typography-text>
       </div>
       <a-space wrap>
@@ -603,8 +627,10 @@ onMounted(fetchData)
           :options="viewModeOptions"
           @update:value="onViewModeChange"
         />
-        <a-button @click="fetchData" :loading="loading">刷新</a-button>
-        <a-button v-if="viewMode === 'visual'" type="primary" @click="openAddModal">新增规则</a-button>
+        <a-button @click="fetchData" :loading="loading">{{ t('common.refresh') }}</a-button>
+        <a-button v-if="viewMode === 'visual'" type="primary" @click="openAddModal">
+          {{ t('pages.rules.addRule') }}
+        </a-button>
       </a-space>
     </div>
 
@@ -613,8 +639,8 @@ onMounted(fetchData)
         <a-alert
           type="info"
           show-icon
-          message="每行一条规则：类型,匹配值1|匹配值2,动作[,上游1|上游2]"
-          description="动作为 direct / proxy / direct_first / proxy_first / auto / deny；行首 ! 表示禁用（保留规则但不参与匹配）；整行以 # 开头为注释；兼容 Clash 写法（DOMAIN-SUFFIX / PROXY / REJECT）；匹配值含逗号或竖线时用反斜杠转义。"
+          :message="t('pages.rules.text.message')"
+          :description="t('pages.rules.text.description')"
         />
         <a-textarea
           v-model:value="rulesText"
@@ -627,32 +653,37 @@ onMounted(fetchData)
           v-if="textIssues.length > 0"
           type="error"
           show-icon
-          :message="`${textIssues.length} 处格式问题`"
+          :message="t('pages.rules.text.issues', { count: textIssues.length })"
         >
           <template #description>
             <ul class="text-issues">
               <li v-for="issue in textIssues" :key="`${issue.line}-${issue.message}`">
-                第 {{ issue.line }} 行：{{ issue.message }}
+                {{ t('pages.rules.text.issueLine', { line: issue.line, message: issue.message }) }}
               </li>
             </ul>
           </template>
         </a-alert>
         <div class="text-actions">
           <a-space wrap>
-            <a-button @click="loadRulesIntoText" :disabled="textSaving">重置</a-button>
-            <a-button @click="formatTextNow" :disabled="textSaving">格式化</a-button>
+            <a-button @click="loadRulesIntoText" :disabled="textSaving">
+              {{ t('pages.rules.text.reset') }}
+            </a-button>
+            <a-button @click="formatTextNow" :disabled="textSaving">
+              {{ t('pages.rules.text.format') }}
+            </a-button>
             <a-button
               type="primary"
               :loading="textSaving"
               :disabled="textIssues.length > 0"
               @click="saveRulesText"
             >
-              保存规则
+              {{ t('pages.rules.text.save') }}
             </a-button>
           </a-space>
           <span class="muted">
-            {{ parsedText.rules.length }} 条规则{{ disabledCount > 0 ? ` · ${disabledCount} 条已禁用` : ''
-            }}{{ textDirty ? ' · 有未保存修改' : '' }}
+            {{ t('pages.rules.text.summary', { count: parsedText.rules.length })
+            }}{{ disabledCount > 0 ? t('pages.rules.text.disabledSuffix', { count: disabledCount }) : ''
+            }}{{ textDirty ? t('pages.rules.text.dirtySuffix') : '' }}
           </span>
         </div>
       </div>
@@ -660,8 +691,8 @@ onMounted(fetchData)
       <div v-else-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
-        <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理">
-          <a-button type="primary" @click="openAddModal">新增规则</a-button>
+        <a-empty v-else-if="dataSource.length === 0" :description="t('pages.rules.emptyDescription')">
+          <a-button type="primary" @click="openAddModal">{{ t('pages.rules.addRule') }}</a-button>
         </a-empty>
         <MobileCard
           v-for="record in mobileItems"
@@ -676,7 +707,7 @@ onMounted(fetchData)
           </template>
           <template #extra>
             <a-space size="small">
-              <a-tag v-if="record.disabled" color="default">已禁用</a-tag>
+              <a-tag v-if="record.disabled" color="default">{{ t('pages.rules.disabledTag') }}</a-tag>
               <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
               <a-switch
                 size="small"
@@ -687,13 +718,13 @@ onMounted(fetchData)
               />
             </a-space>
           </template>
-          <MobileCardRow label="匹配值">
+          <MobileCardRow :label="t('pages.rules.columns.values')">
               <a-space wrap size="small">
                 <a-tag v-for="v in record.values" :key="v">{{ v }}</a-tag>
                 <span v-if="!record.values || record.values.length === 0" class="muted">—</span>
               </a-space>
           </MobileCardRow>
-          <MobileCardRow label="上游">
+          <MobileCardRow :label="t('pages.rules.columns.upstreams')">
               <a-space wrap size="small">
                 <a-tag v-for="u in record.upstreams" :key="u" color="purple">{{ u }}</a-tag>
                 <span v-if="!record.upstreams || record.upstreams.length === 0" class="muted">—</span>
@@ -706,7 +737,7 @@ onMounted(fetchData)
               :loading="movingIndex === record.index"
               @click="handleMove(record.index, 'up')"
             >
-              上移
+              {{ t('pages.rules.moveUp') }}
             </a-button>
             <a-button
               size="small"
@@ -716,16 +747,18 @@ onMounted(fetchData)
               :loading="movingIndex === record.index"
               @click="handleMove(record.index, 'down')"
             >
-              下移
+              {{ t('pages.rules.moveDown') }}
             </a-button>
-            <a-button size="small" @click="openEditModal(record)">编辑</a-button>
+            <a-button size="small" @click="openEditModal(record)">{{ t('common.edit') }}</a-button>
             <a-popconfirm
-              title="确定删除这条规则？"
-              ok-text="删除"
-              cancel-text="取消"
+              :title="t('pages.rules.deleteConfirm')"
+              :ok-text="t('common.delete')"
+              :cancel-text="t('common.cancel')"
               @confirm="handleDelete(record.index)"
             >
-              <a-button type="link" size="small" danger :loading="deleting === record.index">删除</a-button>
+              <a-button type="link" size="small" danger :loading="deleting === record.index">
+                {{ t('common.delete') }}
+              </a-button>
             </a-popconfirm>
           </template>
         </MobileCard>
@@ -742,17 +775,23 @@ onMounted(fetchData)
 
       <div v-else class="fill-table">
         <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
-          <span>已选 {{ selectedRowKeys.length }} 项</span>
-          <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
-          <a-button size="small" :loading="bulkToggling" @click="handleBulkToggle(false)">批量启用</a-button>
-          <a-button size="small" :loading="bulkToggling" @click="handleBulkToggle(true)">批量禁用</a-button>
+          <span>{{ t('common.selected', { count: selectedRowKeys.length }) }}</span>
+          <a-button size="small" type="text" @click="selectedRowKeys = []">
+            {{ t('common.clearSelection') }}
+          </a-button>
+          <a-button size="small" :loading="bulkToggling" @click="handleBulkToggle(false)">
+            {{ t('pages.rules.bulkEnable') }}
+          </a-button>
+          <a-button size="small" :loading="bulkToggling" @click="handleBulkToggle(true)">
+            {{ t('pages.rules.bulkDisable') }}
+          </a-button>
           <a-popconfirm
-            :title="`确定删除选中的 ${selectedRowKeys.length} 条规则？此操作不可撤销。`"
-            ok-text="删除"
-            cancel-text="取消"
+            :title="t('pages.rules.bulkDeleteConfirm', { count: selectedRowKeys.length })"
+            :ok-text="t('common.delete')"
+            :cancel-text="t('common.cancel')"
             @confirm="handleBulkDelete"
           >
-            <a-button size="small" danger :loading="bulkDeleting">批量删除</a-button>
+            <a-button size="small" danger :loading="bulkDeleting">{{ t('pages.rules.bulkDelete') }}</a-button>
           </a-popconfirm>
         </div>
         <a-table
@@ -795,17 +834,17 @@ onMounted(fetchData)
       </template>
       <template v-else-if="column.key === 'operations'">
         <a-space>
-          <a-tooltip title="上移">
+          <a-tooltip :title="t('pages.rules.moveUp')">
             <a-button
               type="link"
               size="small"
               :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
               :loading="movingIndex === record.index"
-              aria-label="上移"
+              :aria-label="t('pages.rules.moveUp')"
               @click="handleMove(record.index, 'up')"
             >↑</a-button>
           </a-tooltip>
-          <a-tooltip title="下移">
+          <a-tooltip :title="t('pages.rules.moveDown')">
             <a-button
               type="link"
               size="small"
@@ -813,21 +852,28 @@ onMounted(fetchData)
                 record.index === dataSource.length - 1 || (movingIndex !== null && movingIndex !== record.index)
               "
               :loading="movingIndex === record.index"
-              aria-label="下移"
+              :aria-label="t('pages.rules.moveDown')"
               @click="handleMove(record.index, 'down')"
             >↓</a-button>
           </a-tooltip>
-          <a-button type="link" size="small" @click="openEditModal(record)">编辑</a-button>
-          <a-popconfirm title="确定删除此规则？" ok-text="删除" cancel-text="取消" @confirm="handleDelete(record.index)">
-            <a-button type="link" size="small" danger :loading="deleting === record.index">删除</a-button>
+          <a-button type="link" size="small" @click="openEditModal(record)">{{ t('common.edit') }}</a-button>
+          <a-popconfirm
+            :title="t('pages.rules.deleteConfirmShort')"
+            :ok-text="t('common.delete')"
+            :cancel-text="t('common.cancel')"
+            @confirm="handleDelete(record.index)"
+          >
+            <a-button type="link" size="small" danger :loading="deleting === record.index">
+              {{ t('common.delete') }}
+            </a-button>
           </a-popconfirm>
         </a-space>
       </template>
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-          <a-empty v-else description="暂无路由规则，所有请求将按全局 default_action 处理">
-            <a-button type="primary" @click="openAddModal">新增规则</a-button>
+          <a-empty v-else :description="t('pages.rules.emptyDescription')">
+            <a-button type="primary" @click="openAddModal">{{ t('pages.rules.addRule') }}</a-button>
           </a-empty>
         </template>
         </a-table>
@@ -837,10 +883,14 @@ onMounted(fetchData)
 
   <a-modal
     v-model:open="modalVisible"
-    :title="isEdit ? `编辑规则 #${editingIndex + 1}` : '新增规则'"
+    :title="
+      isEdit
+        ? t('pages.rules.editTitle', { index: editingIndex + 1 })
+        : t('pages.rules.addTitle')
+    "
     :confirm-loading="submitting"
-    :ok-text="isEdit ? '保存' : '添加'"
-    cancel-text="取消"
+    :ok-text="isEdit ? t('pages.rules.saveOk') : t('pages.rules.addOk')"
+    :cancel-text="t('common.cancel')"
     width="640px"
     @ok="handleSubmit"
   >
@@ -849,7 +899,7 @@ onMounted(fetchData)
         <a-col :xs="24" :sm="12">
           <a-form-item
             html-for="rule-type"
-            label="类型"
+            :label="t('pages.rules.form.type')"
             required
             :validate-status="fieldErrors.type ? 'error' : undefined"
             :help="fieldErrors.type"
@@ -858,7 +908,7 @@ onMounted(fetchData)
           </a-form-item>
         </a-col>
         <a-col :xs="24" :sm="12">
-          <a-form-item label="动作" required>
+          <a-form-item :label="t('pages.rules.form.action')" required>
             <a-select v-model:value="form.action" :options="actionOptions" />
           </a-form-item>
         </a-col>
@@ -867,7 +917,7 @@ onMounted(fetchData)
       <a-form-item
         v-if="needsValues"
         html-for="rule-values"
-        label="匹配值（每行一个）"
+        :label="t('pages.rules.form.valuesLabel')"
         required
         :validate-status="fieldErrors.values ? 'error' : undefined"
         :help="fieldErrors.values"
@@ -876,43 +926,51 @@ onMounted(fetchData)
           id="rule-values"
           :value="valuesText"
           :rows="5"
-          :placeholder="form.type === 'ip_cidr' ? '10.0.0.0/8\n192.168.0.0/16' : 'example.com\nexample.org'"
+          :placeholder="
+            form.type === 'ip_cidr'
+              ? t('pages.rules.form.cidrPlaceholder')
+              : t('pages.rules.form.valuesPlaceholder')
+          "
           @update:value="syncValues"
         />
         <template #extra>
-          <span v-if="form.type === 'domain_suffix'">按域名后缀匹配，example.com 会同时匹配 a.example.com。</span>
-          <span v-else-if="form.type === 'ip_cidr'">使用 CIDR 格式，例如 10.0.0.0/8，非法网段会在保存时报错。</span>
-          <span v-else-if="form.type === 'domain_regex'">使用 Go 正则语法，保存前会校验合法性。</span>
-          <span v-else-if="form.type === 'geosite'">填写 geosite 分类名，例如 cn、geolocation-!cn；需要先配置并加载 geosite.dat。</span>
-          <span v-else>每行一条，空行会被忽略。</span>
+          <span v-if="form.type === 'domain_suffix'">{{ t('pages.rules.form.hintDomainSuffix') }}</span>
+          <span v-else-if="form.type === 'ip_cidr'">{{ t('pages.rules.form.hintIpCidr') }}</span>
+          <span v-else-if="form.type === 'domain_regex'">{{ t('pages.rules.form.hintDomainRegex') }}</span>
+          <span v-else-if="form.type === 'geosite'">{{ t('pages.rules.form.hintGeosite') }}</span>
+          <span v-else>{{ t('pages.rules.form.hintDefault') }}</span>
         </template>
       </a-form-item>
 
-      <a-form-item v-else label="匹配值">
-        <a-alert type="info" show-icon message="match 类型匹配所有请求，无需填写匹配值，通常放在规则末尾作为兜底。" />
+      <a-form-item v-else :label="t('pages.rules.form.valuesNoneLabel')">
+        <a-alert type="info" show-icon :message="t('pages.rules.form.valuesNoneHint')" />
       </a-form-item>
 
-      <a-form-item html-for="rule-upstreams" v-if="needsUpstreams" label="指定上游（可多选）">
+      <a-form-item
+        html-for="rule-upstreams"
+        v-if="needsUpstreams"
+        :label="t('pages.rules.form.upstreamsLabel')"
+      >
         <a-select id="rule-upstreams"
           v-model:value="form.upstreams"
           mode="multiple"
           :options="upstreamOptions"
-          placeholder="不选择时使用全部可用上游"
+          :placeholder="t('pages.rules.form.upstreamsPlaceholder')"
           allow-clear
         />
         <template #extra>
-          proxy、proxy_first、auto 会使用这里指定的上游；不选则使用全部可用上游。direct_first 仅在回退到代理时使用。
+          {{ t('pages.rules.form.upstreamsHint') }}
         </template>
       </a-form-item>
 
-      <a-form-item label="规则状态">
+      <a-form-item :label="t('pages.rules.form.statusLabel')">
         <a-space>
           <a-switch
             :checked="form.disabled !== true"
             @change="(checked) => (form.disabled = checked !== true)"
           />
           <span class="muted">
-            {{ form.disabled ? '已禁用：保存后保留规则但不参与匹配' : '启用中：参与路由匹配' }}
+            {{ form.disabled ? t('pages.rules.form.statusDisabled') : t('pages.rules.form.statusEnabled') }}
           </span>
         </a-space>
       </a-form-item>

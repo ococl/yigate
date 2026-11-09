@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { apiGroups } from '@/data/api-docs'
 import type { InputRef } from 'antdv-next'
 import { useHotkeys } from '@/composables/useHotkeys'
 import { highlightText } from '@/utils/highlight'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
@@ -105,6 +107,18 @@ const totalEndpoints = computed(() =>
   apiGroups.reduce((sum, g) => sum + g.endpoints.length, 0),
 )
 
+const paramColumns = computed(() => [
+  { title: t('pages.apiDoc.paramColumns.name'), dataIndex: 'name', width: 120 },
+  { title: t('pages.apiDoc.paramColumns.type'), dataIndex: 'type', width: 140 },
+  { title: t('pages.apiDoc.paramColumns.required'), dataIndex: 'required', width: 60 },
+  { title: t('pages.apiDoc.paramColumns.description'), dataIndex: 'description' },
+])
+
+const statusColumns = computed(() => [
+  { title: t('pages.apiDoc.statusColumns.code'), dataIndex: 'code', width: 80 },
+  { title: t('pages.apiDoc.statusColumns.description'), dataIndex: 'description' },
+])
+
 </script>
 
 <template>
@@ -112,12 +126,12 @@ const totalEndpoints = computed(() =>
     <!-- 页面标题 -->
     <div class="page-header">
       <div class="page-header-text">
-        <a-typography-title :level="4" style="margin: 0;">API 文档</a-typography-title>
-        <a-typography-text type="secondary">YiGate 管理接口完整说明</a-typography-text>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.apiDoc.title') }}</a-typography-title>
+        <a-typography-text type="secondary">{{ t('pages.apiDoc.subtitle') }}</a-typography-text>
       </div>
       <div>
-        <a-tag color="blue">{{ totalEndpoints }} 个端点</a-tag>
-        <a-tag color="purple">{{ apiGroups.length }} 个分组</a-tag>
+        <a-tag color="blue">{{ t('pages.apiDoc.endpointCount', { count: totalEndpoints }) }}</a-tag>
+        <a-tag color="purple">{{ t('pages.apiDoc.groupCount', { count: apiGroups.length }) }}</a-tag>
       </div>
     </div>
 
@@ -126,16 +140,16 @@ const totalEndpoints = computed(() =>
       ref="searchInputRef"
       v-model:value="searchKeyword"
       class="api-docs-search"
-      placeholder="搜索端点路径、名称或描述..."
+      :placeholder="t('pages.apiDoc.searchPlaceholder')"
       allow-clear
-      aria-label="搜索端点路径、名称或描述"
+      :aria-label="t('pages.apiDoc.searchAria')"
     />
 
     <div class="api-docs-body">
       <!-- 左侧分组导航：固定宽度，保证分组名称完整显示 -->
       <aside class="api-docs-aside">
         <a-card size="small" class="group-card">
-          <template #title>接口分组</template>
+          <template #title>{{ t('pages.apiDoc.groupsTitle') }}</template>
           <a-menu
             :selected-keys="[activeGroup]"
             mode="inline"
@@ -205,7 +219,7 @@ const totalEndpoints = computed(() =>
                 <!-- 认证标记 -->
                 <a-space style="margin-bottom: 12px;">
                   <a-tag :color="endpoint.auth ? 'red' : 'green'">
-                    {{ endpoint.auth ? '需要认证' : '无需认证' }}
+                    {{ endpoint.auth ? t('pages.apiDoc.authRequired') : t('pages.apiDoc.authNotRequired') }}
                   </a-tag>
                   <a-typography-text type="secondary" v-if="endpoint.authNote">
                     {{ endpoint.authNote }}
@@ -215,23 +229,18 @@ const totalEndpoints = computed(() =>
                 <!-- 路径参数 -->
                 <template v-if="endpoint.params.length > 0">
                   <a-divider title-placement="start" plain style="margin: 8px 0;">
-                    <a-typography-text type="secondary">路径参数</a-typography-text>
+                    <a-typography-text type="secondary">{{ t('pages.apiDoc.paramsTitle') }}</a-typography-text>
                   </a-divider>
                   <a-table
                     :data-source="endpoint.params"
                     :pagination="false"
                     size="small"
-                    :columns="[
-                      { title: '参数名', dataIndex: 'name', width: 120 },
-                      { title: '类型', dataIndex: 'type', width: 140 },
-                      { title: '必填', dataIndex: 'required', width: 60 },
-                      { title: '说明', dataIndex: 'description' },
-                    ]"
+                    :columns="paramColumns"
                     :row-key="(r: any) => r.name"
                   >
                     <template #bodyCell="{ column, record }">
                       <template v-if="column.dataIndex === 'required'">
-                        {{ record.required ? '是' : '否' }}
+                        {{ record.required ? t('common.yes') : t('common.no') }}
                       </template>
                     </template>
                   </a-table>
@@ -240,29 +249,26 @@ const totalEndpoints = computed(() =>
                 <!-- 请求体 -->
                 <template v-if="endpoint.requestBody">
                   <a-divider title-placement="start" plain style="margin: 8px 0;">
-                    <a-typography-text type="secondary">请求体 (JSON)</a-typography-text>
+                    <a-typography-text type="secondary">{{ t('pages.apiDoc.requestBody') }}</a-typography-text>
                   </a-divider>
                   <CodeBlock title="Request Body" :code="endpoint.requestBody!" copyable />
                 </template>
 
                 <!-- 响应体 -->
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
-                  <a-typography-text type="secondary">响应体 (JSON)</a-typography-text>
+                  <a-typography-text type="secondary">{{ t('pages.apiDoc.responseBody') }}</a-typography-text>
                 </a-divider>
                 <CodeBlock title="Response Body" :code="endpoint.responseBody" copyable />
 
                 <!-- 状态码 -->
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
-                  <a-typography-text type="secondary">状态码</a-typography-text>
+                  <a-typography-text type="secondary">{{ t('pages.apiDoc.statusCodes') }}</a-typography-text>
                 </a-divider>
                 <a-table
                   :data-source="endpoint.statusCodes"
                   :pagination="false"
                   size="small"
-                  :columns="[
-                    { title: '状态码', dataIndex: 'code', width: 80 },
-                    { title: '说明', dataIndex: 'description' },
-                  ]"
+                  :columns="statusColumns"
                   :row-key="(r: any) => r.code"
                 >
                   <template #bodyCell="{ column, record }">
@@ -278,7 +284,7 @@ const totalEndpoints = computed(() =>
 
                 <!-- 示例 -->
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
-                  <a-typography-text type="secondary">请求示例</a-typography-text>
+                  <a-typography-text type="secondary">{{ t('pages.apiDoc.requestExample') }}</a-typography-text>
                 </a-divider>
                 <CodeBlock
                   title="cURL"
@@ -287,7 +293,7 @@ const totalEndpoints = computed(() =>
                 />
 
                 <a-divider title-placement="start" plain style="margin: 8px 0;">
-                  <a-typography-text type="secondary">响应示例</a-typography-text>
+                  <a-typography-text type="secondary">{{ t('pages.apiDoc.responseExample') }}</a-typography-text>
                 </a-divider>
                 <CodeBlock title="Response" :code="endpoint.example.response" copyable />
               </a-card>
@@ -297,10 +303,16 @@ const totalEndpoints = computed(() =>
           <!-- 无搜索结果 -->
           <a-empty
             v-if="filteredGroups.length === 0"
-            :description="searchKeyword ? `未找到匹配「${searchKeyword}」的端点` : '未找到匹配的端点'"
+            :description="
+              searchKeyword
+                ? t('pages.apiDoc.emptyWithKeyword', { keyword: searchKeyword })
+                : t('pages.apiDoc.empty')
+            "
             style="margin-top: 60px;"
           >
-            <a-button v-if="searchKeyword" size="small" @click="clearSearch">清除搜索</a-button>
+            <a-button v-if="searchKeyword" size="small" @click="clearSearch">
+              {{ t('pages.apiDoc.clearSearch') }}
+            </a-button>
           </a-empty>
         </div>
       </section>

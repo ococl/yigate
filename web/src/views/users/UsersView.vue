@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
@@ -7,6 +8,7 @@ import { useIsMobile } from '@/composables/useIsMobile'
 import { listUsers, addUser, updateUserPassword, deleteUser, batchDeleteUsers } from '@/api/users'
 import type { UserInfo } from '@/types/api'
 
+const { t } = useI18n()
 const isMobile = useIsMobile()
 const dataSource = ref<UserInfo[]>([])
 const loading = ref(true)
@@ -37,10 +39,10 @@ const form = ref({
 
 watch([() => form.value.username, () => form.value.password, resetPassword], () => resetFieldErrors())
 
-const columns = [
-  { title: '用户名', dataIndex: 'username', key: 'username' },
-  { title: '操作', key: 'action', width: 180, fixed: 'right' as const },
-]
+const columns = computed(() => [
+  { title: t('pages.users.columns.username'), dataIndex: 'username', key: 'username' },
+  { title: t('pages.users.columns.actions'), key: 'action', width: 180, fixed: 'right' as const },
+])
 
 // 桌面表格分页受控，删除后能收回越界页码
 const PAGE_SIZE = 20
@@ -89,14 +91,14 @@ function showAddModal() {
 
 async function handleSubmit() {
   resetFieldErrors()
-  if (!form.value.username.trim()) fieldErrors.username = '请输入用户名'
-  if (!form.value.password.trim()) fieldErrors.password = '请输入密码'
-  else if (form.value.password.length < 4) fieldErrors.password = '密码至少 4 位'
+  if (!form.value.username.trim()) fieldErrors.username = t('pages.users.messages.usernameRequired')
+  if (!form.value.password.trim()) fieldErrors.password = t('pages.users.messages.passwordRequired')
+  else if (form.value.password.length < 4) fieldErrors.password = t('pages.users.messages.passwordTooShort')
   if (Object.keys(fieldErrors).length > 0) return
   submitting.value = true
   try {
     await addUser({ username: form.value.username.trim(), password: form.value.password })
-    message.success('添加成功')
+    message.success(t('pages.users.messages.added'))
     modalVisible.value = false
     await fetchData()
   } catch {
@@ -115,12 +117,12 @@ function showResetModal(username: string) {
 
 async function handleResetPassword() {
   resetFieldErrors()
-  if (resetPassword.value.length < 4) fieldErrors.reset = '密码至少 4 位'
+  if (resetPassword.value.length < 4) fieldErrors.reset = t('pages.users.messages.passwordTooShort')
   if (Object.keys(fieldErrors).length > 0) return
   submitting.value = true
   try {
     await updateUserPassword(resetTarget.value, resetPassword.value)
-    message.success(`用户 ${resetTarget.value} 的密码已更新`)
+    message.success(t('pages.users.messages.passwordUpdated', { name: resetTarget.value }))
     passwordModalVisible.value = false
   } catch {
     // 错误已由拦截器处理
@@ -134,7 +136,7 @@ async function handleDelete(username: string) {
   deleting.value = username
   try {
     await deleteUser(username)
-    message.success('删除成功')
+    message.success(t('pages.users.messages.deleted'))
     await fetchData()
   } catch {
     // 错误已由拦截器处理
@@ -160,10 +162,16 @@ async function handleBulkDelete() {
     selectedRowKeys.value = failed
     await fetchData()
     if (failed.length === 0) {
-      message.success(`已删除 ${res.deleted.length} 个用户`)
+      message.success(t('pages.users.messages.deletedCount', { count: res.deleted.length }))
       return
     }
-    message.warning(`已删除 ${res.deleted.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
+    message.warning(
+      t('pages.users.messages.deletedPartial', {
+        deleted: res.deleted.length,
+        failed: failed.length,
+        names: failed.join(t('pages.users.messages.listSeparator')),
+      }),
+    )
   } catch {
     // 整体失败（网络/500）已由请求层提示，保留当前选择
   } finally {
@@ -178,14 +186,14 @@ onMounted(fetchData)
   <div class="page-shell">
     <div class="page-header">
       <div>
-        <a-typography-title :level="4" style="margin: 0;">用户管理</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.users.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          代理认证用户；修改密码后，新连接立即使用新凭证。
+          {{ t('pages.users.subtitle') }}
         </a-typography-text>
       </div>
       <a-space>
-        <a-button @click="fetchData" :loading="loading">刷新</a-button>
-        <a-button type="primary" @click="showAddModal">新增用户</a-button>
+        <a-button @click="fetchData" :loading="loading">{{ t('common.refresh') }}</a-button>
+        <a-button type="primary" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
       </a-space>
     </div>
 
@@ -195,29 +203,33 @@ onMounted(fetchData)
         type="info"
         show-icon
         style="margin-bottom: 16px;"
-        message="未配置用户时不启用代理认证；新增任意用户后，所有代理连接都必须提供用户名密码。"
-        description="多监听器模式下，新增/删除用户会同步到所有监听器。"
+        :message="t('pages.users.authNotice.message')"
+        :description="t('pages.users.authNotice.description')"
       />
 
       <div v-if="isMobile" class="mobile-list">
         <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
         <MobileListSkeleton v-else-if="loading && dataSource.length === 0" />
-        <a-empty v-else-if="dataSource.length === 0" description="暂无用户，未配置用户时表示不启用代理认证">
-          <a-button type="primary" @click="showAddModal">新增用户</a-button>
+        <a-empty v-else-if="dataSource.length === 0" :description="t('pages.users.emptyDescription')">
+          <a-button type="primary" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="record.username">
           <template #head>
             <a-typography-text strong>{{ record.username }}</a-typography-text>
           </template>
           <template #actions>
-            <a-button size="small" @click="showResetModal(record.username)">修改密码</a-button>
+            <a-button size="small" @click="showResetModal(record.username)">
+              {{ t('pages.users.changePassword') }}
+            </a-button>
             <a-popconfirm
-              title="删除后该用户将无法继续通过代理认证，确定删除？"
-              ok-text="删除"
-              cancel-text="取消"
+              :title="t('pages.users.deleteConfirm')"
+              :ok-text="t('common.delete')"
+              :cancel-text="t('common.cancel')"
               @confirm="handleDelete(record.username)"
             >
-              <a-button type="link" size="small" danger :loading="deleting === record.username">删除</a-button>
+              <a-button type="link" size="small" danger :loading="deleting === record.username">
+                {{ t('common.delete') }}
+              </a-button>
             </a-popconfirm>
           </template>
         </MobileCard>
@@ -234,15 +246,17 @@ onMounted(fetchData)
 
       <div v-else class="fill-table">
         <div v-if="selectedRowKeys.length > 0" class="bulk-bar">
-          <span>已选 {{ selectedRowKeys.length }} 项</span>
-          <a-button size="small" type="text" @click="selectedRowKeys = []">取消选择</a-button>
+          <span>{{ t('common.selected', { count: selectedRowKeys.length }) }}</span>
+          <a-button size="small" type="text" @click="selectedRowKeys = []">
+            {{ t('common.clearSelection') }}
+          </a-button>
           <a-popconfirm
-            :title="`确定删除选中的 ${selectedRowKeys.length} 个用户？此操作不可撤销。`"
-            ok-text="删除"
-            cancel-text="取消"
+            :title="t('pages.users.bulkDeleteConfirm', { count: selectedRowKeys.length })"
+            :ok-text="t('common.delete')"
+            :cancel-text="t('common.cancel')"
             @confirm="handleBulkDelete"
           >
-            <a-button size="small" danger :loading="bulkDeleting">批量删除</a-button>
+            <a-button size="small" danger :loading="bulkDeleting">{{ t('pages.users.bulkDelete') }}</a-button>
           </a-popconfirm>
         </div>
         <a-table
@@ -257,22 +271,26 @@ onMounted(fetchData)
     <template #bodyCell="{ column, record }">
       <template v-if="column.key === 'action'">
         <a-space>
-          <a-button type="link" size="small" @click="showResetModal(record.username)">修改密码</a-button>
+          <a-button type="link" size="small" @click="showResetModal(record.username)">
+            {{ t('pages.users.changePassword') }}
+          </a-button>
           <a-popconfirm
-            title="删除后该用户将无法继续通过代理认证，确定删除？"
-            ok-text="删除"
-            cancel-text="取消"
+            :title="t('pages.users.deleteConfirm')"
+            :ok-text="t('common.delete')"
+            :cancel-text="t('common.cancel')"
             @confirm="handleDelete(record.username)"
           >
-            <a-button type="link" size="small" danger :loading="deleting === record.username">删除</a-button>
+            <a-button type="link" size="small" danger :loading="deleting === record.username">
+              {{ t('common.delete') }}
+            </a-button>
           </a-popconfirm>
         </a-space>
       </template>
     </template>
         <template #emptyText>
           <LoadError v-if="loadError" :retrying="loading" @retry="fetchData" />
-          <a-empty v-else description="暂无用户，未配置用户时表示不启用代理认证">
-            <a-button type="primary" @click="showAddModal">新增用户</a-button>
+          <a-empty v-else :description="t('pages.users.emptyDescription')">
+            <a-button type="primary" @click="showAddModal">{{ t('pages.users.addUser') }}</a-button>
           </a-empty>
         </template>
         </a-table>
@@ -282,51 +300,65 @@ onMounted(fetchData)
 
   <a-modal
     v-model:open="modalVisible"
-    title="新增用户"
+    :title="t('pages.users.form.addTitle')"
     :confirm-loading="submitting"
-    ok-text="添加"
-    cancel-text="取消"
+    :ok-text="t('pages.users.form.okAdd')"
+    :cancel-text="t('common.cancel')"
     @ok="handleSubmit"
   >
     <a-form layout="vertical">
       <a-form-item
         html-for="user-username"
-        label="用户名"
+        :label="t('pages.users.form.username')"
         required
         :validate-status="fieldErrors.username ? 'error' : undefined"
         :help="fieldErrors.username"
       >
-        <a-input id="user-username" v-model:value="form.username" placeholder="用户名" />
+        <a-input
+          id="user-username"
+          v-model:value="form.username"
+          :placeholder="t('pages.users.form.usernamePlaceholder')"
+        />
       </a-form-item>
       <a-form-item
         html-for="user-password"
-        label="密码"
+        :label="t('pages.users.form.password')"
         required
         :validate-status="fieldErrors.password ? 'error' : undefined"
         :help="fieldErrors.password"
       >
-        <a-input-password id="user-password" v-model:value="form.password" placeholder="密码" autocomplete="new-password" />
+        <a-input-password
+          id="user-password"
+          v-model:value="form.password"
+          :placeholder="t('pages.users.form.passwordPlaceholder')"
+          autocomplete="new-password"
+        />
       </a-form-item>
     </a-form>
   </a-modal>
 
   <a-modal
     v-model:open="passwordModalVisible"
-    :title="`修改密码：${resetTarget}`"
+    :title="t('pages.users.form.resetTitle', { name: resetTarget })"
     :confirm-loading="submitting"
-    ok-text="保存"
-    cancel-text="取消"
+    :ok-text="t('pages.users.form.okSave')"
+    :cancel-text="t('common.cancel')"
     @ok="handleResetPassword"
   >
     <a-form layout="vertical">
       <a-form-item
         html-for="user-reset-password"
-        label="新密码"
+        :label="t('pages.users.form.newPassword')"
         required
         :validate-status="fieldErrors.reset ? 'error' : undefined"
         :help="fieldErrors.reset"
       >
-        <a-input-password id="user-reset-password" v-model:value="resetPassword" placeholder="至少 4 位" autocomplete="new-password" />
+        <a-input-password
+          id="user-reset-password"
+          v-model:value="resetPassword"
+          :placeholder="t('pages.users.form.newPasswordPlaceholder')"
+          autocomplete="new-password"
+        />
       </a-form-item>
     </a-form>
   </a-modal>

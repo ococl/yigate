@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { message } from 'antdv-next'
+import { i18n } from '@/locales'
 import { parseApiError } from './types'
 
 const TOKEN_KEY = 'yigate_token'
@@ -77,18 +78,18 @@ request.interceptors.response.use(
         if (window.location.pathname !== '/login') {
           window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
         }
-        notifyError('认证失败，请重新登录')
+        notifyError(i18n.global.t('feedback.authFailed'))
       } else if (apiError.status === 403) {
-        notifyError(apiError.detail || '无权限执行此操作')
+        notifyError(apiError.detail || i18n.global.t('feedback.forbidden'))
       } else if (apiError.status >= 500) {
-        notifyError(`服务器错误 (${apiError.status})：${apiError.detail}`)
+        notifyError(i18n.global.t('feedback.serverError', { status: apiError.status, detail: apiError.detail }))
       } else {
         notifyError(apiError.detail)
       }
     } else if (error.code === 'ECONNABORTED') {
-      notifyError('请求超时')
+      notifyError(i18n.global.t('feedback.timeout'))
     } else {
-      notifyError('网络错误，请检查后端服务是否运行')
+      notifyError(i18n.global.t('feedback.networkError'))
     }
 
     return Promise.reject(error)

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { message } from 'antdv-next'
 import { reloadConfig } from '@/api/system'
 import { getSettings, updateSettings } from '@/api/settings'
@@ -17,63 +18,35 @@ interface SettingsSection {
   group: string
 }
 
-const defaultSection: SettingsSection = {
-  key: 'basic',
-  title: '基础设置',
-  description: '监听信息、健康检查、连接上限与 SOCKS5 能力',
-  group: '基础',
-}
+const { t } = useI18n()
 
-const sections: SettingsSection[] = [
-  defaultSection,
-  {
-    key: 'panel',
-    title: '管理面板与安全',
-    description: '内置 WebUI 开关与管理令牌',
-    group: '基础',
-  },
-  {
-    key: 'routing',
-    title: '路由策略',
-    description: '兜底路由与自动探测策略',
-    group: '网络',
-  },
-  {
-    key: 'dns',
-    title: 'DNS 解析',
-    description: '解析方式、DoH/DoT、超时与 IP 优先级',
-    group: '网络',
-  },
-  {
-    key: 'timeout',
-    title: '连接与超时',
-    description: '拨号、握手、HTTP 交换与隧道空闲超时',
-    group: '网络',
-  },
-  {
-    key: 'destination',
-    title: '目标访问策略',
-    description: '默认动作与 CIDR、域名、端口黑白名单',
-    group: '访问与配额',
-  },
-  {
-    key: 'access',
-    title: '访问控制',
-    description: '客户端白名单、连接限速与单用户并发上限',
-    group: '访问与配额',
-  },
-  {
-    key: 'quota',
-    title: '流量审计与配额',
-    description: '流量审计开关、用户与上游配额',
-    group: '访问与配额',
-  },
-]
+// 章节标题与分组走翻译，切换语言后菜单与详情头同步更新
+const SECTION_DEFS = [
+  { key: 'basic', group: 'basic' },
+  { key: 'panel', group: 'basic' },
+  { key: 'routing', group: 'network' },
+  { key: 'dns', group: 'network' },
+  { key: 'timeout', group: 'network' },
+  { key: 'destination', group: 'access' },
+  { key: 'access', group: 'access' },
+  { key: 'quota', group: 'access' },
+] as const
+
+const defaultSectionKey = 'basic'
+
+const sections = computed<SettingsSection[]>(() =>
+  SECTION_DEFS.map((def) => ({
+    key: def.key,
+    group: t(`pages.settings.groups.${def.group}`),
+    title: t(`pages.settings.sections.${def.key}.title`),
+    description: t(`pages.settings.sections.${def.key}.description`),
+  })),
+)
 
 // 按 group 折叠为带标题的分组菜单
 const groupedSections = computed(() => {
   const groups: { title: string; items: SettingsSection[] }[] = []
-  for (const section of sections) {
+  for (const section of sections.value) {
     const last = groups[groups.length - 1]
     if (last && last.title === section.group) {
       last.items.push(section)
@@ -85,10 +58,12 @@ const groupedSections = computed(() => {
 })
 
 // 移动端用下拉框代替左侧分类菜单，避免固定 220px 侧栏挤压表单
-const sectionOptions = sections.map((section) => ({
-  label: section.title,
-  value: section.key,
-}))
+const sectionOptions = computed(() =>
+  sections.value.map((section) => ({
+    label: section.title,
+    value: section.key,
+  })),
+)
 
 const route = useRoute()
 const router = useRouter()
@@ -165,30 +140,30 @@ const form = ref<SettingsView>(defaultSettings())
 const denyPortsText = ref('')
 const allowPortsText = ref('')
 
-const finalOptions = [
-  { label: 'auto（按规则与探测自动决定）', value: 'auto' },
-  { label: 'proxy（默认走上游）', value: 'proxy' },
-  { label: 'direct（默认直连）', value: 'direct' },
-  { label: 'deny（拒绝未命中流量）', value: 'deny' },
-]
-const autoModeOptions = [
-  { label: 'direct_first（直连优先，失败后走上游）', value: 'direct_first' },
-  { label: 'proxy_first（上游优先，失败后直连）', value: 'proxy_first' },
-]
-const dnsTypeOptions = [
-  { label: 'system（系统 DNS）', value: 'system' },
-  { label: 'doh（DNS over HTTPS）', value: 'doh' },
-  { label: 'dot（DNS over TLS）', value: 'dot' },
-]
-const ipPrecedenceOptions = [
-  { label: 'ipv4_first（IPv4 优先）', value: 'ipv4_first' },
-  { label: 'ipv6_first（IPv6 优先）', value: 'ipv6_first' },
-  { label: 'system（跟随系统）', value: 'system' },
-]
-const destinationActionOptions = [
-  { label: 'deny（拒绝）', value: 'deny' },
-  { label: 'allow（允许）', value: 'allow' },
-]
+const finalOptions = computed(() => [
+  { label: t('pages.settings.options.final.auto'), value: 'auto' },
+  { label: t('pages.settings.options.final.proxy'), value: 'proxy' },
+  { label: t('pages.settings.options.final.direct'), value: 'direct' },
+  { label: t('pages.settings.options.final.deny'), value: 'deny' },
+])
+const autoModeOptions = computed(() => [
+  { label: t('pages.settings.options.autoMode.directFirst'), value: 'direct_first' },
+  { label: t('pages.settings.options.autoMode.proxyFirst'), value: 'proxy_first' },
+])
+const dnsTypeOptions = computed(() => [
+  { label: t('pages.settings.options.dnsType.system'), value: 'system' },
+  { label: t('pages.settings.options.dnsType.doh'), value: 'doh' },
+  { label: t('pages.settings.options.dnsType.dot'), value: 'dot' },
+])
+const ipPrecedenceOptions = computed(() => [
+  { label: t('pages.settings.options.ipPrecedence.ipv4First'), value: 'ipv4_first' },
+  { label: t('pages.settings.options.ipPrecedence.ipv6First'), value: 'ipv6_first' },
+  { label: t('pages.settings.options.ipPrecedence.system'), value: 'system' },
+])
+const destinationActionOptions = computed(() => [
+  { label: t('pages.settings.options.destinationAction.deny'), value: 'deny' },
+  { label: t('pages.settings.options.destinationAction.allow'), value: 'allow' },
+])
 const logLevelOptions = [
   { label: 'debug', value: 'debug' },
   { label: 'info', value: 'info' },
@@ -206,18 +181,18 @@ const listenList = computed(() =>
 const multiListener = computed(() => listenList.value.length > 1)
 
 function isSectionKey(value: unknown): value is string {
-  return typeof value === 'string' && sections.some((section) => section.key === value)
+  return typeof value === 'string' && sections.value.some((section) => section.key === value)
 }
 
 function resolveSectionFromRoute(): string {
   const querySection = route.query.section
   const key = Array.isArray(querySection) ? querySection[0] : querySection
-  return isSectionKey(key) ? key : defaultSection.key
+  return isSectionKey(key) ? key : defaultSectionKey
 }
 
 const activeSection = ref<string>(resolveSectionFromRoute())
 const currentSection = computed(
-  () => sections.find((section) => section.key === activeSection.value) ?? defaultSection,
+  () => sections.value.find((section) => section.key === activeSection.value) ?? sections.value[0],
 )
 
 // 章节与路由绑定：切换章节写入 ?section=xxx，刷新后可正确定位
@@ -237,7 +212,7 @@ watch(
       activeSection.value = key
       return
     }
-    activeSection.value = defaultSection.key
+    activeSection.value = defaultSectionKey
     if (key !== undefined) {
       const query = { ...route.query }
       delete query.section
@@ -284,16 +259,18 @@ function validateSettings(): SettingsFieldError[] {
 
   if (f.dns_type === 'doh') {
     const url = f.doh_url.trim()
-    if (!url) errors.push({ key: 'doh_url', section: 'dns', message: '请填写 DoH URL' })
-    else if (!/^https?:\/\/\S+$/i.test(url)) {
-      errors.push({ key: 'doh_url', section: 'dns', message: 'DoH URL 需以 http:// 或 https:// 开头' })
+    if (!url) {
+      errors.push({ key: 'doh_url', section: 'dns', message: t('pages.settings.validation.dohRequired') })
+    } else if (!/^https?:\/\/\S+$/i.test(url)) {
+      errors.push({ key: 'doh_url', section: 'dns', message: t('pages.settings.validation.dohInvalid') })
     }
   }
   if (f.dns_type === 'dot') {
     const addr = f.dot_addr.trim()
-    if (!addr) errors.push({ key: 'dot_addr', section: 'dns', message: '请填写 DoT 地址' })
-    else if (!/^[^\s:]+:\d{1,5}$/.test(addr)) {
-      errors.push({ key: 'dot_addr', section: 'dns', message: 'DoT 地址格式为 host:port，如 1.1.1.1:853' })
+    if (!addr) {
+      errors.push({ key: 'dot_addr', section: 'dns', message: t('pages.settings.validation.dotRequired') })
+    } else if (!/^[^\s:]+:\d{1,5}$/.test(addr)) {
+      errors.push({ key: 'dot_addr', section: 'dns', message: t('pages.settings.validation.dotInvalid') })
     }
   }
 
@@ -302,7 +279,7 @@ function validateSettings(): SettingsFieldError[] {
     errors.push({
       key: 'deny_ports',
       section: 'destination',
-      message: `端口需为 1-65535 的整数：${deny.invalid.join(', ')}`,
+      message: t('pages.settings.validation.portsInvalid', { ports: deny.invalid.join(', ') }),
     })
   }
   const allow = parsePorts(allowPortsText.value)
@@ -310,18 +287,22 @@ function validateSettings(): SettingsFieldError[] {
     errors.push({
       key: 'allow_ports',
       section: 'destination',
-      message: `端口需为 1-65535 的整数：${allow.invalid.join(', ')}`,
+      message: t('pages.settings.validation.portsInvalid', { ports: allow.invalid.join(', ') }),
     })
   }
 
   const token = tokenInput.value.trim()
   if (token && token.length < 8) {
-    errors.push({ key: 'token', section: 'panel', message: '管理令牌至少 8 位，过短的令牌容易被暴力破解' })
+    errors.push({ key: 'token', section: 'panel', message: t('pages.settings.validation.tokenTooShort') })
   }
 
   // GeoSite 自动更新间隔由 GeoSite 页面维护，没有对应输入框，保留仅提示
   if (f.geosite_auto_update && f.geosite_update_interval_hours <= 0) {
-    errors.push({ key: 'geosite_interval', section: 'routing', message: '启用 GeoSite 自动更新时，更新间隔必须大于 0' })
+    errors.push({
+      key: 'geosite_interval',
+      section: 'routing',
+      message: t('pages.settings.validation.geositeInterval'),
+    })
   }
 
   return errors
@@ -411,7 +392,7 @@ async function handleReload() {
   reloading.value = true
   try {
     await reloadConfig()
-    message.success('配置热加载成功')
+    message.success(t('pages.settings.messages.reloaded'))
     await fetchAll()
   } catch {
     // 错误已由拦截器处理
@@ -435,13 +416,13 @@ useHotkeys([
 
 function resetForm() {
   if (settings.value) applySettingsToForm(settings.value)
-  message.info('已还原为上次加载的设置')
+  message.info(t('pages.settings.messages.reset'))
 }
 
 async function handleSave() {
   if (!form.value) return
   if (loadError.value || !settings.value) {
-    message.warning('设置尚未成功加载，请先重试读取后再保存')
+    message.warning(t('pages.settings.messages.notLoaded'))
     return
   }
   const f = form.value
@@ -452,7 +433,13 @@ async function handleSave() {
   if (errors.length > 0) {
     // 跳到第一个出错字段所在章节，并保留一条汇总提示
     selectSection(errors[0].section)
-    const summary = errors.length === 1 ? errors[0].message : `${errors[0].message}（共 ${errors.length} 项待修正）`
+    const summary =
+      errors.length === 1
+        ? errors[0].message
+        : t('pages.settings.messages.errorSummary', {
+            message: errors[0].message,
+            count: errors.length,
+          })
     message.warning(summary)
     return
   }
@@ -510,14 +497,14 @@ async function handleSave() {
     await updateSettings(patch)
     if (newToken) {
       // 令牌已轮换：当前会话的旧令牌立即失效，清理本地状态并回到登录页
-      message.success('设置已保存，管理令牌已更新，请使用新令牌重新登录')
+      message.success(t('pages.settings.messages.savedTokenRotated'))
       tokenInput.value = ''
       markSaved()
       authStore.logout()
       router.push('/login')
       return
     }
-    message.success('设置已保存并生效')
+    message.success(t('pages.settings.messages.saved'))
     applySettingsToForm(await getSettings())
   } catch {
     // 错误已由拦截器处理
@@ -532,10 +519,10 @@ async function handleGenerateToken() {
   crypto.getRandomValues(bytes)
   tokenInput.value = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
   if (await copyText(tokenInput.value)) {
-    message.success('已生成并复制新令牌，请妥善保存后点击保存')
+    message.success(t('pages.settings.messages.tokenGeneratedCopied'))
     return
   }
-  message.success('已生成新令牌，请点击输入框右侧眼睛图标查看并复制后保存')
+  message.success(t('pages.settings.messages.tokenGenerated'))
 }
 
 // 清除管理令牌：仅回环管理地址允许（非回环时后端会拒绝）
@@ -543,7 +530,7 @@ async function handleClearToken() {
   clearingToken.value = true
   try {
     await updateSettings({ management_auth_token: '' })
-    message.success('管理令牌已清除，管理端口现在无需认证')
+    message.success(t('pages.settings.messages.tokenCleared'))
     applySettingsToForm(await getSettings())
   } catch {
     // 错误已由拦截器处理
@@ -559,12 +546,14 @@ onMounted(fetchAll)
   <div class="page-shell">
     <div class="page-header">
       <div class="page-header-text">
-        <a-typography-title :level="4" style="margin: 0;">系统设置</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.settings.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          修改后立即写入配置文件并热加载；WebUI、pprof 与管理令牌即时生效，监听地址等启动参数需重启。
+          {{ t('pages.settings.subtitle') }}
         </a-typography-text>
         <div class="settings-section-field">
-          <label class="settings-section-label" for="settings-section-select">设置分类</label>
+          <label class="settings-section-label" for="settings-section-select">
+            {{ t('pages.settings.sectionLabel') }}
+          </label>
           <a-select
             id="settings-section-select"
             class="settings-section-select"
@@ -575,24 +564,24 @@ onMounted(fetchAll)
         </div>
       </div>
       <a-space wrap class="settings-actions">
-        <a-button @click="fetchAll" :loading="loading">刷新</a-button>
+        <a-button @click="fetchAll" :loading="loading">{{ t('common.refresh') }}</a-button>
         <a-popconfirm
-          title="重新读取 YAML 配置文件？未保存的表单修改会丢失。"
-          ok-text="重载"
-          cancel-text="取消"
+          :title="t('pages.settings.actions.reloadConfirm')"
+          :ok-text="t('pages.settings.actions.reloadOk')"
+          :cancel-text="t('common.cancel')"
           @confirm="handleReload"
         >
-          <a-button :loading="reloading">重新加载配置</a-button>
+          <a-button :loading="reloading">{{ t('pages.settings.actions.reload') }}</a-button>
         </a-popconfirm>
-        <a-button @click="resetForm">还原</a-button>
+        <a-button @click="resetForm">{{ t('pages.settings.actions.reset') }}</a-button>
         <a-button
           type="primary"
           :loading="saving"
           :disabled="!isDirty || loadError || !settings"
-          title="保存设置（Ctrl+S）"
+          :title="t('pages.settings.actions.saveTitle')"
           @click="handleSave"
         >
-          保存设置
+          {{ t('pages.settings.actions.save') }}
         </a-button>
       </a-space>
     </div>
@@ -602,15 +591,19 @@ onMounted(fetchAll)
       type="error"
       show-icon
       class="settings-load-error"
-      :message="settings ? '设置刷新失败' : '设置加载失败'"
+      :message="
+        settings ? t('pages.settings.loadError.refreshTitle') : t('pages.settings.loadError.loadTitle')
+      "
       :description="
         settings
-          ? '当前展示的是上次成功读取的内容，此时保存可能覆盖服务端最新配置。请先重试读取。'
-          : '无法读取服务端配置，页面显示的是空表单，不能保存。请确认后端服务正常后重试。'
+          ? t('pages.settings.loadError.refreshDescription')
+          : t('pages.settings.loadError.loadDescription')
       "
     >
       <template #action>
-        <a-button size="small" :loading="loading" @click="fetchAll">重试</a-button>
+        <a-button size="small" :loading="loading" @click="fetchAll">
+          {{ t('pages.settings.loadError.retry') }}
+        </a-button>
       </template>
     </a-alert>
 
@@ -618,7 +611,7 @@ onMounted(fetchAll)
       <!-- 左侧设置分类 -->
       <aside class="settings-aside">
         <a-card size="small" class="settings-nav-card">
-          <template #title>设置分类</template>
+          <template #title>{{ t('pages.settings.navTitle') }}</template>
           <a-menu :selected-keys="[activeSection]" mode="inline" style="border: none;">
             <a-menu-item-group
               v-for="group in groupedSections"
@@ -651,17 +644,23 @@ onMounted(fetchAll)
             <a-form layout="vertical">
               <!-- 基础设置 -->
               <div v-show="activeSection === 'basic'">
-                <a-card size="small" title="当前生效配置" style="margin-bottom: 16px;">
+                <a-card size="small" :title="t('pages.settings.current.title')" style="margin-bottom: 16px;">
                   <a-descriptions size="small" bordered :column="{ xs: 1, sm: 2, lg: 3 }">
-                    <a-descriptions-item label="生效监听地址">
+                    <a-descriptions-item :label="t('pages.settings.current.listen')">
                       <a-typography-text code>{{ settings?.listen || '—' }}</a-typography-text>
                     </a-descriptions-item>
-                    <a-descriptions-item label="管理端口">
-                      <a-typography-text code>{{ settings?.management || '未配置' }}</a-typography-text>
+                    <a-descriptions-item :label="t('pages.settings.current.management')">
+                      <a-typography-text code>
+                        {{ settings?.management || t('pages.settings.current.notConfigured') }}
+                      </a-typography-text>
                     </a-descriptions-item>
-                    <a-descriptions-item label="管理令牌">
+                    <a-descriptions-item :label="t('pages.settings.current.token')">
                       <a-tag :color="settings?.management_token_set ? 'green' : 'orange'">
-                        {{ settings?.management_token_set ? '已设置' : '未设置' }}
+                        {{
+                          settings?.management_token_set
+                            ? t('pages.settings.current.set')
+                            : t('pages.settings.current.unset')
+                        }}
                       </a-tag>
                     </a-descriptions-item>
                   </a-descriptions>
@@ -670,49 +669,67 @@ onMounted(fetchAll)
                     type="info"
                     show-icon
                     style="margin-top: 12px;"
-                    message="检测到多个监听端口"
-                    :description="`共 ${listenList.length} 个端口（${listenList.join(', ')}）。SOCKS5 命令、访问控制与最大连接数的修改会同步写入所有端口；如需按端口差异化配置，请直接编辑 YAML 中的 listeners。`"
+                    :message="t('pages.settings.current.multiTitle')"
+                    :description="
+                      t('pages.settings.current.multiDescription', {
+                        count: listenList.length,
+                        ports: listenList.join(', '),
+                      })
+                    "
                   />
                 </a-card>
 
-                <a-card size="small" title="检查与连接" style="margin-bottom: 16px;">
+                <a-card size="small" :title="t('pages.settings.cards.check')" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-check-interval-seconds" label="健康检查间隔（秒）" tooltip="上游健康检查的全局默认间隔；0 表示停止周期性检查">
+                      <a-form-item
+                        html-for="stg-check-interval-seconds"
+                        :label="t('pages.settings.fields.checkInterval')"
+                        :tooltip="t('pages.settings.fields.checkIntervalTooltip')"
+                      >
                         <a-input-number id="stg-check-interval-seconds"
                           v-model:value="form.check_interval_seconds"
                           :min="0"
                           style="width: 100%;"
-                          aria-label="健康检查间隔（秒）"
+                          :aria-label="t('pages.settings.fields.checkInterval')"
                         />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-max-connections" label="最大连接数（兜底）" tooltip="listener 未单独设置时的并发上限；0 表示不限制">
+                      <a-form-item
+                        html-for="stg-max-connections"
+                        :label="t('pages.settings.fields.maxConnections')"
+                        :tooltip="t('pages.settings.fields.maxConnectionsTooltip')"
+                      >
                         <a-input-number id="stg-max-connections"
                           v-model:value="form.max_connections"
                           :min="0"
                           style="width: 100%;"
-                          aria-label="最大连接数（兜底）"
+                          :aria-label="t('pages.settings.fields.maxConnections')"
                         />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-log-level" label="日志级别">
-                        <a-select id="stg-log-level" v-model:value="form.log_level" :options="logLevelOptions" aria-label="日志级别" />
+                      <a-form-item html-for="stg-log-level" :label="t('pages.settings.fields.logLevel')">
+                        <a-select
+                          id="stg-log-level"
+                          v-model:value="form.log_level"
+                          :options="logLevelOptions"
+                          :aria-label="t('pages.settings.fields.logLevel')"
+                        />
                       </a-form-item>
                     </a-col>
                   </a-row>
                 </a-card>
 
-                <a-card size="small" title="SOCKS5 能力">
+                <a-card size="small" :title="t('pages.settings.cards.socks5')">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
                       <a-form-item html-for="stg-socks5-allow-bind" label="SOCKS5 BIND">
                         <a-switch id="stg-socks5-allow-bind"
                           v-model:checked="form.socks5_allow_bind"
-                          checked-children="允许"
-                          un-checked-children="禁止"
+                          :checked-children="t('pages.settings.switches.allow')"
+                          :un-checked-children="t('pages.settings.switches.deny')"
                           aria-label="SOCKS5 BIND"
                         />
                       </a-form-item>
@@ -721,8 +738,8 @@ onMounted(fetchAll)
                       <a-form-item html-for="stg-socks5-allow-udp-associate" label="SOCKS5 UDP ASSOCIATE">
                         <a-switch id="stg-socks5-allow-udp-associate"
                           v-model:checked="form.socks5_allow_udp_associate"
-                          checked-children="允许"
-                          un-checked-children="禁止"
+                          :checked-children="t('pages.settings.switches.allow')"
+                          :un-checked-children="t('pages.settings.switches.deny')"
                           aria-label="SOCKS5 UDP ASSOCIATE"
                         />
                       </a-form-item>
@@ -733,32 +750,44 @@ onMounted(fetchAll)
 
               <!-- 管理面板与安全 -->
               <div v-show="activeSection === 'panel'">
-                <a-card size="small" title="管理面板" style="margin-bottom: 16px;">
+                <a-card size="small" :title="t('pages.settings.cards.panel')" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-webui-enabled" label="内置 WebUI" tooltip="关闭后管理端口仅提供 API，不再返回前端页面">
+                      <a-form-item
+                        html-for="stg-webui-enabled"
+                        :label="t('pages.settings.fields.webui')"
+                        :tooltip="t('pages.settings.fields.webuiTooltip')"
+                      >
                         <a-switch id="stg-webui-enabled"
                           v-model:checked="form.webui_enabled"
-                          checked-children="启用"
-                          un-checked-children="关闭"
-                          aria-label="内置 WebUI"
+                          :checked-children="t('pages.settings.switches.enable')"
+                          :un-checked-children="t('pages.settings.switches.disable')"
+                          :aria-label="t('pages.settings.fields.webui')"
                         />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="16">
                       <a-form-item html-for="stg-token-input"
-                        label="管理令牌"
-                        :tooltip="`对应 management_auth_token；当前${settings?.management_token_set ? '已设置' : '未设置'}。留空表示保持不变。`"
+                        :label="t('pages.settings.fields.token')"
+                        :tooltip="
+                          t('pages.settings.fields.tokenTooltip', {
+                            state: settings?.management_token_set
+                              ? t('pages.settings.current.set')
+                              : t('pages.settings.current.unset'),
+                          })
+                        "
                         :validate-status="settingsErrors.token ? 'error' : undefined"
                         :help="settingsErrors.token"
                       >
                         <div class="token-input-row">
                           <a-input-password id="stg-token-input"
                             v-model:value="tokenInput"
-                            placeholder="留空则不修改，修改后需重新登录"
+                            :placeholder="t('pages.settings.fields.tokenPlaceholder')"
                             autocomplete="new-password"
                           />
-                          <a-button @click="handleGenerateToken">生成</a-button>
+                          <a-button @click="handleGenerateToken">
+                            {{ t('pages.settings.fields.tokenGenerate') }}
+                          </a-button>
                         </div>
                       </a-form-item>
                     </a-col>
@@ -766,15 +795,17 @@ onMounted(fetchAll)
                   <a-space wrap>
                     <a-popconfirm
                       v-if="settings?.management_token_set"
-                      title="清除后管理端口将不再要求认证，仅建议在回环地址下使用，确定清除？"
-                      ok-text="清除"
-                      cancel-text="取消"
+                      :title="t('pages.settings.fields.tokenClearConfirm')"
+                      :ok-text="t('pages.settings.fields.tokenClearOk')"
+                      :cancel-text="t('common.cancel')"
                       @confirm="handleClearToken"
                     >
-                      <a-button danger :loading="clearingToken">清除管理令牌</a-button>
+                      <a-button danger :loading="clearingToken">
+                        {{ t('pages.settings.fields.tokenClear') }}
+                      </a-button>
                     </a-popconfirm>
                     <a-typography-text type="secondary" style="font-size: 12px;">
-                      WebUI 开关与令牌修改保存后立即生效；轮换令牌会强制当前会话重新登录。
+                      {{ t('pages.settings.fields.tokenHint') }}
                     </a-typography-text>
                   </a-space>
                 </a-card>
@@ -782,27 +813,38 @@ onMounted(fetchAll)
                 <a-alert
                   type="warning"
                   show-icon
-                  message="管理面板安全提示"
-                  description="管理端口绑定非回环地址时必须配置管理令牌。可直接点击「生成」由系统创建强随机令牌；令牌修改后当前会话会立即失效。"
+                  :message="t('pages.settings.fields.securityTitle')"
+                  :description="t('pages.settings.fields.securityDescription')"
                 />
               </div>
 
               <!-- 路由与 GeoSite -->
               <div v-show="activeSection === 'routing'">
-                <a-card size="small" title="路由策略" style="margin-bottom: 16px;">
+                <a-card size="small" :title="t('pages.settings.cards.routing')" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-routing-final" label="兜底动作" tooltip="所有规则都未命中时使用的动作">
+                      <a-form-item
+                        html-for="stg-routing-final"
+                        :label="t('pages.settings.fields.routingFinal')"
+                        :tooltip="t('pages.settings.fields.routingFinalTooltip')"
+                      >
                         <a-select id="stg-routing-final" v-model:value="form.routing_final" :options="finalOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-auto-mode" label="自动模式" tooltip="final=auto 时的判断方式">
+                      <a-form-item
+                        html-for="stg-auto-mode"
+                        :label="t('pages.settings.fields.autoMode')"
+                        :tooltip="t('pages.settings.fields.autoModeTooltip')"
+                      >
                         <a-select id="stg-auto-mode" v-model:value="form.auto_mode" :options="autoModeOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item html-for="stg-auto-direct-timeout-seconds" label="直连探测超时（秒）">
+                      <a-form-item
+                        html-for="stg-auto-direct-timeout-seconds"
+                        :label="t('pages.settings.fields.autoDirectTimeout')"
+                      >
                         <a-input-number id="stg-auto-direct-timeout-seconds"
                           v-model:value="form.auto_direct_timeout_seconds"
                           :min="0.1"
@@ -812,15 +854,25 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item html-for="stg-auto-cache-ttl-seconds" label="自动结果缓存（秒）">
+                      <a-form-item
+                        html-for="stg-auto-cache-ttl-seconds"
+                        :label="t('pages.settings.fields.autoCacheTtl')"
+                      >
                         <a-input-number id="stg-auto-cache-ttl-seconds" v-model:value="form.auto_cache_ttl_seconds" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                   </a-row>
-                  <a-form-item html-for="stg-socks5h-redirect-enabled" label="socks5h 重定向">
-                    <a-switch id="stg-socks5h-redirect-enabled" v-model:checked="form.socks5h_redirect_enabled" aria-label="socks5h 重定向" />
+                  <a-form-item
+                    html-for="stg-socks5h-redirect-enabled"
+                    :label="t('pages.settings.fields.socks5hRedirect')"
+                  >
+                    <a-switch
+                      id="stg-socks5h-redirect-enabled"
+                      v-model:checked="form.socks5h_redirect_enabled"
+                      :aria-label="t('pages.settings.fields.socks5hRedirect')"
+                    />
                     <a-typography-text type="secondary" style="margin-left: 8px;">
-                      启用后，目标为 socks5h:// 的请求会重定向到指定上游
+                      {{ t('pages.settings.fields.socks5hRedirectHint') }}
                     </a-typography-text>
                   </a-form-item>
                 </a-card>
@@ -828,54 +880,63 @@ onMounted(fetchAll)
 
               <!-- DNS 解析 -->
               <div v-show="activeSection === 'dns'">
-                <a-card size="small" title="DNS 解析" style="margin-bottom: 16px;">
+                <a-card size="small" :title="t('pages.settings.cards.dns')" style="margin-bottom: 16px;">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-dns-type" label="解析方式">
+                      <a-form-item html-for="stg-dns-type" :label="t('pages.settings.fields.dnsType')">
                         <a-select id="stg-dns-type" v-model:value="form.dns_type" :options="dnsTypeOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
                       <a-form-item
                         html-for="stg-doh-url"
-                        label="DoH URL"
-                        tooltip="仅 doh 模式生效"
+                        :label="t('pages.settings.fields.dohUrl')"
+                        :tooltip="t('pages.settings.fields.dohUrlTooltip')"
                         :validate-status="settingsErrors.doh_url ? 'error' : undefined"
                         :help="settingsErrors.doh_url"
                       >
                         <a-input id="stg-doh-url"
                           v-model:value="form.doh_url"
                           :disabled="form.dns_type !== 'doh'"
-                          placeholder="https://dns.example/dns-query"
+                          :placeholder="t('pages.settings.fields.dohUrlPlaceholder')"
                         />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
                       <a-form-item
                         html-for="stg-dot-addr"
-                        label="DoT 地址"
-                        tooltip="仅 dot 模式生效，格式 host:port"
+                        :label="t('pages.settings.fields.dotAddr')"
+                        :tooltip="t('pages.settings.fields.dotAddrTooltip')"
                         :validate-status="settingsErrors.dot_addr ? 'error' : undefined"
                         :help="settingsErrors.dot_addr"
                       >
-                        <a-input id="stg-dot-addr" v-model:value="form.dot_addr" :disabled="form.dns_type !== 'dot'" placeholder="1.1.1.1:853" />
+                        <a-input
+                          id="stg-dot-addr"
+                          v-model:value="form.dot_addr"
+                          :disabled="form.dns_type !== 'dot'"
+                          placeholder="1.1.1.1:853"
+                        />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item html-for="stg-ip-precedence" label="IP 优先级">
+                      <a-form-item html-for="stg-ip-precedence" :label="t('pages.settings.fields.ipPrecedence')">
                         <a-select id="stg-ip-precedence" v-model:value="form.ip_precedence" :options="ipPrecedenceOptions" />
                       </a-form-item>
                     </a-col>
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-dns-timeout-seconds" label="解析超时（秒）">
+                      <a-form-item html-for="stg-dns-timeout-seconds" :label="t('pages.settings.fields.dnsTimeout')">
                         <a-input-number id="stg-dns-timeout-seconds" v-model:value="form.dns_timeout_seconds" :min="0.1" :step="0.1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-dns-fallback" label="失败回退系统 DNS">
-                        <a-switch id="stg-dns-fallback" v-model:checked="form.dns_fallback" aria-label="失败回退系统 DNS" />
+                      <a-form-item html-for="stg-dns-fallback" :label="t('pages.settings.fields.dnsFallback')">
+                        <a-switch
+                          id="stg-dns-fallback"
+                          v-model:checked="form.dns_fallback"
+                          :aria-label="t('pages.settings.fields.dnsFallback')"
+                        />
                       </a-form-item>
                     </a-col>
                   </a-row>
@@ -884,26 +945,26 @@ onMounted(fetchAll)
 
               <!-- 连接与超时 -->
               <div v-show="activeSection === 'timeout'">
-                <a-card size="small" title="超时参数">
+                <a-card size="small" :title="t('pages.settings.cards.timeout')">
                   <a-alert
                     type="info"
                     show-icon
                     style="margin-bottom: 12px;"
-                    message="填写 0 表示使用内置默认值（拨号/握手 10s、HTTP 交换 60s、隧道空闲 5min）；数值单位为秒。"
+                    :message="t('pages.settings.fields.timeoutNotice')"
                   />
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-dial-timeout-seconds" label="拨号超时（秒）">
+                      <a-form-item html-for="stg-dial-timeout-seconds" :label="t('pages.settings.fields.dialTimeout')">
                         <a-input-number id="stg-dial-timeout-seconds" v-model:value="form.dial_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-handshake-timeout-seconds" label="握手超时（秒）">
+                      <a-form-item html-for="stg-handshake-timeout-seconds" :label="t('pages.settings.fields.handshakeTimeout')">
                         <a-input-number id="stg-handshake-timeout-seconds" v-model:value="form.handshake_timeout_seconds" :min="0" :step="0.1" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-http-exchange-timeout-seconds" label="HTTP 交换超时（秒）">
+                      <a-form-item html-for="stg-http-exchange-timeout-seconds" :label="t('pages.settings.fields.httpExchangeTimeout')">
                         <a-input-number id="stg-http-exchange-timeout-seconds"
                           v-model:value="form.http_exchange_timeout_seconds"
                           :min="0"
@@ -913,7 +974,7 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-tunnel-idle-timeout-seconds" label="隧道空闲超时（秒）">
+                      <a-form-item html-for="stg-tunnel-idle-timeout-seconds" :label="t('pages.settings.fields.tunnelIdleTimeout')">
                         <a-input-number id="stg-tunnel-idle-timeout-seconds" v-model:value="form.tunnel_idle_timeout_seconds" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
@@ -923,39 +984,47 @@ onMounted(fetchAll)
 
               <!-- 目标访问策略 -->
               <div v-show="activeSection === 'destination'">
-                <a-card size="small" title="默认动作">
+                <a-card size="small" :title="t('pages.settings.cards.defaultAction')">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-default-action" label="默认动作">
+                      <a-form-item html-for="stg-default-action" :label="t('pages.settings.fields.defaultAction')">
                         <a-select id="stg-default-action" v-model:value="form.default_action" :options="destinationActionOptions" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="6">
-                      <a-form-item html-for="stg-protect-private" label="保护私网目标" tooltip="启用后默认拒绝访问内网地址">
-                        <a-switch id="stg-protect-private" v-model:checked="form.protect_private" aria-label="保护私网目标" />
+                      <a-form-item
+                        html-for="stg-protect-private"
+                        :label="t('pages.settings.fields.protectPrivate')"
+                        :tooltip="t('pages.settings.fields.protectPrivateTooltip')"
+                      >
+                        <a-switch
+                          id="stg-protect-private"
+                          v-model:checked="form.protect_private"
+                          :aria-label="t('pages.settings.fields.protectPrivate')"
+                        />
                       </a-form-item>
                     </a-col>
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-deny-cidrs" label="拒绝 CIDR">
+                      <a-form-item html-for="stg-deny-cidrs" :label="t('pages.settings.fields.denyCidrs')">
                         <a-select id="stg-deny-cidrs" v-model:value="form.deny_cidrs" mode="tags" placeholder="10.0.0.0/8" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-allow-cidrs" label="允许 CIDR">
+                      <a-form-item html-for="stg-allow-cidrs" :label="t('pages.settings.fields.allowCidrs')">
                         <a-select id="stg-allow-cidrs" v-model:value="form.allow_cidrs" mode="tags" placeholder="192.168.0.0/16" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-deny-domains" label="拒绝域名">
+                      <a-form-item html-for="stg-deny-domains" :label="t('pages.settings.fields.denyDomains')">
                         <a-select id="stg-deny-domains" v-model:value="form.deny_domains" mode="tags" placeholder="example.com" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-allow-domains" label="允许域名">
+                      <a-form-item html-for="stg-allow-domains" :label="t('pages.settings.fields.allowDomains')">
                         <a-select id="stg-allow-domains" v-model:value="form.allow_domains" mode="tags" placeholder="*.internal" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
@@ -964,8 +1033,8 @@ onMounted(fetchAll)
                     <a-col :xs="24" :md="12">
                       <a-form-item
                       html-for="stg-deny-ports-text"
-                      label="拒绝端口"
-                      tooltip="逗号或空格分隔，如 25, 135, 445"
+                      :label="t('pages.settings.fields.denyPorts')"
+                      :tooltip="t('pages.settings.fields.denyPortsTooltip')"
                       :validate-status="settingsErrors.deny_ports ? 'error' : undefined"
                       :help="settingsErrors.deny_ports"
                     >
@@ -975,7 +1044,7 @@ onMounted(fetchAll)
                     <a-col :xs="24" :md="12">
                       <a-form-item
                       html-for="stg-allow-ports-text"
-                      label="允许端口"
+                      :label="t('pages.settings.fields.allowPorts')"
                       :validate-status="settingsErrors.allow_ports ? 'error' : undefined"
                       :help="settingsErrors.allow_ports"
                     >
@@ -988,25 +1057,37 @@ onMounted(fetchAll)
 
               <!-- 访问控制 -->
               <div v-show="activeSection === 'access'">
-                <a-card size="small" title="客户端与限速">
+                <a-card size="small" :title="t('pages.settings.cards.access')">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-allowed-clients" label="客户端白名单" tooltip="留空表示不限制；支持单个 IP 或 CIDR">
+                      <a-form-item
+                        html-for="stg-allowed-clients"
+                        :label="t('pages.settings.fields.allowedClients')"
+                        :tooltip="t('pages.settings.fields.allowedClientsTooltip')"
+                      >
                         <a-select id="stg-allowed-clients" v-model:value="form.allowed_clients" mode="tags" placeholder="127.0.0.1, 10.0.0.0/8" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item html-for="stg-rate-limit-connections-per-second" label="每秒连接上限" tooltip="0 表示不限制">
+                      <a-form-item
+                        html-for="stg-rate-limit-connections-per-second"
+                        :label="t('pages.settings.fields.rateLimit')"
+                        :tooltip="t('pages.settings.fields.rateLimitTooltip')"
+                      >
                         <a-input-number id="stg-rate-limit-connections-per-second" v-model:value="form.rate_limit_connections_per_second" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item html-for="stg-rate-limit-burst" label="突发容量">
+                      <a-form-item html-for="stg-rate-limit-burst" :label="t('pages.settings.fields.burst')">
                         <a-input-number id="stg-rate-limit-burst" v-model:value="form.rate_limit_burst" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="4">
-                      <a-form-item html-for="stg-max-conns-per-user" label="单用户最大连接" tooltip="0 表示不限制">
+                      <a-form-item
+                        html-for="stg-max-conns-per-user"
+                        :label="t('pages.settings.fields.maxConnsPerUser')"
+                        :tooltip="t('pages.settings.fields.maxConnsPerUserTooltip')"
+                      >
                         <a-input-number id="stg-max-conns-per-user" v-model:value="form.max_conns_per_user" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
@@ -1016,30 +1097,55 @@ onMounted(fetchAll)
 
               <!-- 流量审计与配额 -->
               <div v-show="activeSection === 'quota'">
-                <a-card size="small" title="流量审计与配额">
+                <a-card size="small" :title="t('pages.settings.cards.quota')">
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="4">
-                      <a-form-item html-for="stg-traffic-audit-enabled" label="启用流量审计">
-                        <a-switch id="stg-traffic-audit-enabled" v-model:checked="form.traffic_audit_enabled" checked-children="启用" un-checked-children="关闭" />
+                      <a-form-item
+                        html-for="stg-traffic-audit-enabled"
+                        :label="t('pages.settings.fields.auditEnabled')"
+                      >
+                        <a-switch
+                          id="stg-traffic-audit-enabled"
+                          v-model:checked="form.traffic_audit_enabled"
+                          :checked-children="t('pages.settings.switches.enable')"
+                          :un-checked-children="t('pages.settings.switches.disable')"
+                          :aria-label="t('pages.settings.fields.auditEnabled')"
+                        />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item html-for="stg-per-user-quota" label="单用户配额（字节）" tooltip="0 表示不限制">
+                      <a-form-item
+                        html-for="stg-per-user-quota"
+                        :label="t('pages.settings.fields.perUserQuota')"
+                        :tooltip="t('pages.settings.fields.perUserQuotaTooltip')"
+                      >
                         <a-input-number id="stg-per-user-quota" v-model:value="form.per_user_quota" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item html-for="stg-per-upstream-quota" label="单上游配额（字节）" tooltip="0 表示不限制">
+                      <a-form-item
+                        html-for="stg-per-upstream-quota"
+                        :label="t('pages.settings.fields.perUpstreamQuota')"
+                        :tooltip="t('pages.settings.fields.perUpstreamQuotaTooltip')"
+                      >
                         <a-input-number id="stg-per-upstream-quota" v-model:value="form.per_upstream_quota" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item html-for="stg-quota-window-seconds" label="配额窗口（秒）" tooltip="0 表示使用默认 1 小时">
+                      <a-form-item
+                        html-for="stg-quota-window-seconds"
+                        :label="t('pages.settings.fields.quotaWindow')"
+                        :tooltip="t('pages.settings.fields.quotaWindowTooltip')"
+                      >
                         <a-input-number id="stg-quota-window-seconds" v-model:value="form.quota_window_seconds" :min="0" style="width: 100%;" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item html-for="stg-traffic-retention-days" label="流量保留天数" tooltip="默认保留 30 天，0 表示使用默认值">
+                      <a-form-item
+                        html-for="stg-traffic-retention-days"
+                        :label="t('pages.settings.fields.retentionDays')"
+                        :tooltip="t('pages.settings.fields.retentionDaysTooltip')"
+                      >
                         <a-input-number id="stg-traffic-retention-days"
                           v-model:value="form.traffic_retention_days"
                           :min="0"
@@ -1061,14 +1167,14 @@ onMounted(fetchAll)
 
   <a-modal
     v-model:open="leaveConfirmOpen"
-    title="有未保存的设置"
-    ok-text="离开"
-    cancel-text="继续编辑"
+    :title="t('pages.settings.leave.title')"
+    :ok-text="t('pages.settings.leave.ok')"
+    :cancel-text="t('pages.settings.leave.cancel')"
     :mask-closable="false"
     @ok="resolveLeave(true)"
     @cancel="resolveLeave(false)"
   >
-    <p>离开后本次修改将丢失，确定离开吗？</p>
+    <p>{{ t('pages.settings.leave.body') }}</p>
   </a-modal>
 </template>
 
