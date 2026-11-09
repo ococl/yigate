@@ -364,3 +364,25 @@ test('toggling two upstreams keeps both rows loading', async ({ page, request })
     await request.delete(`/api/v1/config/upstreams/${encodeURIComponent(name)}`, { headers: auth })
   }
 })
+
+test('an out-of-range page falls back to the last page', async ({ page, request }) => {
+  const names = [`${PREFIX}page-a`, `${PREFIX}page-b`]
+  for (const name of names) {
+    await request.delete(`/api/v1/config/upstreams/${encodeURIComponent(name)}`, { headers: auth })
+    await request.post('/api/v1/config/upstreams', {
+      headers: auth,
+      data: { name, url: 'http://127.0.0.1:9', types: ['http'] },
+    })
+  }
+
+  await login(page)
+  await page.goto('/upstreams?page=99')
+
+  // 越界页码会渲染空表格，看起来像上游被清空了
+  await expect(page.locator('.ant-table-tbody tr.ant-table-row').first()).toBeVisible()
+  await expect(page).toHaveURL(/page=1/)
+
+  for (const name of names) {
+    await request.delete(`/api/v1/config/upstreams/${encodeURIComponent(name)}`, { headers: auth })
+  }
+})

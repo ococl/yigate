@@ -145,6 +145,7 @@ async function fetchData() {
     const [res] = await Promise.all([listUpstreams(), fetchRuntimeStatus()])
     dataSource.value = res.upstreams || []
     loadError.value = false
+    ensurePageInRange()
   } catch {
     // 具体错误已由请求拦截器提示，这里只切换列表区域的状态
     loadError.value = true
@@ -426,6 +427,14 @@ const pagination = computed(() => ({
   showTotal: (total: number) => `共 ${total} 条`,
   onChange: handlePageChange,
 }))
+
+// 页码越界（删掉最后一页的最后一条、手改 URL）时会看到空表格，回落到最后一页
+function ensurePageInRange() {
+  const { current, pageSize } = pagination.value
+  const maxPage = Math.max(1, Math.ceil(dataSource.value.length / pageSize))
+  if (current <= maxPage) return
+  void router.replace({ query: { ...route.query, page: String(maxPage) } })
+}
 
 function handlePageChange(page: number, size: number) {
   // 每页条数变化时回到第一页，避免停留在越界页码只显示零星几条。
