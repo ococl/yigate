@@ -4,7 +4,7 @@ import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { listRules, addRule, updateRule, moveRule, deleteRule } from '@/api/rules'
+import { listRules, addRule, updateRule, moveRule, deleteRule, batchDeleteRules } from '@/api/rules'
 import { listUpstreams } from '@/api/upstreams'
 import type { RuleInfo, RuleRequest } from '@/types/api'
 
@@ -257,25 +257,25 @@ function onSelectionChange(keys: (string | number)[]) {
 async function handleBulkDelete() {
   if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
   bulkDeleting.value = true
-  // 删除会让后面的序号前移，必须从大到小删，否则会删错行
-  const targets = [...selectedRowKeys.value].sort((a, b) => b - a)
-  const failed: number[] = []
-  for (const index of targets) {
-    try {
-      await deleteRule(index)
-    } catch {
-      failed.push(index)
+  const targets = [...selectedRowKeys.value]
+  try {
+    // 索引由服务端按删除前的位置解释，并合并成一次落盘，这里不必自己倒序
+    const res = await batchDeleteRules(targets)
+    // 索引已经变了，失败项无法按原索引保留，统一清空选择
+    selectedRowKeys.value = []
+    await fetchData()
+    const failed = res.failed ?? []
+    if (failed.length === 0) {
+      message.success(`已删除 ${res.deleted.length} 条规则`)
+      return
     }
+    const names = failed.map((item) => `第 ${Number(item.target) + 1} 条`).join('、')
+    message.warning(`已删除 ${res.deleted.length} 条，失败 ${failed.length} 条：${names}`)
+  } catch {
+    // 整体失败（网络/500）已由请求层提示，保留当前选择
+  } finally {
+    bulkDeleting.value = false
   }
-  bulkDeleting.value = false
-  selectedRowKeys.value = []
-  await fetchData()
-  if (failed.length === 0) {
-    message.success(`已删除 ${targets.length} 条规则`)
-    return
-  }
-  const names = failed.map((index) => `第 ${index + 1} 条`).join('、')
-  message.warning(`已删除 ${targets.length - failed.length} 条，失败 ${failed.length} 条：${names}`)
 }
 
 onMounted(fetchData)

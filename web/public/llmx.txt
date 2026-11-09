@@ -40,6 +40,7 @@
 - POST   /api/v1/config/upstreams
 - PUT    /api/v1/config/upstreams/{name}
 - DELETE /api/v1/config/upstreams/{name}
+- POST   /api/v1/config/upstreams/batch-delete   {"names":["a","b"]}
 - POST   /api/v1/config/upstreams/{name}/check   单个健康检查
 - POST   /api/v1/config/upstreams/check          全量健康检查
 
@@ -53,18 +54,20 @@
 - POST   /api/v1/config/rules
 - PUT    /api/v1/config/rules/{index}
 - DELETE /api/v1/config/rules/{index}
+- POST   /api/v1/config/rules/batch-delete       {"indexes":[0,2]}
 - POST   /api/v1/config/rules/{index}/move    {"direction":"up"} 或 {"direction":"down"}
 
 规则字段：type、values[]、action、upstreams[]
 - type 可选：domain、domain_suffix、domain_keyword、domain_regex、ip_cidr、geosite、match
 - action 可选：direct、proxy、auto
-- index 是当前位置，增删或移动后都会变；要批量删除就倒序删，或每删一条重新 GET
+- index 是当前位置，增删或移动后都会变；批量删除用 batch-delete，indexes 按删除前的位置给
 
 代理认证用户
 - GET    /api/v1/config/users
 - POST   /api/v1/config/users              {"username":"alice","password":"..."}
 - PUT    /api/v1/config/users/{username}   {"password":"..."}
 - DELETE /api/v1/config/users/{username}
+- POST   /api/v1/config/users/batch-delete       {"usernames":["a","b"]}
 
 用户列表非空后，所有代理连接都必须提供用户名密码；删空则回到匿名代理。
 
@@ -111,6 +114,7 @@ GeoSite 数据
 
 - 只在用户明确要求时做写操作；不确定就先问，不要「顺手」清理不认识的上游或规则。
 - 不要尝试猜测或读取 management_auth_token 的值。
-- 不要并发批量删规则或上游：规则索引会漂移，上游可能被规则引用。
+- 批量删除一律走上面的 batch-delete：一次请求只落盘一次，返回的 deleted 与 failed 逐项对应。
+  不要并发逐条删规则，索引会漂移；逐条删上游还可能被规则引用。
 - listen / management 是启动参数，改了也要重启才生效；其余多数字段热加载。
 - 流量审计数据按自然日持久化，默认保留 30 天，重启或热加载都不会清空。

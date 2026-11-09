@@ -648,3 +648,128 @@ routing:
 		t.Fatalf("persisted token = %q, want %q", cfg.Routing.GeoSite.SyncToken, token)
 	}
 }
+
+// 批量删除的核心承诺：多条改动只落盘、只热加载一次，且索引按删除前的位置解释。
+func TestConfigEditorRemoveUpstreamsWritesOnce(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	writeConfigForTest(t, cfgPath, `listen: "127.0.0.1:0"
+upstreams:
+  - name: "up1"
+    url: "socks5://host1:1080"
+  - name: "up2"
+    url: "http://host2:8080"
+routing:
+  final: auto
+  rules:
+    - type: domain_suffix
+      values: ["example.com"]
+      action: proxy
+      upstreams: ["up1", "up2"]
+`)
+	applies := 0
+	editor := newConfigEditor(cfgPath, func() error {
+		applies++
+		return nil
+	})
+
+	res, err := editor.RemoveUpstreams([]string{"up1", "up2", "ghost"})
+	if err != nil {
+		t.Fatalf("RemoveUpstreams: %v", err)
+	}
+	if applies != 1 {
+		t.Fatalf("apply called %d times, want 1", applies)
+	}
+	if len(res.Deleted) != 2 {
+		t.Fatalf("deleted = %v, want up1 and up2", res.Deleted)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].Target != "ghost" {
+		t.Fatalf("failed = %v, want ghost", res.Failed)
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	content := string(data)
+	if contains(content, "up1") || contains(content, "up2") {
+		t.Fatalf("expected upstreams removed from config, got:\n%s", content)
+	}
+	cfg, err := editor.loadRawConfig()
+	if err != nil {
+		t.Fatalf("loadRawConfig: %v", err)
+	}
+	if len(cfg.Routing.Rules) != 1 {
+		t.Fatalf("rules = %d, want 1", len(cfg.Routing.Rules))
+	}
+	if refs := cfg.Routing.Rules[0].Upstreams; len(refs) != 0 {
+		t.Fatalf("rule upstream refs = %v, want empty", refs)
+	}
+}
+
+func TestConfigEditorRemoveRulesUsesOriginalIndexes(t *testing.T) {
+	editor, cfgPath := newTestConfigEditor(t, `listen: "127.0.0.1:0"
+routing:
+  final: auto
+  rules:
+    - type: domain_suffix
+      values: ["a.com"]
+      action: direct
+    - type: domain_suffix
+      values: ["b.com"]
+      action: direct
+    - type: domain_suffix
+      values: ["c.com"]
+      action: direct
+`)
+
+	res, err := editor.RemoveRules([]int{0, 2, 9})
+	if err != nil {
+		t.Fatalf("RemoveRules: %v", err)
+	}
+	if len(res.Deleted) != 2 {
+		t.Fatalf("deleted = %v, want indexes 0 and 2", res.Deleted)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].Target != "9" {
+		t.Fatalf("failed = %v, want index 9", res.Failed)
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	content := string(data)
+	if contains(content, "a.com") || contains(content, "c.com") {
+		t.Fatalf("expected first and third rules removed, got:\n%s", content)
+	}
+	if !contains(content, "b.com") {
+		t.Fatalf("expected middle rule kept, got:\n%s", content)
+	}
+}
+
+func TestConfigEditorRemoveUsersWritesOnce(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	writeConfigForTest(t, cfgPath, `listen: "127.0.0.1:0"
+users:
+  alice: "secret1"
+  bob: "secret2"
+routing:
+  final: auto
+`)
+	applies := 0
+	editor := newConfigEditor(cfgPath, func() error {
+		applies++
+		return nil
+	})
+
+	res, err := editor.RemoveUsers([]string{"alice", "bob", "nobody"})
+	if err != nil {
+		t.Fatalf("RemoveUsers: %v", err)
+	}
+	if applies != 1 {
+		t.Fatalf("apply called %d times, want 1", applies)
+	}
+	if len(res.Deleted) != 2 || len(res.Failed) != 1 {
+		t.Fatalf("deleted = %v, failed = %v", res.Deleted, res.Failed)
+	}
+
+	data, _ := os.ReadFile(cfgPath)
+	if contains(string(data), "alice") || contains(string(data), "bob") {
+		t.Fatalf("expected users removed, got:\n%s", data)
+	}
+}

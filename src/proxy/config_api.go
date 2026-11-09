@@ -21,6 +21,8 @@ type ConfigEditor interface {
 	UpdateUpstream(name string, up UpstreamConfig) error
 	// RemoveUpstream 按名称删除上游并持久化。
 	RemoveUpstream(name string) error
+	// RemoveUpstreams 批量删除上游：全部改动合并成一次落盘与一次热加载。
+	RemoveUpstreams(names []string) (BatchDeleteResult, error)
 
 	// ListRules 返回当前路由规则列表。
 	ListRules() []RouteRule
@@ -32,6 +34,8 @@ type ConfigEditor interface {
 	MoveRule(index int, direction string) error
 	// RemoveRule 按索引删除路由规则并持久化。
 	RemoveRule(index int) error
+	// RemoveRules 批量删除路由规则：索引按删除前的原始位置解释。
+	RemoveRules(indexes []int) (BatchDeleteResult, error)
 
 	// ListUsers 返回当前用户名列表（不含密码）。
 	ListUsers() []string
@@ -41,11 +45,33 @@ type ConfigEditor interface {
 	UpdateUser(username, password string) error
 	// RemoveUser 按用户名删除用户并持久化。
 	RemoveUser(username string) error
+	// RemoveUsers 批量删除用户：一次落盘一次热加载。
+	RemoveUsers(usernames []string) (BatchDeleteResult, error)
 
 	// GetSettings 返回全局设置视图。
 	GetSettings() (SettingsView, error)
 	// UpdateSettings 部分更新全局设置并持久化。
 	UpdateSettings(patch SettingsPatch) error
+}
+
+// BatchDeleteFailure 描述批量删除中失败的一项，target 是调用方给的原值。
+type BatchDeleteFailure struct {
+	Target string `json:"target"`
+	Error  string `json:"error"`
+}
+
+// BatchDeleteResult 是批量删除的逐项结果。
+// 一批删除只产生一次写盘与一次热加载，不存在的项留在 Failed 里由调用方决定如何提示。
+type BatchDeleteResult struct {
+	Deleted []string             `json:"deleted"`
+	Failed  []BatchDeleteFailure `json:"failed,omitempty"`
+}
+
+// batchDeleteRequest 是批量删除的请求体，三个列表共用同一种形状。
+type batchDeleteRequest struct {
+	Names     []string `json:"names,omitempty"`
+	Indexes   []int    `json:"indexes,omitempty"`
+	Usernames []string `json:"usernames,omitempty"`
 }
 
 // healthCheckInfo 是健康检查配置的 API 表示（时间单位为秒）。
@@ -281,6 +307,23 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			}
 			writeJSON(w, http.StatusCreated, map[string]string{"status": "ok", "name": up.Name})
 		case 1:
+			if rest[0] == "batch-delete" {
+				req, ok := decodeBatchDelete(w, r)
+				if !ok {
+					return
+				}
+				if len(req.Names) == 0 {
+					writeJSONError(w, http.StatusBadRequest, "names must not be empty")
+					return
+				}
+				res, err := editor.RemoveUpstreams(req.Names)
+				if err != nil {
+					writeJSONError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				writeJSON(w, http.StatusOK, batchDeleteResponse(res))
+				return
+			}
 			if rest[0] != "check" {
 				writeJSONError(w, http.StatusNotFound, "unknown path")
 				return
@@ -445,6 +488,23 @@ func (m *ManagementServer) handleRulesAPI(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 			return
 		}
+		if len(rest) == 1 && rest[0] == "batch-delete" {
+			req, ok := decodeBatchDelete(w, r)
+			if !ok {
+				return
+			}
+			if len(req.Indexes) == 0 {
+				writeJSONError(w, http.StatusBadRequest, "indexes must not be empty")
+				return
+			}
+			res, err := editor.RemoveRules(req.Indexes)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, batchDeleteResponse(res))
+			return
+		}
 		if len(rest) > 0 {
 			writeJSONError(w, http.StatusNotFound, "unknown path")
 			return
@@ -545,6 +605,23 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusOK, map[string]any{"users": result})
 
 	case http.MethodPost:
+		if len(rest) == 1 && rest[0] == "batch-delete" {
+			req, ok := decodeBatchDelete(w, r)
+			if !ok {
+				return
+			}
+			if len(req.Usernames) == 0 {
+				writeJSONError(w, http.StatusBadRequest, "usernames must not be empty")
+				return
+			}
+			res, err := editor.RemoveUsers(req.Usernames)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, batchDeleteResponse(res))
+			return
+		}
 		if len(rest) > 0 {
 			writeJSONError(w, http.StatusNotFound, "unknown path")
 			return
@@ -631,6 +708,25 @@ var ErrNotFound = errors.New("not found")
 
 // errNotFound 保留包内别名，便于既有代码与测试引用。
 var errNotFound = ErrNotFound
+
+// decodeBatchDelete 解析批量删除请求体；失败时已写好响应，调用方直接 return。
+func decodeBatchDelete(w http.ResponseWriter, r *http.Request) (batchDeleteRequest, bool) {
+	var req batchDeleteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return batchDeleteRequest{}, false
+	}
+	return req, true
+}
+
+// batchDeleteResponse 把逐项结果包装成统一响应，deleted 恒为数组便于前端直接遍历。
+func batchDeleteResponse(res BatchDeleteResult) map[string]any {
+	deleted := res.Deleted
+	if deleted == nil {
+		deleted = []string{}
+	}
+	return map[string]any{"status": "ok", "deleted": deleted, "failed": res.Failed}
+}
 
 // writeJSON 写入 JSON 响应。
 func writeJSON(w http.ResponseWriter, code int, v any) {

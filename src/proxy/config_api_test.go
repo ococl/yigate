@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -81,6 +83,21 @@ func (m *mockConfigEditor) RemoveUpstream(name string) error {
 	return errNotFound
 }
 
+func (m *mockConfigEditor) RemoveUpstreams(names []string) (BatchDeleteResult, error) {
+	res := BatchDeleteResult{Deleted: []string{}}
+	if m.applyErr != nil {
+		return res, m.applyErr
+	}
+	for _, name := range names {
+		if err := m.RemoveUpstream(name); err != nil {
+			res.Failed = append(res.Failed, BatchDeleteFailure{Target: name, Error: err.Error()})
+			continue
+		}
+		res.Deleted = append(res.Deleted, name)
+	}
+	return res, nil
+}
+
 func (m *mockConfigEditor) ListRules() []RouteRule {
 	return m.rules
 }
@@ -139,6 +156,24 @@ func (m *mockConfigEditor) RemoveRule(index int) error {
 	return nil
 }
 
+func (m *mockConfigEditor) RemoveRules(indexes []int) (BatchDeleteResult, error) {
+	res := BatchDeleteResult{Deleted: []string{}}
+	if m.applyErr != nil {
+		return res, m.applyErr
+	}
+	// 与真实实现一致：索引按删除前的位置解释，内部倒序删除
+	ordered := append([]int(nil), indexes...)
+	sort.Sort(sort.Reverse(sort.IntSlice(ordered)))
+	for _, index := range ordered {
+		if err := m.RemoveRule(index); err != nil {
+			res.Failed = append(res.Failed, BatchDeleteFailure{Target: strconv.Itoa(index), Error: err.Error()})
+			continue
+		}
+		res.Deleted = append(res.Deleted, strconv.Itoa(index))
+	}
+	return res, nil
+}
+
 func (m *mockConfigEditor) ListUsers() []string {
 	result := make([]string, 0, len(m.users))
 	for name := range m.users {
@@ -181,6 +216,21 @@ func (m *mockConfigEditor) RemoveUser(username string) error {
 	}
 	delete(m.users, username)
 	return nil
+}
+
+func (m *mockConfigEditor) RemoveUsers(usernames []string) (BatchDeleteResult, error) {
+	res := BatchDeleteResult{Deleted: []string{}}
+	if m.applyErr != nil {
+		return res, m.applyErr
+	}
+	for _, username := range usernames {
+		if err := m.RemoveUser(username); err != nil {
+			res.Failed = append(res.Failed, BatchDeleteFailure{Target: username, Error: err.Error()})
+			continue
+		}
+		res.Deleted = append(res.Deleted, username)
+	}
+	return res, nil
 }
 
 func (m *mockConfigEditor) GetSettings() (SettingsView, error) {
@@ -756,5 +806,103 @@ func TestConfigAPIBodySizeLimit(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413 for oversized body", resp.StatusCode)
+	}
+}
+
+type batchDeleteBody struct {
+	Status  string               `json:"status"`
+	Deleted []string             `json:"deleted"`
+	Failed  []BatchDeleteFailure `json:"failed"`
+}
+
+func readBatchDeleteBody(t *testing.T, resp *http.Response) batchDeleteBody {
+	t.Helper()
+	defer resp.Body.Close()
+	var body batchDeleteBody
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestConfigAPIBatchDeleteUpstreams(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "POST", addr, "/api/v1/config/upstreams/batch-delete",
+		batchDeleteRequest{Names: []string{"up1", "ghost"}}, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body := readBatchDeleteBody(t, resp)
+	if len(body.Deleted) != 1 || body.Deleted[0] != "up1" {
+		t.Fatalf("deleted = %v, want [up1]", body.Deleted)
+	}
+	if len(body.Failed) != 1 || body.Failed[0].Target != "ghost" {
+		t.Fatalf("failed = %v, want [ghost]", body.Failed)
+	}
+	if len(editor.upstreams) != 1 || editor.upstreams[0].Name != "up2" {
+		t.Fatalf("remaining upstreams = %v, want [up2]", editor.upstreams)
+	}
+}
+
+func TestConfigAPIBatchDeleteRulesUsesOriginalIndexes(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	// 两条规则全删：索引按删除前的原始位置解释，不会因为先删 0 而越界
+	resp := doRequest(t, "POST", addr, "/api/v1/config/rules/batch-delete",
+		batchDeleteRequest{Indexes: []int{0, 1}}, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body := readBatchDeleteBody(t, resp)
+	if len(body.Deleted) != 2 {
+		t.Fatalf("deleted = %v, want 2 items", body.Deleted)
+	}
+	if len(editor.rules) != 0 {
+		t.Fatalf("remaining rules = %d, want 0", len(editor.rules))
+	}
+}
+
+func TestConfigAPIBatchDeleteUsers(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "POST", addr, "/api/v1/config/users/batch-delete",
+		batchDeleteRequest{Usernames: []string{"alice", "nobody"}}, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body := readBatchDeleteBody(t, resp)
+	if len(body.Deleted) != 1 || body.Deleted[0] != "alice" {
+		t.Fatalf("deleted = %v, want [alice]", body.Deleted)
+	}
+	if len(body.Failed) != 1 || body.Failed[0].Target != "nobody" {
+		t.Fatalf("failed = %v, want [nobody]", body.Failed)
+	}
+	if _, exists := editor.users["alice"]; exists {
+		t.Fatal("alice should be removed")
+	}
+}
+
+func TestConfigAPIBatchDeleteRejectsEmptyList(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	for _, path := range []string{
+		"/api/v1/config/upstreams/batch-delete",
+		"/api/v1/config/rules/batch-delete",
+		"/api/v1/config/users/batch-delete",
+	} {
+		resp := doRequest(t, "POST", addr, path, batchDeleteRequest{}, "")
+		if resp.StatusCode != 400 {
+			t.Fatalf("%s status = %d, want 400", path, resp.StatusCode)
+		}
+		resp.Body.Close()
 	}
 }

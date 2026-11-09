@@ -561,18 +561,22 @@ test('api docs highlight the searched keyword', async ({ page }) => {
   await expect(mark).toHaveText('健康检查')
 })
 
-test('bulk delete removes the selected users and clears the selection', async ({ page }) => {
+test('bulk delete sends one batch request and keeps failed items selected', async ({ page }) => {
   await login(page)
 
-  const deleted: string[] = []
-  await page.route('**/api/v1/config/users/*', (route) => {
-    if (route.request().method() === 'DELETE') {
-      deleted.push(decodeURIComponent(route.request().url().split('/').pop() ?? ''))
-    }
+  let batchCalls = 0
+  let sent: string[] = []
+  await page.route('**/api/v1/config/users/batch-delete', (route) => {
+    batchCalls += 1
+    sent = JSON.parse(route.request().postData() ?? '{}').usernames ?? []
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true }),
+      body: JSON.stringify({
+        status: 'ok',
+        deleted: ['zh-bulk-1'],
+        failed: [{ target: 'zh-bulk-2', error: 'user not found' }],
+      }),
     })
   })
   await page.route('**/api/v1/config/users', (route) =>
@@ -592,10 +596,12 @@ test('bulk delete removes the selected users and clears the selection', async ({
   await page.getByRole('button', { name: '批量删除' }).click()
   await page.locator('.ant-popconfirm-buttons .ant-btn-primary').click()
 
-  await expect(page.locator('.ant-message')).toContainText('已删除 2 个用户')
-  // 删完选择栏要收起，否则会让人以为选中项还在
-  await expect(page.locator('.bulk-bar')).toHaveCount(0)
-  expect(deleted.sort()).toEqual(['zh-bulk-1', 'zh-bulk-2'])
+  await expect(page.locator('.ant-message')).toContainText('已删除 1 个，失败 1 个：zh-bulk-2')
+  // 一个请求办完一批，不再逐条 DELETE
+  expect(batchCalls).toBe(1)
+  expect(sent.sort()).toEqual(['zh-bulk-1', 'zh-bulk-2'])
+  // 失败项留在选中里，用户可以再点一次重试
+  await expect(page.locator('.bulk-bar')).toContainText('已选 1 项')
 })
 
 test('keyboard shortcuts focus search and save settings', async ({ page }) => {

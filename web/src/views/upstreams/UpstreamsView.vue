@@ -11,6 +11,7 @@ import {
   addUpstream,
   updateUpstream,
   deleteUpstream,
+  batchDeleteUpstreams,
   checkUpstream,
   checkAllUpstreams,
 } from '@/api/upstreams'
@@ -327,23 +328,24 @@ async function handleBulkDelete() {
   if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
   bulkDeleting.value = true
   const targets = [...selectedRowKeys.value]
-  const failed: string[] = []
-  for (const name of targets) {
-    try {
-      await deleteUpstream(name)
-      lastChecks.value.delete(name)
-    } catch {
-      failed.push(name)
+  try {
+    // 一次请求一次落盘，服务端同时清理规则里对上游的引用
+    const res = await batchDeleteUpstreams(targets)
+    for (const name of res.deleted) lastChecks.value.delete(name)
+    const failed = (res.failed ?? []).map((item) => item.target)
+    // 失败项留在选中里，方便直接重试
+    selectedRowKeys.value = failed
+    await fetchData()
+    if (failed.length === 0) {
+      message.success(`已删除 ${res.deleted.length} 个上游`)
+      return
     }
+    message.warning(`已删除 ${res.deleted.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
+  } catch {
+    // 整体失败（网络/500）已由请求层提示，保留当前选择
+  } finally {
+    bulkDeleting.value = false
   }
-  bulkDeleting.value = false
-  selectedRowKeys.value = []
-  await fetchData()
-  if (failed.length === 0) {
-    message.success(`已删除 ${targets.length} 个上游`)
-    return
-  }
-  message.warning(`已删除 ${targets.length - failed.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
 }
 
 async function handleCheck(name: string) {

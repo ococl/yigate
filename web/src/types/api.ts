@@ -251,6 +251,19 @@ export interface ApiResult {
   error?: string
 }
 
+/** 批量删除中失败的一项；target 是调用方传进来的原始值（名称或索引）。 */
+export interface BatchDeleteFailure {
+  target: string
+  error: string
+}
+
+/** 批量删除结果：一批只落盘一次，不存在的项留在 failed 里而不是整批失败。 */
+export interface BatchDeleteResult {
+  status: string
+  deleted: string[]
+  failed?: BatchDeleteFailure[]
+}
+
 // GeoSiteInfo 描述 GeoSite 数据文件的版本与更新/同步配置。
 export interface GeoSiteInfo {
   path: string

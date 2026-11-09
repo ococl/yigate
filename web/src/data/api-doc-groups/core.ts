@@ -507,6 +507,42 @@ yigate_connections_total 12345
           { code: 401, description: '未认证' },
         ],
       },
+      {
+        id: 'upstreams-batch-delete',
+        method: 'POST',
+        path: '/api/v1/config/upstreams/batch-delete',
+        summary: '批量删除上游',
+        description:
+          '一次请求删除多个上游：整批只写一次配置文件、只热加载一次，并同步清理路由规则与 socks5h_redirect 中对这些上游的引用。不存在的名称不会中断整批，会出现在 failed 里。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        requestBody: `{
+  "names": ["us-east-1", "us-west-1"]
+}`,
+        responseBody: `{
+  "status": "ok",
+  "deleted": ["us-east-1", "us-west-1"],
+  "failed": [
+    { "target": "not-exist", "error": "upstream not found" }
+  ]
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/upstreams/batch-delete \\
+  -H "Content-Type: application/json" \\
+  -d '{"names": ["us-east-1", "us-west-1"]}'`,
+          response: `{
+  "status": "ok",
+  "deleted": ["us-east-1", "us-west-1"],
+  "failed": []
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '请求已处理，逐项结果见 deleted / failed' },
+          { code: 400, description: '请求体格式错误或 names 为空' },
+          { code: 401, description: '未认证' },
+        ],
+      },
     ],
   },
   {
@@ -621,6 +657,42 @@ yigate_connections_total 12345
         statusCodes: [
           { code: 200, description: '删除成功' },
           { code: 404, description: '索引超出范围' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
+        id: 'rules-batch-delete',
+        method: 'POST',
+        path: '/api/v1/config/rules/batch-delete',
+        summary: '批量删除路由规则',
+        description:
+          '一次请求删除多条规则，整批只写一次配置文件、只热加载一次。indexes 一律按删除前的原始位置解释，服务端内部从大到小处理，因此调用方不必自己倒序，也不会因为边删边漂移删错行。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        requestBody: `{
+  "indexes": [0, 2]
+}`,
+        responseBody: `{
+  "status": "ok",
+  "deleted": ["0", "2"],
+  "failed": [
+    { "target": "9", "error": "rule index 9 out of range (0-2)" }
+  ]
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/rules/batch-delete \\
+  -H "Content-Type: application/json" \\
+  -d '{"indexes": [0, 2]}'`,
+          response: `{
+  "status": "ok",
+  "deleted": ["0", "2"],
+  "failed": []
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '请求已处理，逐项结果见 deleted / failed' },
+          { code: 400, description: '请求体格式错误或 indexes 为空' },
           { code: 401, description: '未认证' },
         ],
       },

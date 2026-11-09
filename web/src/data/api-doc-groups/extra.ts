@@ -109,6 +109,42 @@ export const extraGroups: ApiGroup[] = [
         ],
       },
       {
+        id: 'users-batch-delete',
+        method: 'POST',
+        path: '/api/v1/config/users/batch-delete',
+        summary: '批量删除用户',
+        description:
+          '一次请求删除多个代理用户，整批只写一次配置文件、只热加载一次。不存在的用户名会出现在 failed 里；把用户删空后所有代理连接回到匿名模式。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        requestBody: `{
+  "usernames": ["alice", "bob"]
+}`,
+        responseBody: `{
+  "status": "ok",
+  "deleted": ["alice", "bob"],
+  "failed": [
+    { "target": "nobody", "error": "user not found" }
+  ]
+}`,
+        example: {
+          request: `curl -X POST http://127.0.0.1:8890/api/v1/config/users/batch-delete \\
+  -H "Content-Type: application/json" \\
+  -d '{"usernames": ["alice", "bob"]}'`,
+          response: `{
+  "status": "ok",
+  "deleted": ["alice", "bob"],
+  "failed": []
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '请求已处理，逐项结果见 deleted / failed' },
+          { code: 400, description: '请求体格式错误或 usernames 为空' },
+          { code: 401, description: '未认证' },
+        ],
+      },
+      {
         id: 'users-update',
         method: 'PUT',
         path: '/api/v1/config/users/{username}',

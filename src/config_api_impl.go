@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,10 @@ type configEditor struct {
 
 // errNotFound 表示资源不存在，用于区分 404 和 400 响应。
 var errNotFound = proxy.ErrNotFound
+
+// 批量删除的结果类型与接口定义同在 proxy 包，这里用别名避免两处维护同一份结构。
+type BatchDeleteResult = proxy.BatchDeleteResult
+type BatchDeleteFailure = proxy.BatchDeleteFailure
 
 func effectiveTrafficRetentionDays(days int) int {
 	if days <= 0 {
@@ -372,11 +377,9 @@ func (e *configEditor) UpdateUpstream(name string, up proxy.UpstreamConfig) erro
 	return e.saveAndApply(cfg)
 }
 
-func (e *configEditor) RemoveUpstream(name string) error {
-	cfg, err := e.loadRawConfig()
-	if err != nil {
-		return err
-	}
+// removeUpstreamFromConfig 在内存中删除上游并清理引用，返回是否真的删掉了。
+// 抽出来是为了单条删除与批量删除共用同一套引用清理逻辑。
+func removeUpstreamFromConfig(cfg *Config, name string) bool {
 	name = strings.TrimSpace(name)
 	found := false
 	for i, existing := range cfg.Upstreams {
@@ -387,7 +390,7 @@ func (e *configEditor) RemoveUpstream(name string) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("%w: upstream %q not found", errNotFound, name)
+		return false
 	}
 	// 同时清理路由规则中对该上游的引用
 	for i := range cfg.Routing.Rules {
@@ -408,7 +411,51 @@ func (e *configEditor) RemoveUpstream(name string) error {
 		}
 	}
 	cfg.Routing.Socks5HRedirect.Upstreams = filteredSocks
+	return true
+}
+
+func (e *configEditor) RemoveUpstream(name string) error {
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return err
+	}
+	if !removeUpstreamFromConfig(cfg, name) {
+		return fmt.Errorf("%w: upstream %q not found", errNotFound, strings.TrimSpace(name))
+	}
 	return e.saveAndApply(cfg)
+}
+
+// RemoveUpstreams 批量删除上游：全部改动合并成一次写盘与一次热加载。
+// 不存在的名称记进 Failed 而不是整批失败，调用方据此保留选择。
+func (e *configEditor) RemoveUpstreams(names []string) (BatchDeleteResult, error) {
+	res := BatchDeleteResult{Deleted: []string{}}
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return res, err
+	}
+	seen := make(map[string]struct{}, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		if removeUpstreamFromConfig(cfg, name) {
+			res.Deleted = append(res.Deleted, name)
+			continue
+		}
+		res.Failed = append(res.Failed, BatchDeleteFailure{Target: raw, Error: "upstream not found"})
+	}
+	if len(res.Deleted) == 0 {
+		return res, nil
+	}
+	if err := e.saveAndApply(cfg); err != nil {
+		return BatchDeleteResult{Deleted: []string{}}, err
+	}
+	return res, nil
 }
 
 func (e *configEditor) ListRules() []proxy.RouteRule {
@@ -484,6 +531,48 @@ func (e *configEditor) RemoveRule(index int) error {
 	}
 	cfg.Routing.Rules = append(cfg.Routing.Rules[:index], cfg.Routing.Rules[index+1:]...)
 	return e.saveAndApply(cfg)
+}
+
+// RemoveRules 批量删除路由规则。
+// indexes 一律按删除前的原始位置解释：调用方不必自己倒序，也不会因为边删边漂移删错行。
+func (e *configEditor) RemoveRules(indexes []int) (BatchDeleteResult, error) {
+	res := BatchDeleteResult{Deleted: []string{}}
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return res, err
+	}
+	rules := cfg.Routing.Rules
+	drop := make(map[int]struct{}, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(rules) {
+			detail := "no rules configured"
+			if len(rules) > 0 {
+				detail = fmt.Sprintf("rule index %d out of range (0-%d)", index, len(rules)-1)
+			}
+			res.Failed = append(res.Failed, BatchDeleteFailure{Target: strconv.Itoa(index), Error: detail})
+			continue
+		}
+		if _, dup := drop[index]; dup {
+			continue
+		}
+		drop[index] = struct{}{}
+		res.Deleted = append(res.Deleted, strconv.Itoa(index))
+	}
+	if len(drop) == 0 {
+		return res, nil
+	}
+	kept := make([]proxy.RouteRule, 0, len(rules)-len(drop))
+	for i, rule := range rules {
+		if _, removed := drop[i]; removed {
+			continue
+		}
+		kept = append(kept, rule)
+	}
+	cfg.Routing.Rules = kept
+	if err := e.saveAndApply(cfg); err != nil {
+		return BatchDeleteResult{Deleted: []string{}}, err
+	}
+	return res, nil
 }
 
 func (e *configEditor) ListUsers() []string {
@@ -580,12 +669,9 @@ func (e *configEditor) UpdateUser(username, password string) error {
 	return e.saveAndApply(cfg)
 }
 
-func (e *configEditor) RemoveUser(username string) error {
+// removeUserFromConfig 在内存中删除用户（含所有 listener），返回是否真的删掉了。
+func removeUserFromConfig(cfg *Config, username string) bool {
 	username = strings.TrimSpace(username)
-	cfg, err := e.loadRawConfig()
-	if err != nil {
-		return err
-	}
 	if cfg.Users == nil {
 		cfg.Users = make(map[string]string)
 	}
@@ -604,10 +690,50 @@ func (e *configEditor) RemoveUser(username string) error {
 			found = true
 		}
 	}
-	if !found {
-		return fmt.Errorf("%w: user %q not found", errNotFound, username)
+	return found
+}
+
+func (e *configEditor) RemoveUser(username string) error {
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return err
+	}
+	if !removeUserFromConfig(cfg, username) {
+		return fmt.Errorf("%w: user %q not found", errNotFound, strings.TrimSpace(username))
 	}
 	return e.saveAndApply(cfg)
+}
+
+// RemoveUsers 批量删除用户：一次写盘一次热加载，删空即回到匿名代理。
+func (e *configEditor) RemoveUsers(usernames []string) (BatchDeleteResult, error) {
+	res := BatchDeleteResult{Deleted: []string{}}
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return res, err
+	}
+	seen := make(map[string]struct{}, len(usernames))
+	for _, raw := range usernames {
+		username := strings.TrimSpace(raw)
+		if username == "" {
+			continue
+		}
+		if _, dup := seen[username]; dup {
+			continue
+		}
+		seen[username] = struct{}{}
+		if removeUserFromConfig(cfg, username) {
+			res.Deleted = append(res.Deleted, username)
+			continue
+		}
+		res.Failed = append(res.Failed, BatchDeleteFailure{Target: raw, Error: "user not found"})
+	}
+	if len(res.Deleted) == 0 {
+		return res, nil
+	}
+	if err := e.saveAndApply(cfg); err != nil {
+		return BatchDeleteResult{Deleted: []string{}}, err
+	}
+	return res, nil
 }
 
 // GetSettings 返回全局设置视图。

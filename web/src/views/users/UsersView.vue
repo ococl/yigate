@@ -4,7 +4,7 @@ import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { listUsers, addUser, updateUserPassword, deleteUser } from '@/api/users'
+import { listUsers, addUser, updateUserPassword, deleteUser, batchDeleteUsers } from '@/api/users'
 import type { UserInfo } from '@/types/api'
 
 const isMobile = useIsMobile()
@@ -152,22 +152,23 @@ async function handleBulkDelete() {
   if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
   bulkDeleting.value = true
   const targets = [...selectedRowKeys.value]
-  const failed: string[] = []
-  for (const username of targets) {
-    try {
-      await deleteUser(username)
-    } catch {
-      failed.push(username)
+  try {
+    // 一次请求一次落盘，服务端返回逐项结果
+    const res = await batchDeleteUsers(targets)
+    const failed = (res.failed ?? []).map((item) => item.target)
+    // 失败项留在选中里：用户可以直接再点一次，不用在列表里重新找
+    selectedRowKeys.value = failed
+    await fetchData()
+    if (failed.length === 0) {
+      message.success(`已删除 ${res.deleted.length} 个用户`)
+      return
     }
+    message.warning(`已删除 ${res.deleted.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
+  } catch {
+    // 整体失败（网络/500）已由请求层提示，保留当前选择
+  } finally {
+    bulkDeleting.value = false
   }
-  bulkDeleting.value = false
-  selectedRowKeys.value = []
-  await fetchData()
-  if (failed.length === 0) {
-    message.success(`已删除 ${targets.length} 个用户`)
-    return
-  }
-  message.warning(`已删除 ${targets.length - failed.length} 个，失败 ${failed.length} 个：${failed.join('、')}`)
 }
 
 onMounted(fetchData)
