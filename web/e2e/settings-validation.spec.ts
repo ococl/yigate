@@ -117,3 +117,24 @@ test('settings reports a load failure instead of showing an empty form', async (
   await page.getByRole('button', { name: /重\s*试/ }).click()
   await expect(page.getByText('设置加载失败')).toBeVisible()
 })
+
+test('retention 0 stays "use default" instead of becoming one day', async ({ page }) => {
+  await login(page)
+
+  let sent: Record<string, unknown> | null = null
+  await page.route('**/api/v1/config/settings', (route) => {
+    if (route.request().method() === 'PUT') {
+      sent = route.request().postDataJSON()
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":"ok"}' })
+    }
+    return route.continue()
+  })
+
+  await page.goto('/settings?section=quota')
+  // 字段名后面会跟一个 tooltip 图标，用正则匹配即可
+  await page.getByRole('spinbutton', { name: /流量保留天数/ }).fill('0')
+  await page.getByRole('button', { name: '保存设置' }).click()
+
+  // 0 的语义是「使用默认 30 天」，被强转成 1 会让流量明细一天后就被清掉
+  await expect.poll(() => sent?.traffic_retention_days).toBe(0)
+})

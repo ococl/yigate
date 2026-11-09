@@ -510,3 +510,40 @@ test('about page can retry the version read', async ({ page }) => {
   await expect(page.getByText('v9.9.9')).toBeVisible()
   await expect(page.getByText('无法获取版本信息')).toHaveCount(0)
 })
+
+test('moving a rule reveals where it landed', async ({ page, request }) => {
+  const listRules = async () => {
+    const resp = await request.get('/api/v1/config/rules', { headers: auth })
+    return ((await resp.json()) as { rules?: { index: number; values: string[] }[] }).rules ?? []
+  }
+  const cleanup = async () => {
+    for (const rule of await listRules()) {
+      if (rule.values?.some((v) => v.startsWith('zh-move-'))) {
+        await request.delete(`/api/v1/config/rules/${rule.index}`, { headers: auth })
+      }
+    }
+  }
+
+  await cleanup()
+  for (const value of ['zh-move-1', 'zh-move-2', 'zh-move-3']) {
+    const created = await request.post('/api/v1/config/rules', {
+      headers: auth,
+      data: { type: 'domain_suffix', values: [value], action: 'direct', upstreams: [] },
+    })
+    expect(created.ok()).toBeTruthy()
+  }
+
+  await login(page)
+  await page.goto('/rules')
+
+  const rows = page.locator('.ant-table-tbody tr.ant-table-row')
+  await expect(rows).toHaveCount(3)
+
+  await rows.filter({ hasText: 'zh-move-2' }).getByRole('button', { name: '下移' }).click()
+
+  // 顺序变成 1、3、2，且落点行被高亮，长列表里不用自己找
+  await expect(rows.nth(2)).toContainText('zh-move-2')
+  await expect(page.locator('.ant-table-tbody tr.row-highlight')).toHaveCount(1)
+
+  await cleanup()
+})

@@ -482,7 +482,8 @@ async function handleSave() {
     per_user_quota: Math.round(f.per_user_quota),
     per_upstream_quota: Math.round(f.per_upstream_quota),
     quota_window_seconds: f.quota_window_seconds,
-    traffic_retention_days: Math.max(1, Math.round(f.traffic_retention_days || 30)),
+    // 0 在运行时表示「用默认 30 天」；此前这里强转成 1，会让流量明细只保留一天
+    traffic_retention_days: Math.max(0, Math.round(f.traffic_retention_days ?? 30)),
     log_level: f.log_level,
   }
 

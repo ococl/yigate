@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -14,6 +14,9 @@ const loading = ref(false)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
 const movingIndex = ref<number | null>(null)
+// 移动后目标行的新位置，用于滚动定位与短暂高亮
+const highlightIndex = ref<number | null>(null)
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
 // 正在删除的规则序号，避免重复点击触发多次 DELETE
 const deleting = ref<number | null>(null)
 const modalVisible = ref(false)
@@ -173,11 +176,42 @@ async function handleSubmit() {
   }
 }
 
+// 移动后行序变化，长列表里用户看不出刚才那行去了哪；翻到对应页并高亮一小会儿
+function revealMovedRule(newIndex: number) {
+  const desktopTarget = Math.floor(newIndex / DESKTOP_PAGE_SIZE) + 1
+  if (desktopPage.value !== desktopTarget) desktopPage.value = desktopTarget
+  const mobileTarget = Math.floor(newIndex / MOBILE_PAGE_SIZE) + 1
+  if (mobilePage.value !== mobileTarget) mobilePage.value = mobileTarget
+
+  highlightIndex.value = newIndex
+  window.clearTimeout(highlightTimer)
+  highlightTimer = window.setTimeout(() => {
+    highlightIndex.value = null
+  }, 2000)
+
+  void nextTick(() => {
+    // 等表格在切页后完成一次渲染，再定位
+    window.requestAnimationFrame(() => {
+      const localIndex = newIndex % (isMobile.value ? MOBILE_PAGE_SIZE : DESKTOP_PAGE_SIZE)
+      const selector = isMobile.value ? '.mobile-card' : '.ant-table-tbody tr.ant-table-row'
+      document.querySelectorAll(selector)[localIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+  })
+}
+
+function rowClassName(record: RuleInfo): string {
+  return highlightIndex.value === record.index ? 'row-highlight' : ''
+}
+
 async function handleMove(index: number, direction: 'up' | 'down') {
+  // 移动期间禁止并发：第二次点击的序号基于旧顺序，落库后会错位
+  if (movingIndex.value !== null) return
   movingIndex.value = index
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
   try {
     await moveRule(index, direction)
     await fetchData()
+    revealMovedRule(targetIndex)
   } catch {
     // 错误已由拦截器处理
   } finally {
@@ -236,7 +270,12 @@ onMounted(fetchData)
         <a-empty v-else-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理">
           <a-button type="primary" @click="openAddModal">新增规则</a-button>
         </a-empty>
-        <a-card v-for="record in mobileItems" :key="record.index" size="small" class="mobile-card">
+        <a-card
+          v-for="record in mobileItems"
+          :key="record.index"
+          size="small"
+          :class="['mobile-card', { 'row-highlight': highlightIndex === record.index }]"
+        >
           <div class="mobile-card-head">
             <a-space size="small">
               <a-tag>{{ record.index + 1 }}</a-tag>
@@ -265,7 +304,7 @@ onMounted(fetchData)
           <div class="mobile-card-actions">
             <a-button
               size="small"
-              :disabled="record.index === 0"
+              :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
               :loading="movingIndex === record.index"
               @click="handleMove(record.index, 'up')"
             >
@@ -273,7 +312,9 @@ onMounted(fetchData)
             </a-button>
             <a-button
               size="small"
-              :disabled="record.index === dataSource.length - 1"
+              :disabled="
+                record.index === dataSource.length - 1 || (movingIndex !== null && movingIndex !== record.index)
+              "
               :loading="movingIndex === record.index"
               @click="handleMove(record.index, 'down')"
             >
@@ -307,6 +348,7 @@ onMounted(fetchData)
           :columns="columns"
           :loading="loading"
           row-key="index"
+          :row-class-name="rowClassName"
           :pagination="desktopPagination"
           :scroll="{ x: 900, y: 1 }"
         >
@@ -335,8 +377,9 @@ onMounted(fetchData)
             <a-button
               type="text"
               size="small"
-              :disabled="record.index === 0"
+              :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
               :loading="movingIndex === record.index"
+              aria-label="上移"
               @click="handleMove(record.index, 'up')"
             >↑</a-button>
           </a-tooltip>
@@ -344,8 +387,11 @@ onMounted(fetchData)
             <a-button
               type="text"
               size="small"
-              :disabled="record.index === dataSource.length - 1"
+              :disabled="
+                record.index === dataSource.length - 1 || (movingIndex !== null && movingIndex !== record.index)
+              "
               :loading="movingIndex === record.index"
+              aria-label="下移"
               @click="handleMove(record.index, 'down')"
             >↓</a-button>
           </a-tooltip>
