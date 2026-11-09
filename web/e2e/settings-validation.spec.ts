@@ -98,3 +98,22 @@ test('settings shows inline errors only after save, not while typing', async ({ 
   await page.locator('#stg-dot-addr').fill('1.1.1.1')
   expect(await fieldErrors(page)).toEqual([])
 })
+
+test('settings reports a load failure instead of showing an empty form', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/config/settings', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+  )
+  await page.goto('/settings')
+
+  // 读不到配置时不能摆出一份空表单，更不能允许保存覆盖服务端配置
+  await expect(page.getByText('设置加载失败')).toBeVisible()
+  await expect(page.getByText('无法读取服务端配置')).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存设置' })).toBeDisabled()
+  await expect(page.locator('.settings-body')).toHaveCount(0)
+
+  // antd 会在两个汉字间插空格，可访问名称是「重 试」
+  await page.getByRole('button', { name: /重\s*试/ }).click()
+  await expect(page.getByText('设置加载失败')).toBeVisible()
+})

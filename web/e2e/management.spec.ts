@@ -267,3 +267,15 @@ test('api doc search offers a clear action when nothing matches', async ({ page 
   await page.getByRole('button', { name: '清除搜索' }).click()
   await expect(page.getByText('未找到匹配')).toHaveCount(0)
 })
+
+test('pprof page explains why the switch is disabled when the read fails', async ({ page }) => {
+  await login(page)
+
+  await page.route('**/api/v1/config/settings', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+  )
+  await page.goto('/pprof')
+
+  await expect(page.getByText('读取开关状态失败')).toBeVisible()
+  await expect(page.getByRole('switch')).toBeDisabled()
+})

@@ -84,6 +84,8 @@ const pprofGroups: { title: string; items: PprofLink[] }[] = [
 
 const loaded = ref(false)
 const saving = ref(false)
+// 开关值来自服务端；读取失败时开关保持禁用，并明确告知原因
+const loadError = ref(false)
 // 当前生效值来自服务端，表单值保存成功后同步
 const enabled = ref(false)
 
@@ -92,8 +94,9 @@ async function fetchSettings() {
     const settings = await getSettings()
     enabled.value = settings.enable_pprof
     loaded.value = true
+    loadError.value = false
   } catch {
-    // 错误提示由请求拦截器统一处理
+    loadError.value = true
   }
 }
 
@@ -141,7 +144,11 @@ onMounted(fetchSettings)
                   un-checked-children="关闭"
                   @change="(value: boolean) => handleToggle(value)"
                 />
-                <a-typography-text type="secondary" class="switch-hint">保存后立即生效</a-typography-text>
+                <a-typography-text v-if="loadError" type="danger" class="switch-hint">
+                  读取开关状态失败
+                  <a-button type="link" size="small" style="padding: 0 4px;" @click="fetchSettings">重试</a-button>
+                </a-typography-text>
+                <a-typography-text v-else type="secondary" class="switch-hint">保存后立即生效</a-typography-text>
               </div>
             </a-form-item>
           </a-form>

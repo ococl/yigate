@@ -95,6 +95,8 @@ const authStore = useAuthStore()
 
 const settings = ref<SettingsView | null>(null)
 const loading = ref(false)
+// 设置读取失败：此时表单里只是默认值，绝不能当成真实配置保存
+const loadError = ref(false)
 const reloading = ref(false)
 const saving = ref(false)
 const clearingToken = ref(false)
@@ -395,6 +397,10 @@ async function fetchAll() {
   loading.value = true
   try {
     applySettingsToForm(await getSettings())
+    loadError.value = false
+  } catch {
+    // 保留已有内容（首次加载时为空），只标记失败，避免默认值被误认成真实配置
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -420,6 +426,10 @@ function resetForm() {
 
 async function handleSave() {
   if (!form.value) return
+  if (loadError.value || !settings.value) {
+    message.warning('设置尚未成功加载，请先重试读取后再保存')
+    return
+  }
   const f = form.value
 
   resetSettingsErrors()
@@ -560,11 +570,35 @@ onMounted(fetchAll)
           <a-button :loading="reloading">重新加载配置</a-button>
         </a-popconfirm>
         <a-button @click="resetForm">还原</a-button>
-        <a-button type="primary" :loading="saving" :disabled="!isDirty" @click="handleSave">保存设置</a-button>
+        <a-button
+          type="primary"
+          :loading="saving"
+          :disabled="!isDirty || loadError || !settings"
+          @click="handleSave"
+        >
+          保存设置
+        </a-button>
       </a-space>
     </div>
 
-    <div class="settings-body">
+    <a-alert
+      v-if="loadError"
+      type="error"
+      show-icon
+      class="settings-load-error"
+      :message="settings ? '设置刷新失败' : '设置加载失败'"
+      :description="
+        settings
+          ? '当前展示的是上次成功读取的内容，此时保存可能覆盖服务端最新配置。请先重试读取。'
+          : '无法读取服务端配置，页面显示的是空表单，不能保存。请确认后端服务正常后重试。'
+      "
+    >
+      <template #action>
+        <a-button size="small" :loading="loading" @click="fetchAll">重试</a-button>
+      </template>
+    </a-alert>
+
+    <div v-if="!loadError || settings" class="settings-body">
       <!-- 左侧设置分类 -->
       <aside class="settings-aside">
         <a-card size="small" class="settings-nav-card">
@@ -1054,6 +1088,11 @@ onMounted(fetchAll)
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.settings-load-error {
+  flex: 0 0 auto;
+  margin-bottom: 16px;
 }
 
 .settings-body {
