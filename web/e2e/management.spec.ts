@@ -295,3 +295,72 @@ test('rendering errors surface a visible message instead of a blank page', async
 
   await expect(page.getByText('页面渲染出现异常')).toBeVisible()
 })
+
+test('check-all names the upstreams that failed', async ({ page }) => {
+  await login(page)
+
+  const checkedAt = new Date().toISOString()
+  await page.route('**/api/v1/config/upstreams/check', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        results: [
+          { name: 'zh-check-ok', alive: true, checked_at: checkedAt },
+          { name: 'zh-check-bad-1', alive: false, error: 'dial timeout', checked_at: checkedAt },
+          { name: 'zh-check-bad-2', alive: false, error: 'dial timeout', checked_at: checkedAt },
+        ],
+      }),
+    }),
+  )
+  await page.goto('/upstreams')
+  await page.getByRole('button', { name: '一键巡检' }).click()
+
+  // 只说 1/3 可用还得自己找是哪个，直接点名失败的
+  await expect(page.getByText(/1\/3 个可用/)).toBeVisible()
+  await expect(page.getByText(/zh-check-bad-1/)).toBeVisible()
+  await expect(page.getByText(/zh-check-bad-2/)).toBeVisible()
+})
+
+test('toggling two upstreams keeps both rows loading', async ({ page, request }) => {
+  const names = [`${PREFIX}toggle-a`, `${PREFIX}toggle-b`]
+  for (const name of names) {
+    await request.delete(`/api/v1/config/upstreams/${encodeURIComponent(name)}`, { headers: auth })
+    const created = await request.post('/api/v1/config/upstreams', {
+      headers: auth,
+      data: { name, url: 'http://127.0.0.1:9', types: ['http'] },
+    })
+    expect(created.ok()).toBeTruthy()
+  }
+
+  await login(page)
+  await page.goto('/upstreams')
+  await expect(page.getByRole('heading', { name: '上游管理' })).toBeVisible()
+
+  // 拖慢 PUT，制造两行同时进行中的窗口
+  await page.route('**/api/v1/config/upstreams/*', async (route) => {
+    if (route.request().method() !== 'PUT') {
+      await route.continue()
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await route.continue()
+  })
+
+  const [rowA, rowB] = names.map((name) =>
+    page.locator('.ant-table-tbody tr.ant-table-row').filter({ hasText: name }),
+  )
+  await rowA.locator('.ant-switch').click()
+  await rowB.locator('.ant-switch').click()
+
+  // 后点的行不能把先点那行的 loading 顶掉
+  await expect(rowA.locator('.ant-switch-loading')).toBeVisible()
+  await expect(rowB.locator('.ant-switch-loading')).toBeVisible()
+
+  await expect(rowA.locator('.ant-switch-loading')).toHaveCount(0, { timeout: 10000 })
+  await expect(rowB.locator('.ant-switch-loading')).toHaveCount(0, { timeout: 10000 })
+
+  for (const name of names) {
+    await request.delete(`/api/v1/config/upstreams/${encodeURIComponent(name)}`, { headers: auth })
+  }
+})

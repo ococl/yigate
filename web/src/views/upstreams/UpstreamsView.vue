@@ -31,11 +31,12 @@ const dataSource = ref<UpstreamInfo[]>([])
 const loading = ref(false)
 // 首次/刷新失败时展示错误态与重试入口，避免与「暂无数据」混淆
 const loadError = ref(false)
-const checking = ref<string | null>(null)
+// 按名称跟踪进行中的操作：同时巡检或切换多行时，各行的 loading 不能互相覆盖
+const checking = ref<string[]>([])
+const toggling = ref<string[]>([])
 // 正在删除的上游名，避免重复点击触发多次 DELETE
 const deleting = ref<string | null>(null)
 const checkingAll = ref(false)
-const toggling = ref<string | null>(null)
 // 本次会话内手动检查的结果，仅用于补充失败原因文案
 const lastChecks = ref<Map<string, UpstreamCheckResult>>(new Map())
 // 服务端运行时健康状态（进程内存态），刷新页面后仍可读取
@@ -283,7 +284,8 @@ async function handleSubmit() {
 }
 
 async function handleToggle(record: UpstreamInfo, enabled: boolean) {
-  toggling.value = record.name
+  if (toggling.value.includes(record.name)) return
+  toggling.value = [...toggling.value, record.name]
   try {
     await updateUpstream(record.name, { enabled })
     message.success(enabled ? `已启用上游 ${record.name}` : `已禁用上游 ${record.name}`)
@@ -292,7 +294,7 @@ async function handleToggle(record: UpstreamInfo, enabled: boolean) {
     // 错误已由拦截器处理，重新拉取以还原开关状态
     await fetchData()
   } finally {
-    toggling.value = null
+    toggling.value = toggling.value.filter((n) => n !== record.name)
   }
 }
 
@@ -312,7 +314,8 @@ async function handleDelete(name: string) {
 }
 
 async function handleCheck(name: string) {
-  checking.value = name
+  if (checking.value.includes(name)) return
+  checking.value = [...checking.value, name]
   try {
     const { result } = await checkUpstream(name)
     lastChecks.value.set(result.name, result)
@@ -325,7 +328,7 @@ async function handleCheck(name: string) {
   } catch {
     // 错误已由拦截器处理
   } finally {
-    checking.value = null
+    checking.value = checking.value.filter((n) => n !== name)
   }
 }
 
@@ -340,7 +343,17 @@ async function handleCheckAll() {
       if (r.alive) aliveCount++
     }
     lastChecks.value = next
-    message.info(`巡检完成：${aliveCount}/${results.length} 个上游可用`)
+    if (results.length === 0) {
+      message.info('没有可巡检的上游')
+    } else if (aliveCount === results.length) {
+      message.success(`巡检完成：${aliveCount} 个上游全部可用`)
+    } else {
+      // 只报数字的话，用户还得自己在表格里找是哪一个坏了
+      const failed = results.filter((r) => !r.alive).map((r) => r.name)
+      const shown = failed.slice(0, 3).join('、')
+      const rest = failed.length > 3 ? ` 等 ${failed.length} 个` : ''
+      message.warning(`巡检完成：${aliveCount}/${results.length} 个可用；不可用：${shown}${rest}`)
+    }
     await fetchData()
   } catch {
     // 错误已由拦截器处理
@@ -465,7 +478,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             <a-typography-text strong>{{ record.name }}</a-typography-text>
             <a-switch
               :checked="record.enabled !== false"
-              :loading="toggling === record.name"
+              :loading="toggling.includes(record.name)"
               size="small"
               :aria-label="`启用或禁用上游 ${record.name}`"
               @change="(checked: boolean) => handleToggle(record, checked)"
@@ -507,7 +520,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             <a-button
               size="small"
               :disabled="record.enabled === false"
-              :loading="checking === record.name"
+              :loading="checking.includes(record.name)"
               @click="handleCheck(record.name)"
             >
               检查
@@ -549,7 +562,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
         <a-tooltip :title="record.enabled === false ? '已禁用：不参与流量调度与健康检查' : '启用中：点击可临时禁用'">
           <a-switch
             :checked="record.enabled !== false"
-            :loading="toggling === record.name"
+            :loading="toggling.includes(record.name)"
             size="small"
             :aria-label="`启用或禁用上游 ${record.name}`"
             @change="(checked: boolean) => handleToggle(record, checked)"
@@ -579,7 +592,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             type="link"
             size="small"
             :disabled="record.enabled === false"
-            :loading="checking === record.name"
+            :loading="checking.includes(record.name)"
             @click="handleCheck(record.name)"
           >
             检查
