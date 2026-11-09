@@ -117,3 +117,6 @@ desktop.ini
 .playwright-cli/
 test-results/
 playwright-report/
+
+# 视觉巡检快照（本地生成，不入库）
+.impeccable/

@@ -121,6 +121,11 @@ html:has(body.app-dark) {
   min-height: 0;
 }
 
+/* 空列表不撑满视口：卡片回落到内容高度，避免表头下方留出一整屏空白 */
+.fill-card:has(.ant-table-placeholder) {
+  flex: 0 0 auto;
+}
+
 .fill-card > .ant-card-body {
   display: flex;
   flex-direction: column;
