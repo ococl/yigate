@@ -249,6 +249,81 @@ watch(activeSection, () => {
   detailRef.value?.scrollTo({ top: 0 })
 })
 
+// 字段级校验：保存时把错误挂到对应字段，同时切换到该字段所在章节，
+// 避免顶部 toast 一闪而过、用户还要自己找是哪个字段填错了。
+interface SettingsFieldError {
+  key: string
+  section: string
+  message: string
+}
+
+const settingsErrors = ref<Record<string, string>>({})
+
+function resetSettingsErrors() {
+  settingsErrors.value = {}
+}
+
+watch(
+  () => [
+    form.value.dns_type,
+    form.value.doh_url,
+    form.value.dot_addr,
+    denyPortsText.value,
+    allowPortsText.value,
+    tokenInput.value,
+  ],
+  () => resetSettingsErrors(),
+)
+
+function validateSettings(): SettingsFieldError[] {
+  const f = form.value
+  const errors: SettingsFieldError[] = []
+
+  if (f.dns_type === 'doh') {
+    const url = f.doh_url.trim()
+    if (!url) errors.push({ key: 'doh_url', section: 'dns', message: '请填写 DoH URL' })
+    else if (!/^https?:\/\/\S+$/i.test(url)) {
+      errors.push({ key: 'doh_url', section: 'dns', message: 'DoH URL 需以 http:// 或 https:// 开头' })
+    }
+  }
+  if (f.dns_type === 'dot') {
+    const addr = f.dot_addr.trim()
+    if (!addr) errors.push({ key: 'dot_addr', section: 'dns', message: '请填写 DoT 地址' })
+    else if (!/^[^\s:]+:\d{1,5}$/.test(addr)) {
+      errors.push({ key: 'dot_addr', section: 'dns', message: 'DoT 地址格式为 host:port，如 1.1.1.1:853' })
+    }
+  }
+
+  const deny = parsePorts(denyPortsText.value)
+  if (deny.invalid.length > 0) {
+    errors.push({
+      key: 'deny_ports',
+      section: 'destination',
+      message: `端口需为 1-65535 的整数：${deny.invalid.join(', ')}`,
+    })
+  }
+  const allow = parsePorts(allowPortsText.value)
+  if (allow.invalid.length > 0) {
+    errors.push({
+      key: 'allow_ports',
+      section: 'destination',
+      message: `端口需为 1-65535 的整数：${allow.invalid.join(', ')}`,
+    })
+  }
+
+  const token = tokenInput.value.trim()
+  if (token && token.length < 8) {
+    errors.push({ key: 'token', section: 'panel', message: '管理令牌至少 8 位，过短的令牌容易被暴力破解' })
+  }
+
+  // GeoSite 自动更新间隔由 GeoSite 页面维护，没有对应输入框，保留仅提示
+  if (f.geosite_auto_update && f.geosite_update_interval_hours <= 0) {
+    errors.push({ key: 'geosite_interval', section: 'routing', message: '启用 GeoSite 自动更新时，更新间隔必须大于 0' })
+  }
+
+  return errors
+}
+
 // 端口输入允许 1-65535 的整数，非法片段单独提示，避免后端校验失败后才发现
 function parsePorts(text: string): { ports: number[]; invalid: string[] } {
   const ports: number[] = []
@@ -346,30 +421,18 @@ function resetForm() {
 async function handleSave() {
   if (!form.value) return
   const f = form.value
-  if (f.dns_type === 'doh' && !f.doh_url.trim()) {
-    message.warning('DoH 模式需要填写 DoH URL')
-    return
-  }
-  if (f.dns_type === 'dot' && !f.dot_addr.trim()) {
-    message.warning('DoT 模式需要填写 DoT 地址')
-    return
-  }
-  if (f.geosite_auto_update && f.geosite_update_interval_hours <= 0) {
-    message.warning('启用 GeoSite 自动更新时，更新间隔必须大于 0')
-    return
-  }
-  const denyParsed = parsePorts(denyPortsText.value)
-  const allowParsed = parsePorts(allowPortsText.value)
-  const invalidPorts = [...denyParsed.invalid, ...allowParsed.invalid]
-  if (invalidPorts.length > 0) {
-    message.warning(`端口需为 1-65535 的整数，请修正：${invalidPorts.join(', ')}`)
+
+  resetSettingsErrors()
+  const errors = validateSettings()
+  for (const err of errors) settingsErrors.value[err.key] = err.message
+  if (errors.length > 0) {
+    // 跳到第一个出错字段所在章节，并保留一条汇总提示
+    selectSection(errors[0].section)
+    const summary = errors.length === 1 ? errors[0].message : `${errors[0].message}（共 ${errors.length} 项待修正）`
+    message.warning(summary)
     return
   }
   const newToken = tokenInput.value.trim()
-  if (newToken && newToken.length < 8) {
-    message.warning('管理令牌至少 8 位，过短的令牌容易被暴力破解')
-    return
-  }
 
   const patch: SettingsPatch = {
     check_interval_seconds: Math.round(f.check_interval_seconds),
@@ -399,8 +462,8 @@ async function handleSave() {
     allow_cidrs: f.allow_cidrs || [],
     deny_domains: f.deny_domains || [],
     allow_domains: f.allow_domains || [],
-    deny_ports: denyParsed.ports,
-    allow_ports: allowParsed.ports,
+    deny_ports: parsePorts(denyPortsText.value).ports,
+    allow_ports: parsePorts(allowPortsText.value).ports,
     allowed_clients: f.allowed_clients || [],
     rate_limit_connections_per_second: Math.round(f.rate_limit_connections_per_second),
     rate_limit_burst: Math.round(f.rate_limit_burst),
@@ -636,6 +699,8 @@ onMounted(fetchAll)
                       <a-form-item html-for="stg-token-input"
                         label="管理令牌"
                         :tooltip="`对应 management_auth_token；当前${settings?.management_token_set ? '已设置' : '未设置'}。留空表示保持不变。`"
+                        :validate-status="settingsErrors.token ? 'error' : undefined"
+                        :help="settingsErrors.token"
                       >
                         <div class="token-input-row">
                           <a-input-password id="stg-token-input"
@@ -721,7 +786,13 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="8">
-                      <a-form-item html-for="stg-doh-url" label="DoH URL" tooltip="仅 doh 模式生效">
+                      <a-form-item
+                        html-for="stg-doh-url"
+                        label="DoH URL"
+                        tooltip="仅 doh 模式生效"
+                        :validate-status="settingsErrors.doh_url ? 'error' : undefined"
+                        :help="settingsErrors.doh_url"
+                      >
                         <a-input id="stg-doh-url"
                           v-model:value="form.doh_url"
                           :disabled="form.dns_type !== 'doh'"
@@ -730,7 +801,13 @@ onMounted(fetchAll)
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="5">
-                      <a-form-item html-for="stg-dot-addr" label="DoT 地址" tooltip="仅 dot 模式生效，格式 host:port">
+                      <a-form-item
+                        html-for="stg-dot-addr"
+                        label="DoT 地址"
+                        tooltip="仅 dot 模式生效，格式 host:port"
+                        :validate-status="settingsErrors.dot_addr ? 'error' : undefined"
+                        :help="settingsErrors.dot_addr"
+                      >
                         <a-input id="stg-dot-addr" v-model:value="form.dot_addr" :disabled="form.dns_type !== 'dot'" placeholder="1.1.1.1:853" />
                       </a-form-item>
                     </a-col>
@@ -835,12 +912,23 @@ onMounted(fetchAll)
                   </a-row>
                   <a-row :gutter="16">
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-deny-ports-text" label="拒绝端口" tooltip="逗号或空格分隔，如 25, 135, 445">
+                      <a-form-item
+                      html-for="stg-deny-ports-text"
+                      label="拒绝端口"
+                      tooltip="逗号或空格分隔，如 25, 135, 445"
+                      :validate-status="settingsErrors.deny_ports ? 'error' : undefined"
+                      :help="settingsErrors.deny_ports"
+                    >
                         <a-input id="stg-deny-ports-text" v-model:value="denyPortsText" placeholder="25, 135, 445" />
                       </a-form-item>
                     </a-col>
                     <a-col :xs="24" :md="12">
-                      <a-form-item html-for="stg-allow-ports-text" label="允许端口">
+                      <a-form-item
+                      html-for="stg-allow-ports-text"
+                      label="允许端口"
+                      :validate-status="settingsErrors.allow_ports ? 'error' : undefined"
+                      :help="settingsErrors.allow_ports"
+                    >
                         <a-input id="stg-allow-ports-text" v-model:value="allowPortsText" placeholder="80, 443" />
                       </a-form-item>
                     </a-col>
