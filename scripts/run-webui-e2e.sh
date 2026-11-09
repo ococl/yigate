@@ -18,4 +18,9 @@ if [[ ! -f "${CONFIG}" ]]; then
   exit 1
 fi
 
-exec "${BIN}" -config "${CONFIG}" run
+# 实例运行时会重写配置文件（补默认值、去掉注释），
+# 复制到临时目录后再启动，避免污染仓库内被跟踪的测试配置。
+WORK_DIR="$(mktemp -d)"
+cp "${CONFIG}" "${WORK_DIR}/config.yml"
+echo "webui e2e config: ${WORK_DIR}/config.yml"
+exec "${BIN}" -config "${WORK_DIR}/config.yml" run
