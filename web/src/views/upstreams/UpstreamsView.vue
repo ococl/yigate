@@ -544,7 +544,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
               cancel-text="取消"
               @confirm="handleDelete(record.name)"
             >
-              <a-button size="small" danger :loading="deleting === record.name">删除</a-button>
+              <a-button type="link" size="small" danger :loading="deleting === record.name">删除</a-button>
             </a-popconfirm>
           </div>
         </a-card>

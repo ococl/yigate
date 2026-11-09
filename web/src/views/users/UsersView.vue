@@ -186,7 +186,7 @@ onMounted(fetchData)
               cancel-text="取消"
               @confirm="handleDelete(record.username)"
             >
-              <a-button size="small" danger :loading="deleting === record.username">删除</a-button>
+              <a-button type="link" size="small" danger :loading="deleting === record.username">删除</a-button>
             </a-popconfirm>
           </div>
         </a-card>

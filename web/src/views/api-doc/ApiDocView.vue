@@ -151,7 +151,7 @@ async function copyToClipboard(text: string) {
               <a-badge
                 :count="group.endpoints.length"
                 size="small"
-                :number-style="{ backgroundColor: '#1677ff' }"
+                color="blue"
                 :offset="[10, 0]"
               >
                 {{ group.title }}
@@ -247,7 +247,7 @@ async function copyToClipboard(text: string) {
                   <div class="code-block">
                     <div class="code-block-header">
                       <span>Request Body</span>
-                      <a-button type="text" size="small" @click="copyToClipboard(endpoint.requestBody!)">
+                      <a-button type="link" size="small" @click="copyToClipboard(endpoint.requestBody!)">
                         复制
                       </a-button>
                     </div>
@@ -262,7 +262,7 @@ async function copyToClipboard(text: string) {
                 <div class="code-block">
                   <div class="code-block-header">
                     <span>Response Body</span>
-                    <a-button type="text" size="small" @click="copyToClipboard(endpoint.responseBody)">
+                    <a-button type="link" size="small" @click="copyToClipboard(endpoint.responseBody)">
                       复制
                     </a-button>
                   </div>
@@ -302,7 +302,7 @@ async function copyToClipboard(text: string) {
                   <div class="code-block-header">
                     <span>cURL</span>
                     <a-button
-                      type="text"
+                      type="link"
                       size="small"
                       v-if="endpoint.example.request"
                       @click="copyToClipboard(endpoint.example.request)"
@@ -319,7 +319,7 @@ async function copyToClipboard(text: string) {
                 <div class="code-block">
                   <div class="code-block-header">
                     <span>Response</span>
-                    <a-button type="text" size="small" @click="copyToClipboard(endpoint.example.response)">
+                    <a-button type="link" size="small" @click="copyToClipboard(endpoint.example.response)">
                       复制
                     </a-button>
                   </div>
@@ -413,6 +413,11 @@ async function copyToClipboard(text: string) {
   border-radius: 2px;
   background: #fff1b8;
   color: inherit;
+}
+
+body.app-dark .api-docs-detail mark {
+  background: #5c4813;
+  color: #fff;
 }
 
 .code-block {

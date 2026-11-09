@@ -329,7 +329,7 @@ onMounted(fetchData)
               cancel-text="取消"
               @confirm="handleDelete(record.index)"
             >
-              <a-button size="small" danger :loading="deleting === record.index">删除</a-button>
+              <a-button type="link" size="small" danger :loading="deleting === record.index">删除</a-button>
             </a-popconfirm>
           </div>
         </a-card>
@@ -377,7 +377,7 @@ onMounted(fetchData)
         <a-space>
           <a-tooltip title="上移">
             <a-button
-              type="text"
+              type="link"
               size="small"
               :disabled="record.index === 0 || (movingIndex !== null && movingIndex !== record.index)"
               :loading="movingIndex === record.index"
@@ -387,7 +387,7 @@ onMounted(fetchData)
           </a-tooltip>
           <a-tooltip title="下移">
             <a-button
-              type="text"
+              type="link"
               size="small"
               :disabled="
                 record.index === dataSource.length - 1 || (movingIndex !== null && movingIndex !== record.index)

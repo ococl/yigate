@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { message, theme } from 'antdv-next'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
+import { useAppStore } from '@/stores/app'
 import { getHealth, getStatus, getTraffic } from '@/api/system'
 import { formatDateTime, formatTimeOnly } from '@/utils/datetime'
 import { formatBytes, formatUptime } from '@/utils/format'
@@ -15,6 +16,10 @@ const loading = ref(false)
 const lastRefreshed = ref<Date | null>(null)
 
 const { token } = theme.useToken()
+const appStore = useAppStore()
+// antd 的 colorSuccess 是 #52c41a，白底上只有 2.27:1；状态值是大字号，至少要 3:1
+const successText = computed(() => (appStore.isDark ? '#49aa19' : '#237804'))
+const errorText = computed(() => (appStore.isDark ? '#ff7875' : '#cf1322'))
 
 // silent=true 用于定时刷新：避免每次自动刷新都整页 loading 抖动
 async function fetchData(silent = false) {
@@ -328,11 +333,11 @@ const uncheckedCount = computed(() => upstreams.value.filter((u) => !checked(u))
 const healthUnavailable = computed(() => !health.value && !loading.value)
 const statusColor = computed(() => {
   if (!health.value) return token.value.colorTextSecondary
-  return health.value.status === 'up' ? token.value.colorSuccess : token.value.colorError
+  return health.value.status === 'up' ? successText.value : errorText.value
 })
 const readyColor = computed(() => {
   if (!health.value) return token.value.colorTextSecondary
-  return health.value.router_ready && health.value.manager_ready ? token.value.colorSuccess : token.value.colorError
+  return health.value.router_ready && health.value.manager_ready ? successText.value : errorText.value
 })
 
 fetchData()
@@ -1001,7 +1006,7 @@ useVisiblePolling(() => fetchData(true), 10000)
   color: rgba(128, 128, 128, 0.9);
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .traffic-charts {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
