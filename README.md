@@ -21,7 +21,7 @@
 - **SSRF 防护**：`destination_policy` 默认拒绝回环 / 私网 / 链路本地 / 云元数据等敏感目标。
 - **流量审计与配额**：按 user / upstream / target 三维统计，支持配额限制；流量按自然日持久化，默认保留 30 天并自动清理。
 - **可观测性**：`/health`、`/metrics`（Prometheus，`yigate_` 前缀）、`/api/v1/status`、运行时配置 API。
-- **内嵌 Web 管理界面**：Vue 3 + antdv-next，随二进制启动，无需额外部署。
+- **内嵌 Web 管理界面**：Vue 3 + antdv-next，随二进制启动，无需额外部署；界面支持简体中文 / English 切换。
 - **多形态部署**：原生二进制、Docker、systemd 服务；运行目录布局在二进制与 Docker 间一致。
 - **跨平台**：26 个目标平台构建（Linux / macOS / Windows / FreeBSD / OpenBSD / NetBSD，含 arm/mips/riscv/loong64 等）。
 

@@ -3,6 +3,32 @@
 本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
 
+## [0.5.0] - 2026-11-09
+
+本次为路由控制与界面本地化版本。规则新增优先型动作与停用开关，管理界面支持中英文切换。
+
+### Added
+
+- 规则级 `direct_first` / `proxy_first` 动作：命中后先按指定方向尝试，失败再回落到另一边，
+  探测结果与 `auto` 共用缓存；规则级动作会覆盖全局 `routing.auto.mode`。
+  `direct` / `proxy` 仍表示「只走一边、失败不回落」。
+- 规则停用（`disabled: true`）：规则保留在配置中但不参与匹配，重新启用不必重填匹配值；
+  加载期跳过禁用规则的上游引用校验（例如上游正在重建），启用时恢复完整校验。
+- `POST /api/v1/config/rules/batch-toggle`：批量启用/禁用规则，一次校验、一次落盘、一次热加载，
+  越界索引记入 `failed` 且不影响其它项。
+- `PUT /api/v1/config/rules`：整体替换规则列表（WebUI 文本视图保存使用），
+  一次校验、一次落盘、一次热加载。
+- WebUI 中英文切换：接入 vue-i18n，公共词条、侧边栏、路由标题与全部页面文案抽到
+  `web/src/locales`，中英两份保持同一 key 结构；语言记录在浏览器本地，未选择时固定简体中文，
+  切换后同步 `<html lang>`。
+- 前端新增词条用例：扫描源码里的 `t()` 字面量，引用不存在的 key 在单测阶段直接失败。
+
+### Changed
+
+- WebUI 列定义改为 `computed`，切换语言后表头、章节标题与校验提示即时刷新；
+  `formatUptime`、`ApiError` 兜底文案与 `CodeBlock` / `LoadError` 的复制、重试文案统一走 `t()`。
+  API 文档页的接口正文与示例仍是中文，与界面框架解耦，留待后续单独处理。
+
 ## [0.4.0] - 2026-11-09
 
 本次为 WebUI 体验与批量运维版本。管理 API 有两处行为变化：上游健康检查的错误语义更精确，
