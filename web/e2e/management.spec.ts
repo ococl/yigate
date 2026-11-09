@@ -279,3 +279,19 @@ test('pprof page explains why the switch is disabled when the read fails', async
   await expect(page.getByText('读取开关状态失败')).toBeVisible()
   await expect(page.getByRole('switch')).toBeDisabled()
 })
+
+test('rendering errors surface a visible message instead of a blank page', async ({ page }) => {
+  await login(page)
+
+  // upstreams 不是数组：computed 里调用 .filter 会抛 TypeError，触发全局 errorHandler
+  await page.route('**/api/v1/status', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ upstreams: 123, listen: '127.0.0.1:8890' }),
+    }),
+  )
+  await page.goto('/dashboard')
+
+  await expect(page.getByText('页面渲染出现异常')).toBeVisible()
+})
