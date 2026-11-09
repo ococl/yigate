@@ -323,10 +323,16 @@ const aliveCount = computed(() => upstreams.value.filter((u) => checked(u) && !u
 const deadCount = computed(() => upstreams.value.filter((u) => checked(u) && u.dead).length)
 const uncheckedCount = computed(() => upstreams.value.filter((u) => !checked(u)).length)
 
-const statusColor = computed(() => (health.value?.status === 'up' ? token.value.colorSuccess : token.value.colorError))
-const readyColor = computed(() =>
-  health.value?.router_ready && health.value?.manager_ready ? token.value.colorSuccess : token.value.colorError,
-)
+// 健康接口失败时不能把「读不到」显示成「异常」，否则会误报网关故障
+const healthUnavailable = computed(() => !health.value && !loading.value)
+const statusColor = computed(() => {
+  if (!health.value) return token.value.colorTextSecondary
+  return health.value.status === 'up' ? token.value.colorSuccess : token.value.colorError
+})
+const readyColor = computed(() => {
+  if (!health.value) return token.value.colorTextSecondary
+  return health.value.router_ready && health.value.manager_ready ? token.value.colorSuccess : token.value.colorError
+})
 
 fetchData()
 useVisiblePolling(() => fetchData(true), 10000)
@@ -349,10 +355,23 @@ useVisiblePolling(() => fetchData(true), 10000)
       </a-space>
     </div>
 
+    <a-alert
+      v-if="healthUnavailable"
+      type="warning"
+      show-icon
+      style="margin-bottom: 16px;"
+      message="无法获取网关运行状态"
+      description="健康检查接口请求失败，下方指标不代表真实运行状态。请确认后端服务是否正常，然后重试。"
+    >
+      <template #action>
+        <a-button size="small" :loading="loading" @click="() => fetchData()">重试</a-button>
+      </template>
+    </a-alert>
+
     <a-row :gutter="16" style="margin-bottom: 16px;">
       <a-col :xs="24" :sm="12" :lg="6">
         <a-card size="small" style="height: 100%;">
-          <a-statistic title="运行状态" :value="health?.status || '-'" :value-style="{ color: statusColor }" />
+          <a-statistic title="运行状态" :value="health ? health.status || '-' : '—'" :value-style="{ color: statusColor }" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
@@ -367,7 +386,7 @@ useVisiblePolling(() => fetchData(true), 10000)
         <a-card size="small" style="height: 100%;">
           <a-statistic
             title="路由 / 管理就绪"
-            :value="health?.router_ready && health?.manager_ready ? '就绪' : '异常'"
+            :value="health ? (health.router_ready && health.manager_ready ? '就绪' : '异常') : '—'"
             :value-style="{ color: readyColor }"
           />
         </a-card>

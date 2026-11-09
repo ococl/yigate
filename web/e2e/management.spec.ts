@@ -97,6 +97,24 @@ test('upstream page survives a network outage', async ({ page }) => {
   await expect(page.getByText('网络错误').first()).toBeVisible()
 })
 
+test('dashboard warns instead of reporting a false outage when the health API fails', async ({ page }) => {
+  await login(page)
+
+  // 健康接口以站点根路径请求（/health），不是 /api/v1 前缀；登录本身也依赖它，所以登录后再拦截
+  await page.route(/\/health$/, (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
+  )
+  await page.goto('/dashboard')
+
+  await expect(page.getByText('无法获取网关运行状态')).toBeVisible()
+  const ready = page.locator('.ant-statistic').filter({ hasText: '路由 / 管理就绪' })
+  const runState = page.locator('.ant-statistic').filter({ hasText: '运行状态' })
+  // 读不到健康状态时展示「—」，而不是误报「异常」
+  await expect(ready).toContainText('—')
+  await expect(ready).not.toContainText('异常')
+  await expect(runState).toContainText('—')
+})
+
 test('geosite status failure shows an error state instead of "未找到"', async ({ page }) => {
   await login(page)
 
