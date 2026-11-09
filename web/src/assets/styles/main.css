@@ -258,6 +258,13 @@ html:has(body.app-dark) {
   margin-top: 10px;
 }
 
+/* 卡片列表的分页：与桌面表格分页保持一致，但不占满整行 */
+.mobile-list .mobile-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
 /* 窄屏下压缩页面留白，避免内容区被挤占 */
 @media (max-width: 768px) {
   .page-header {

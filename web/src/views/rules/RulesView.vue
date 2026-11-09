@@ -44,6 +44,13 @@ const actionOptions = [
 const needsValues = computed(() => form.value.type !== 'match')
 const needsUpstreams = computed(() => form.value.action === 'proxy')
 
+// 移动端卡片列表本地分页，与桌面表格每页条数保持一致
+const MOBILE_PAGE_SIZE = 20
+const mobilePage = ref(1)
+const mobileItems = computed(() =>
+  dataSource.value.slice((mobilePage.value - 1) * MOBILE_PAGE_SIZE, mobilePage.value * MOBILE_PAGE_SIZE),
+)
+
 const columns = [
   { title: '顺序', dataIndex: 'index', key: 'index', width: 70 },
   { title: '类型', dataIndex: 'type', key: 'type', width: 150 },
@@ -58,6 +65,7 @@ async function fetchData() {
   try {
     const [rules, ups] = await Promise.all([listRules(), listUpstreams()])
     dataSource.value = rules.rules || []
+    mobilePage.value = 1
     upstreamOptions.value = (ups.upstreams || []).map((u) => ({ label: u.name, value: u.name }))
   } finally {
     loading.value = false
@@ -186,7 +194,7 @@ onMounted(fetchData)
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
         <a-empty v-if="dataSource.length === 0" description="暂无路由规则，所有请求将按全局 default_action 处理" />
-        <a-card v-for="record in dataSource" :key="record.index" size="small" class="mobile-card">
+        <a-card v-for="record in mobileItems" :key="record.index" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-space size="small">
               <a-tag>{{ record.index + 1 }}</a-tag>
@@ -240,6 +248,15 @@ onMounted(fetchData)
             </a-popconfirm>
           </div>
         </a-card>
+        <a-pagination
+          v-if="dataSource.length > MOBILE_PAGE_SIZE"
+          v-model:current="mobilePage"
+          :page-size="MOBILE_PAGE_SIZE"
+          :total="dataSource.length"
+          :show-size-changer="false"
+          size="small"
+          class="mobile-pagination"
+        />
       </div>
 
       <div v-else class="fill-table">

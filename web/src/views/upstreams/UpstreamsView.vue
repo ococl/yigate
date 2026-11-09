@@ -373,10 +373,21 @@ const pagination = computed(() => ({
   pageSizeOptions: ['10', '20', '50'],
   showSizeChanger: true,
   showTotal: (total: number) => `共 ${total} 条`,
-  onChange: (page: number, size: number) => {
-    router.replace({ query: { ...route.query, page: String(page), size: String(size) } })
-  },
+  onChange: handlePageChange,
 }))
+
+function handlePageChange(page: number, size: number) {
+  // 每页条数变化时回到第一页，避免停留在越界页码只显示零星几条。
+  const targetPage = size === pagination.value.pageSize ? page : 1
+  router.replace({ query: { ...route.query, page: String(targetPage), size: String(size) } })
+}
+
+// 移动端卡片列表复用同一套分页状态
+const mobileItems = computed(() => {
+  const { current, pageSize } = pagination.value
+  const start = (current - 1) * pageSize
+  return dataSource.value.slice(start, start + pageSize)
+})
 
 const healthCheckType = computed(() => form.value.health_check.type)
 const showHealthCheckPath = computed(() => ['http', 'https'].includes(healthCheckType.value))
@@ -408,7 +419,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     <a-card class="fill-card">
       <div v-if="isMobile" class="mobile-list">
         <a-empty v-if="dataSource.length === 0" description="暂无上游，请先新增一个上游代理" />
-        <a-card v-for="record in dataSource" :key="record.name" size="small" class="mobile-card">
+        <a-card v-for="record in mobileItems" :key="record.name" size="small" class="mobile-card">
           <div class="mobile-card-head">
             <a-typography-text strong>{{ record.name }}</a-typography-text>
             <a-switch
@@ -471,6 +482,16 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             </a-popconfirm>
           </div>
         </a-card>
+        <a-pagination
+          v-if="dataSource.length > pagination.pageSize"
+          :current="pagination.current"
+          :page-size="pagination.pageSize"
+          :total="dataSource.length"
+          :show-size-changer="false"
+          size="small"
+          class="mobile-pagination"
+          @change="handlePageChange"
+        />
       </div>
 
       <div v-else class="fill-table">
@@ -489,6 +510,7 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             :checked="record.enabled !== false"
             :loading="toggling === record.name"
             size="small"
+            :aria-label="`启用或禁用上游 ${record.name}`"
             @change="(checked: boolean) => handleToggle(record, checked)"
           />
         </a-tooltip>
