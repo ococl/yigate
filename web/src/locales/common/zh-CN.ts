@@ -71,7 +71,7 @@ export const nav = {
   help: '帮助',
   authDoc: '认证机制',
   apiDoc: 'API 文档',
-  llmx: 'llmx.txt',
+  llms: 'llms.txt',
   about: '关于',
 }
 
@@ -111,7 +111,7 @@ export const router = {
   pprof: 'pprof 性能分析',
   docsAuth: '认证文档',
   docsApi: 'API 文档',
-  docsLlmx: 'llmx.txt',
+  docsLlms: 'llms.txt',
   about: '关于',
   notFound: '页面不存在',
 }

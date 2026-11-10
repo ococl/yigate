@@ -74,9 +74,9 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/api-doc/ApiDocView.vue'),
       },
       {
-        path: 'docs/llmx',
-        name: 'docs-llmx',
-        component: () => import('@/views/llmx/LlmxView.vue'),
+        path: 'docs/llms',
+        name: 'docs-llms',
+        component: () => import('@/views/llms/LlmsView.vue'),
       },
       {
         path: 'about',
@@ -141,7 +141,7 @@ const PAGE_TITLE_KEYS: Record<string, string> = {
   pprof: 'router.pprof',
   'docs-auth': 'router.docsAuth',
   'docs-api': 'router.docsApi',
-  'docs-llmx': 'router.docsLlmx',
+  'docs-llms': 'router.docsLlms',
   about: 'router.about',
   'not-found': 'router.notFound',
 }

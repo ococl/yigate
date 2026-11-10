@@ -22,6 +22,8 @@
   WebUI 会提示「配置将回落为匿名访问」，用户确认后带 `?force=true` 重试，
   服务端写入 `allow_anonymous_proxy: true` 让配置自洽生效。批量删除同此语义。
 - 配置保存改为在校验副本上执行，单监听配置不会再被改写成 `listeners` 数组形态。
+- 帮助菜单的 `llmx.txt` 更名为 `llms.txt`（AI 助手约定的标准路径），页面路由同步改为
+  `/docs/llms`，原始地址为 `/llms.txt`；旧路径不再保留别名。
 
 - WebUI E2E 改为 `data-testid` 定位：页面根节点 `page-<route>`、侧栏 `nav-<route>`、
   表格行内操作 `row-delete` / `row-edit` / `row-move-up` / `row-move-down`，登录、分页、

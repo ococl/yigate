@@ -7,8 +7,8 @@ import { copyText } from '@/utils/clipboard'
 
 const { t } = useI18n()
 
-// 内容是 public/llmx.txt，随构建一起发布：AI 直接 GET 这个路径就能拿到同一份说明
-const docUrl = `${import.meta.env.BASE_URL}llmx.txt`
+// 内容是 public/llms.txt，随构建一起发布：AI 直接 GET 这个路径就能拿到同一份说明
+const docUrl = `${import.meta.env.BASE_URL}llms.txt`
 
 const content = ref('')
 const loading = ref(true)
@@ -33,40 +33,40 @@ onMounted(fetchDoc)
 async function copyAll() {
   const copied = await copyText(content.value)
   if (copied) {
-    message.success(t('pages.llmx.copied'))
+    message.success(t('pages.llms.copied'))
     return
   }
-  message.error(t('pages.llmx.copyFailed'))
+  message.error(t('pages.llms.copyFailed'))
 }
 </script>
 
 <template>
-  <div class="page-shell" data-testid="page-llmx">
+  <div class="page-shell" data-testid="page-llms">
     <div class="page-header">
       <div class="page-header-text">
-        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.llmx.title') }}</a-typography-title>
+        <a-typography-title :level="4" style="margin: 0;">{{ t('pages.llms.title') }}</a-typography-title>
         <a-typography-text type="secondary">
-          {{ t('pages.llmx.subtitle') }}
+          {{ t('pages.llms.subtitle') }}
         </a-typography-text>
       </div>
       <a-space wrap>
         <a-button :loading="loading" @click="fetchDoc">{{ t('common.refresh') }}</a-button>
-        <a-button type="primary" :disabled="!content" @click="copyAll">{{ t('pages.llmx.copyAll') }}</a-button>
-        <a-button :href="docUrl" target="_blank" rel="noopener">{{ t('pages.llmx.openRaw') }}</a-button>
+        <a-button type="primary" :disabled="!content" @click="copyAll">{{ t('pages.llms.copyAll') }}</a-button>
+        <a-button :href="docUrl" target="_blank" rel="noopener">{{ t('pages.llms.openRaw') }}</a-button>
       </a-space>
     </div>
 
     <a-card class="fill-card">
       <LoadError v-if="failed" :retrying="loading" @retry="fetchDoc" />
       <a-skeleton v-else-if="loading" active :paragraph="{ rows: 16 }" />
-      <pre v-else class="llmx-text">{{ content }}</pre>
+      <pre v-else class="llms-text">{{ content }}</pre>
     </a-card>
   </div>
 </template>
 
 <style scoped>
 /* 纯文本按原样排版：保留缩进与换行，长行折行但不出现横向滚动条 */
-.llmx-text {
+.llms-text {
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;

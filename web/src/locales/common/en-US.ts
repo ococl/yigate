@@ -71,7 +71,7 @@ export const nav = {
   help: 'Help',
   authDoc: 'Authentication',
   apiDoc: 'API reference',
-  llmx: 'llmx.txt',
+  llms: 'llms.txt',
   about: 'About',
 }
 
@@ -111,7 +111,7 @@ export const router = {
   pprof: 'pprof profiling',
   docsAuth: 'Authentication guide',
   docsApi: 'API reference',
-  docsLlmx: 'llmx.txt',
+  docsLlms: 'llms.txt',
   about: 'About',
   notFound: 'Page not found',
 }

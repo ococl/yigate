@@ -34,7 +34,7 @@ test('logs in and renders every management page', async ({ page }) => {
     ['/pprof', 'pprof'],
     ['/docs/auth', 'auth-doc'],
     ['/docs/api', 'api-doc'],
-    ['/docs/llmx', 'llmx'],
+    ['/docs/llms', 'llms'],
     ['/about', 'about'],
   ] as const
 
@@ -112,10 +112,10 @@ test('document title follows the current page', async ({ page }) => {
   await expect(page).toHaveTitle(`${copy.router.rules} · YiGate`)
 })
 
-test('llmx.txt is served for AI clients and mirrored in the help page', async ({ page, request }) => {
+test('llms.txt is served for AI clients and mirrored in the help page', async ({ page, request }) => {
   // AI 客户端直接取原文：匿名可读，Content-Type 要能正确解码中文。
   // 正文由后端生成，不在前端词条里，这里按内容抽样断言。
-  const resp = await request.get('/llmx.txt')
+  const resp = await request.get('/llms.txt')
   expect(resp.status()).toBe(200)
   expect(resp.headers()['content-type']).toContain('text/plain')
   const raw = await resp.text()
@@ -124,7 +124,7 @@ test('llmx.txt is served for AI clients and mirrored in the help page', async ({
 
   await page.goto('/dashboard')
   await login(page)
-  await page.goto('/docs/llmx')
-  await expectPage(page, 'llmx')
-  await expect(page.locator('.llmx-text')).toContainText('先读后写') // copy-ok: 同上
+  await page.goto('/docs/llms')
+  await expectPage(page, 'llms')
+  await expect(page.locator('.llms-text')).toContainText('先读后写') // copy-ok: 同上
 })

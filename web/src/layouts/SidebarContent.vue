@@ -67,8 +67,8 @@ const selectedKeys = computed(() => {
           <a-menu-item key="docs-api">
             <RouterLink to="/docs/api" data-testid="nav-docs-api">{{ t('nav.apiDoc') }}</RouterLink>
           </a-menu-item>
-          <a-menu-item key="docs-llmx">
-            <RouterLink to="/docs/llmx" data-testid="nav-docs-llmx">{{ t('nav.llmx') }}</RouterLink>
+          <a-menu-item key="docs-llms">
+            <RouterLink to="/docs/llms" data-testid="nav-docs-llms">{{ t('nav.llms') }}</RouterLink>
           </a-menu-item>
           <a-menu-item key="about">
             <RouterLink to="/about" data-testid="nav-about">{{ t('nav.about') }}</RouterLink>

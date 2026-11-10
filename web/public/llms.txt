@@ -6,7 +6,7 @@
 
 - 管理 API 前缀：/api/v1
 - WebUI：/（用 management_auth_token 登录）
-- 本文件在线地址：/llmx.txt
+- 本文件在线地址：/llms.txt
 - 完整的字段级文档：/docs/api（WebUI 内的 API 文档页）
 
 ## 认证
@@ -44,7 +44,11 @@
 - POST   /api/v1/config/upstreams/{name}/check   单个健康检查
 - POST   /api/v1/config/upstreams/check          全量健康检查
 
-上游字段：name、url、types[]、priority、weight、strategy、enabled、health_check
+上游字段：name、url、username、password、types[]、priority、weight、strategy、enabled、health_check
+- username/password 必须成对出现，password 支持 ${ENV} 注入；
+  不要同时把凭据拼进 url（两套凭据互斥，会 400）
+- 列表只回显 username 与 has_password，密码永不下发；
+  更新时不传 password 表示保持原值，传空字符串表示清除
 - types 可选：http、https、socks5、socks5h（socks5h 表示远端 DNS）
 - strategy 可选：weighted_round_robin、least_connections、consistent_hash、source_ip_hash
 - 同一优先级组内按 strategy 选，least_connections 不看 weight
@@ -53,23 +57,33 @@
 - GET    /api/v1/config/rules
 - POST   /api/v1/config/rules
 - PUT    /api/v1/config/rules/{index}
+- PUT    /api/v1/config/rules                   {"rules":[...]} 整体替换，一次落盘
 - DELETE /api/v1/config/rules/{index}
 - POST   /api/v1/config/rules/batch-delete       {"indexes":[0,2]}
+- POST   /api/v1/config/rules/batch-toggle       {"indexes":[0,2],"disabled":true}
 - POST   /api/v1/config/rules/{index}/move    {"direction":"up"} 或 {"direction":"down"}
 
-规则字段：type、values[]、action、upstreams[]
+规则字段：type、values[]、action、upstreams[]、disabled
 - type 可选：domain、domain_suffix、domain_keyword、domain_regex、ip_cidr、geosite、match
-- action 可选：direct、proxy、auto
+- action 可选：direct、proxy、auto、direct_first、proxy_first、deny（match 类型不能用 deny）
+  auto 按 settings 里的 auto_mode 决定先直连还是先代理；direct_first / proxy_first
+  是写死优先级的两种版本，不受 auto_mode 影响；连字符写法（如 direct-first）也接受
+- disabled=true 的规则保留在配置里但不参与匹配，也允许引用暂时不存在的上游
 - index 是当前位置，增删或移动后都会变；批量删除用 batch-delete，indexes 按删除前的位置给
 
 代理认证用户
 - GET    /api/v1/config/users
 - POST   /api/v1/config/users              {"username":"alice","password":"..."}
-- PUT    /api/v1/config/users/{username}   {"password":"..."}
+- PUT    /api/v1/config/users/{username}   {"password":"..."} 或 {"enabled":false}
 - DELETE /api/v1/config/users/{username}
 - POST   /api/v1/config/users/batch-delete       {"usernames":["a","b"]}
 
-用户列表非空后，所有代理连接都必须提供用户名密码；删空则回到匿名代理。
+用户字段：username、enabled
+- 只有 enabled=true 的用户能通过代理认证；全部禁用等价于没有用户，回落到匿名代理
+- 存在启用用户时，所有代理连接都必须提供用户名密码
+- 禁用或删除最后一个启用用户会返回 409（code=last_active_user）：先跟用户确认
+  「代理端口将变成匿名开放」，确认后再加 ?force=true 重试（PUT/DELETE/batch-delete 都支持）
+- force 成功后服务端会写入 allow_anonymous_proxy: true，配置才能通过非回环监听的基线校验
 
 全局设置
 - GET /api/v1/config/settings
@@ -81,6 +95,9 @@ GeoSite 数据
 - GET  /api/v1/geosite/sync-token
 - POST /api/v1/geosite/sync-token
 - GET  /api/v1/geosite/dat
+
+读接口（/api/v1/geosite、/dat）在开启 sync_enabled 后允许只读同步令牌；
+update 与 sync-token 只接受管理令牌，同步令牌不能触发更新。
 
 ## 常见任务
 
@@ -103,10 +120,15 @@ GeoSite 数据
 - POST /api/v1/config/rules/{index}/move   {"direction":"up"}
 - 移完重新 GET /api/v1/config/rules 确认顺序，index 已经变了
 
+停用某条规则而不是删掉它
+- POST /api/v1/config/rules/batch-toggle   {"indexes":[1],"disabled":true}
+- 停用的规则留在原位置，只跳过匹配；重新启用时会把完整校验再跑一遍
+
 ## 响应约定
 
-- 成功：{"status":"ok"}，部分接口附带 name / username / index
-- 失败：4xx / 5xx，body 形如 {"status":"error","error":"原因"}
+- 成功：{"status":"ok"}，部分接口附带 name / username / index / count
+- 失败：4xx / 5xx，body 形如 {"status":"error","error":"原因"}，
+  需要调用方分支处理时额外带 "code"（如 last_active_user）
 - 请求体上限 1 MiB，未知字段会被拒绝（严格模式），字段名照抄本文件
 - PUT /api/v1/config/settings 校验失败时不写文件，运行时保持原配置
 

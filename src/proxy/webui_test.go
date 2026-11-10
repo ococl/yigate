@@ -99,12 +99,12 @@ func TestServeWebUIFileServesPlainTextAsUTF8(t *testing.T) {
 	// AI 客户端按 Content-Type 解码，缺 charset 时中文说明会变乱码
 	const content = "# YiGate\n\n认证方式：Bearer Token\n"
 	fsys := fstest.MapFS{
-		"llmx.txt": {Data: []byte(content)},
+		"llms.txt": {Data: []byte(content)},
 	}
-	req := httptest.NewRequest(http.MethodGet, "/llmx.txt", nil)
+	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
 	rec := httptest.NewRecorder()
 
-	serveWebUIFile(fsys, "/llmx.txt", rec, req)
+	serveWebUIFile(fsys, "/llms.txt", rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
@@ -121,13 +121,13 @@ func TestServeWebUIFileServesCompressedPlainTextAsUTF8(t *testing.T) {
 	// 构建时体积够大的文本会被预压缩，gzip 客户端走的是另一条分支
 	const content = "# YiGate\n\n认证方式：Bearer Token\n"
 	fsys := fstest.MapFS{
-		"llmx.txt.gz": {Data: gzipAsset(t, content)},
+		"llms.txt.gz": {Data: gzipAsset(t, content)},
 	}
-	req := httptest.NewRequest(http.MethodGet, "/llmx.txt", nil)
+	req := httptest.NewRequest(http.MethodGet, "/llms.txt", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
 
-	serveWebUIFile(fsys, "/llmx.txt", rec, req)
+	serveWebUIFile(fsys, "/llms.txt", rec, req)
 
 	if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
 		t.Fatalf("Content-Type = %q, want text/plain; charset=utf-8", got)

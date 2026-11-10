@@ -6,7 +6,7 @@ import users from './zh-CN/users'
 import traffic from './zh-CN/traffic'
 import settings from './zh-CN/settings'
 import about from './zh-CN/about'
-import llmx from './zh-CN/llmx'
+import llms from './zh-CN/llms'
 import pprof from './zh-CN/pprof'
 import apiDoc from './zh-CN/apiDoc'
 import authDoc from './zh-CN/authDoc'
@@ -21,7 +21,7 @@ export default {
   traffic,
   settings,
   about,
-  llmx,
+  llms,
   pprof,
   apiDoc,
   authDoc,

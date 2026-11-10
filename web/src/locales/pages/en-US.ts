@@ -6,7 +6,7 @@ import users from './en-US/users'
 import traffic from './en-US/traffic'
 import settings from './en-US/settings'
 import about from './en-US/about'
-import llmx from './en-US/llmx'
+import llms from './en-US/llms'
 import pprof from './en-US/pprof'
 import apiDoc from './en-US/apiDoc'
 import authDoc from './en-US/authDoc'
@@ -21,7 +21,7 @@ export default {
   traffic,
   settings,
   about,
-  llmx,
+  llms,
   pprof,
   apiDoc,
   authDoc,
