@@ -8,7 +8,7 @@ export default {
   groupsTitle: 'Groups',
   authRequired: 'Auth required',
   authNotRequired: 'No auth',
-  paramsTitle: 'Path parameters',
+  paramsTitle: 'Parameters',
   paramColumns: {
     name: 'Name',
     type: 'Type',

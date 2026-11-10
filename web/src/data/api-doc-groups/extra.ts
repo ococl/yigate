@@ -4,24 +4,28 @@ export const extraGroups: ApiGroup[] = [
   {
     key: 'users',
     title: '用户管理',
-    description: '运行时增删查代理用户。用户列表不返回密码。',
+    description:
+      '运行时增删查代理用户，支持启用/禁用。用户列表不返回密码；禁用或删除最后一个启用用户会让代理端口回落匿名访问，此时必须显式带上 force=true，服务端同时写入 allow_anonymous_proxy: true 以通过非回环监听的基线校验。',
     endpoints: [
       {
         id: 'users-list',
         method: 'GET',
         path: '/api/v1/config/users',
         summary: '列出所有用户',
-        description: '返回所有代理用户列表，仅包含用户名，不含密码。',
+        description:
+          '返回所有代理用户列表，包含用户名与启用状态，不含密码。只有 enabled=true 的用户才能通过代理认证。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
         responseBody: `{
   "users": [
     {
-      "username": "alice"
+      "username": "alice",
+      "enabled": true
     },
     {
-      "username": "bob"
+      "username": "bob",
+      "enabled": false
     }
   ]
 }`,
@@ -29,8 +33,8 @@ export const extraGroups: ApiGroup[] = [
           request: 'curl http://127.0.0.1:8890/api/v1/config/users',
           response: `{
   "users": [
-    { "username": "alice" },
-    { "username": "bob" }
+    { "username": "alice", "enabled": true },
+    { "username": "bob", "enabled": false }
   ]
 }`,
         },
@@ -80,7 +84,8 @@ export const extraGroups: ApiGroup[] = [
         method: 'DELETE',
         path: '/api/v1/config/users/{username}',
         summary: '删除用户',
-        description: '删除指定代理用户。username 通过 URL 路径指定。',
+        description:
+          '删除指定代理用户。username 通过 URL 路径指定。若删除的是最后一个启用用户，接口返回 409 last_active_user，确认要回落匿名访问后追加 ?force=true 重试。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [
@@ -89,6 +94,12 @@ export const extraGroups: ApiGroup[] = [
             type: 'string (path)',
             required: true,
             description: '用户名，URL 路径参数',
+          },
+          {
+            name: 'force',
+            type: 'boolean (query)',
+            required: false,
+            description: 'true 时允许删除最后一个启用用户，代理端口回落匿名访问',
           },
         ],
         responseBody: `{
@@ -105,6 +116,7 @@ export const extraGroups: ApiGroup[] = [
         statusCodes: [
           { code: 200, description: '删除成功' },
           { code: 404, description: '用户不存在' },
+          { code: 409, description: '删除的是最后一个启用用户，错误码 last_active_user（需 force=true）' },
           { code: 401, description: '未认证' },
         ],
       },
@@ -114,10 +126,17 @@ export const extraGroups: ApiGroup[] = [
         path: '/api/v1/config/users/batch-delete',
         summary: '批量删除用户',
         description:
-          '一次请求删除多个代理用户，整批只写一次配置文件、只热加载一次。不存在的用户名会出现在 failed 里；把用户删空后所有代理连接回到匿名模式。',
+          '一次请求删除多个代理用户，整批只写一次配置文件、只热加载一次。不存在的用户名会出现在 failed 里；把最后一个启用用户一起删掉时返回 409 last_active_user，追加 ?force=true 才会真正删空并回落匿名模式。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
-        params: [],
+        params: [
+          {
+            name: 'force',
+            type: 'boolean (query)',
+            required: false,
+            description: 'true 时允许删空全部启用用户，代理端口回落匿名访问',
+          },
+        ],
         requestBody: `{
   "usernames": ["alice", "bob"]
 }`,
@@ -141,6 +160,7 @@ export const extraGroups: ApiGroup[] = [
         statusCodes: [
           { code: 200, description: '请求已处理，逐项结果见 deleted / failed' },
           { code: 400, description: '请求体格式错误或 usernames 为空' },
+          { code: 409, description: '会删空全部启用用户，错误码 last_active_user（需 force=true）' },
           { code: 401, description: '未认证' },
         ],
       },
@@ -148,8 +168,9 @@ export const extraGroups: ApiGroup[] = [
         id: 'users-update',
         method: 'PUT',
         path: '/api/v1/config/users/{username}',
-        summary: '修改用户密码',
-        description: '修改指定用户的代理认证密码，新连接立即使用新密码。',
+        summary: '修改用户密码或启用状态',
+        description:
+          '修改指定用户的代理认证密码和/或启用状态，两个字段至少提供一个。改密码后新连接立即使用新密码；enabled=false 后该用户无法再通过代理认证。禁用最后一个启用用户会让代理端口回落匿名访问，需要追加 ?force=true。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [
@@ -159,9 +180,16 @@ export const extraGroups: ApiGroup[] = [
             required: true,
             description: '用户名，URL 路径参数',
           },
+          {
+            name: 'force',
+            type: 'boolean (query)',
+            required: false,
+            description: 'true 时允许禁用最后一个启用用户',
+          },
         ],
         requestBody: `{
-  "password": "new-secret"
+  "password": "new-secret",
+  "enabled": true
 }`,
         responseBody: `{
   "status": "ok",
@@ -178,8 +206,9 @@ export const extraGroups: ApiGroup[] = [
         },
         statusCodes: [
           { code: 200, description: '修改成功' },
-          { code: 400, description: '密码为空' },
+          { code: 400, description: 'password 与 enabled 都没提供，或密码为空' },
           { code: 404, description: '用户不存在' },
+          { code: 409, description: '禁用的是最后一个启用用户，错误码 last_active_user（需 force=true）' },
           { code: 401, description: '未认证' },
         ],
       },

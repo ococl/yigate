@@ -259,7 +259,7 @@ yigate_connections_total 12345
         path: '/api/v1/config/upstreams',
         summary: '列出所有上游',
         description:
-          '返回所有上游代理配置列表。URL 已脱敏，不含凭证信息；enabled=false 表示已暂停调度与健康检查。',
+          '返回所有上游代理配置列表。URL 已脱敏，密码永不下发；配置了独立认证凭据时只回显 username 与 has_password。enabled=false 表示已暂停调度与健康检查。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -268,6 +268,8 @@ yigate_connections_total 12345
     {
       "name": "us-east-1",
       "url": "socks5://127.0.0.1:1080",
+      "username": "proxy-user",
+      "has_password": true,
       "enabled": true,
       "types": ["socks5"],
       "priority": 1,
@@ -284,6 +286,8 @@ yigate_connections_total 12345
     {
       "name": "us-east-1",
       "url": "socks5://127.0.0.1:1080",
+      "username": "proxy-user",
+      "has_password": true,
       "enabled": true,
       "types": ["socks5"],
       "priority": 1,
@@ -305,13 +309,15 @@ yigate_connections_total 12345
         path: '/api/v1/config/upstreams',
         summary: '添加上游',
         description:
-          '添加一个新的上游代理。请求体最大 1 MiB，严格模式（DisallowUnknownFields）。name 不能与已有上游重复。',
+          '添加一个新的上游代理。请求体最大 1 MiB，严格模式（DisallowUnknownFields）。name 不能与已有上游重复。认证凭据用 username/password 独立字段传入，两者必须成对出现，且不能与 URL 内嵌 userinfo 同时配置；password 支持 ${ENV} 环境变量注入。enabled 省略时默认启用。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
         requestBody: `{
   "name": "my-upstream",
   "url": "socks5://127.0.0.1:1080",
+  "username": "proxy-user",
+  "password": "\${PROXY_PASSWORD}",
   "types": ["socks5"],
   "priority": 1,
   "weight": 1,
@@ -350,7 +356,7 @@ yigate_connections_total 12345
         path: '/api/v1/config/upstreams/{name}',
         summary: '更新上游',
         description:
-          '更新指定上游代理配置。priority、weight、enabled 为可选字段（指针类型），未提供时保持原值；enabled=false 会立即暂停该上游的流量调度与健康检查。请求体中 name 非空且与路径中旧名称不同时执行改名，并同步更新路由规则中对旧名称的引用。',
+          '更新指定上游代理配置。priority、weight、enabled 为可选字段（指针类型），未提供时保持原值；enabled=false 会立即暂停该上游的流量调度与健康检查。请求体中 name 非空且与路径中旧名称不同时执行改名，并同步更新路由规则中对旧名称的引用。username/password 同样按“未提供即保留”处理，传空字符串表示清除凭据；两者必须成对，且不能与 URL 内嵌 userinfo 同时存在。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [
@@ -364,6 +370,8 @@ yigate_connections_total 12345
         requestBody: `{
   "name": "my-upstream-new",
   "url": "socks5://127.0.0.1:1081",
+  "username": "proxy-user",
+  "password": "\${PROXY_PASSWORD}",
   "types": ["socks5"],
   "priority": 2,
   "weight": 3,

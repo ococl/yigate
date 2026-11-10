@@ -8,7 +8,7 @@ export default {
   groupsTitle: '接口分组',
   authRequired: '需要认证',
   authNotRequired: '无需认证',
-  paramsTitle: '路径参数',
+  paramsTitle: '请求参数',
   paramColumns: {
     name: '参数名',
     type: '类型',
