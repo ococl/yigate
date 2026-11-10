@@ -92,6 +92,9 @@ export interface HealthCheckConfig {
 export interface UpstreamInfo {
   name: string
   url: string
+  /** 独立认证用户名；密码永不下发，只用 has_password 表示是否已设置。 */
+  username?: string
+  has_password: boolean
   enabled: boolean
   types: string[]
   priority: number
@@ -107,6 +110,8 @@ export interface UpstreamListResponse {
 export interface AddUpstreamRequest {
   name: string
   url: string
+  username?: string
+  password?: string
   enabled?: boolean
   types: string[]
   priority: number
@@ -118,6 +123,8 @@ export interface AddUpstreamRequest {
 export interface UpdateUpstreamRequest {
   name?: string // 非空且与原名称不同时执行改名
   url?: string // 留空表示沿用现有 URL（避免把脱敏后的 URL 写回配置）
+  username?: string // 不传表示保持原用户名，显式空串表示清除
+  password?: string // 不传表示保持原密码，避免脱敏回传时抹掉凭据
   enabled?: boolean
   types?: string[]
   priority?: number
@@ -167,6 +174,8 @@ export type AddRuleRequest = RuleRequest
 
 export interface UserInfo {
   username: string
+  /** 禁用用户不参与代理认证；全部禁用等价于匿名代理。 */
+  enabled: boolean
 }
 
 export interface UserListResponse {

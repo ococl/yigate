@@ -4,12 +4,24 @@ export default {
   addUser: '新增用户',
   authNotice: {
     message: '未配置用户时不启用代理认证；新增任意用户后，所有代理连接都必须提供用户名密码。',
-    description: '多监听器模式下，新增/删除用户会同步到所有监听器。',
+    description: '多监听器模式下，新增/删除用户会同步到所有监听器。禁用用户不参与认证，全部禁用等同于匿名代理。',
   },
   emptyDescription: '暂无用户，未配置用户时表示不启用代理认证',
   columns: {
     username: '用户名',
+    status: '状态',
     actions: '操作',
+  },
+  status: {
+    enabled: '已启用',
+    disabled: '已禁用',
+  },
+  anonymousRisk: {
+    title: '确认回落为匿名访问？',
+    description:
+      '这是最后一个启用的代理用户。删除或禁用它后，该端口将不再要求任何认证，网络内任何人都可以经它访问外网。',
+    detail: '系统会自动写入 allow_anonymous_proxy: true 让配置生效。若仍需认证，请先新增其他用户再操作。',
+    confirm: '仍然继续',
   },
   changePassword: '修改密码',
   deleteConfirm: '删除后该用户将无法继续通过代理认证，确定删除？',
@@ -36,6 +48,8 @@ export default {
     deleted: '删除成功',
     deletedCount: '已删除 {count} 个用户',
     deletedPartial: '已删除 {deleted} 个，失败 {failed} 个：{names}',
+    enabled: '用户 {name} 已启用',
+    disabled: '用户 {name} 已禁用',
     listSeparator: '、',
   },
 }

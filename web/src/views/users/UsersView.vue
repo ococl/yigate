@@ -5,7 +5,8 @@ import { message } from 'antdv-next'
 import LoadError from '@/components/LoadError.vue'
 import MobileListSkeleton from '@/components/MobileListSkeleton.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
-import { listUsers, addUser, updateUserPassword, deleteUser, batchDeleteUsers } from '@/api/users'
+import { listUsers, addUser, updateUserPassword, deleteUser, setUserEnabled, batchDeleteUsers } from '@/api/users'
+import { parseApiError } from '@/api/types'
 import type { UserInfo } from '@/types/api'
 
 const { t } = useI18n()
@@ -17,6 +18,11 @@ const loadError = ref(false)
 const submitting = ref(false)
 // 正在删除的用户名，避免重复点击触发多次 DELETE
 const deleting = ref<string | null>(null)
+// 正在切换启用状态的用户名
+const toggling = ref<string | null>(null)
+// 「回落匿名访问」风险确认弹窗：用户确认后执行 pendingRiskAction
+const riskModalVisible = ref(false)
+const pendingRiskAction = ref<null | (() => Promise<void>)>(null)
 // 多选批量删除只作用于桌面表格，移动端仍是单卡操作
 const selectedRowKeys = ref<string[]>([])
 const bulkDeleting = ref(false)
@@ -41,6 +47,7 @@ watch([() => form.value.username, () => form.value.password, resetPassword], () 
 
 const columns = computed(() => [
   { title: t('pages.users.columns.username'), dataIndex: 'username', key: 'username' },
+  { title: t('pages.users.columns.status'), key: 'status', width: 100 },
   { title: t('pages.users.columns.actions'), key: 'action', width: 180, fixed: 'right' as const },
 ])
 
@@ -67,6 +74,35 @@ function clampPage() {
   if (page.value > maxPage) page.value = maxPage
   const maxMobilePage = Math.max(1, Math.ceil(dataSource.value.length / MOBILE_PAGE_SIZE))
   if (mobilePage.value > maxMobilePage) mobilePage.value = maxMobilePage
+}
+
+/** 服务端以 409 + code=last_active_user 表示"该操作会让代理端口失去认证、回落匿名"。 */
+function isLastActiveUserError(error: unknown): boolean {
+  const apiError = parseApiError(error)
+  return apiError?.status === 409 && apiError.code === 'last_active_user'
+}
+
+function notifyFailure(error: unknown): void {
+  const apiError = parseApiError(error)
+  message.error(apiError?.detail || t('common.requestFailed'))
+}
+
+/** 需要用户明确接受"回落匿名访问"的风险，确认后执行 pendingRiskAction。 */
+function askAnonymousRisk(action: () => Promise<void>): void {
+  pendingRiskAction.value = action
+  riskModalVisible.value = true
+}
+
+async function confirmAnonymousRisk(): Promise<void> {
+  const action = pendingRiskAction.value
+  riskModalVisible.value = false
+  pendingRiskAction.value = null
+  if (action) await action()
+}
+
+function cancelAnonymousRisk(): void {
+  pendingRiskAction.value = null
+  riskModalVisible.value = false
 }
 
 async function fetchData() {
@@ -131,17 +167,45 @@ async function handleResetPassword() {
   }
 }
 
-async function handleDelete(username: string) {
+async function handleDelete(username: string, force = false) {
   if (deleting.value) return
   deleting.value = username
   try {
-    await deleteUser(username)
+    await deleteUser(username, force)
     message.success(t('pages.users.messages.deleted'))
     await fetchData()
-  } catch {
-    // 错误已由拦截器处理
+  } catch (error) {
+    // 删除最后一个启用用户：先确认风险，用户确认后带 force 重试
+    if (!force && isLastActiveUserError(error)) {
+      askAnonymousRisk(() => handleDelete(username, true))
+      return
+    }
+    notifyFailure(error)
   } finally {
     deleting.value = null
+  }
+}
+
+async function handleToggleEnabled(record: UserInfo, enabled: boolean, force = false) {
+  if (toggling.value) return
+  toggling.value = record.username
+  try {
+    await setUserEnabled(record.username, enabled, force)
+    message.success(
+      enabled ? t('pages.users.messages.enabled', { name: record.username }) : t('pages.users.messages.disabled', { name: record.username }),
+    )
+    await fetchData()
+  } catch (error) {
+    // 禁用最后一个启用用户：同样先确认风险
+    if (!force && !enabled && isLastActiveUserError(error)) {
+      askAnonymousRisk(() => handleToggleEnabled(record, enabled, true))
+      return
+    }
+    notifyFailure(error)
+    // 失败时重新拉取，让开关回到服务端真实状态
+    await fetchData()
+  } finally {
+    toggling.value = null
   }
 }
 
@@ -150,13 +214,13 @@ function onSelectionChange(keys: (string | number)[]) {
 }
 
 // 不弹二次确认框逐个删，用户可以一次清掉一批建错的账号
-async function handleBulkDelete() {
+async function handleBulkDelete(force = false) {
   if (bulkDeleting.value || selectedRowKeys.value.length === 0) return
   bulkDeleting.value = true
   const targets = [...selectedRowKeys.value]
   try {
     // 一次请求一次落盘，服务端返回逐项结果
-    const res = await batchDeleteUsers(targets)
+    const res = await batchDeleteUsers(targets, force)
     const failed = (res.failed ?? []).map((item) => item.target)
     // 失败项留在选中里：用户可以直接再点一次，不用在列表里重新找
     selectedRowKeys.value = failed
@@ -172,8 +236,14 @@ async function handleBulkDelete() {
         names: failed.join(t('pages.users.messages.listSeparator')),
       }),
     )
-  } catch {
-    // 整体失败（网络/500）已由请求层提示，保留当前选择
+  } catch (error) {
+    // 选中的用户覆盖了全部启用用户时，同样需要确认匿名回落风险
+    if (!force && isLastActiveUserError(error)) {
+      selectedRowKeys.value = targets
+      askAnonymousRisk(() => handleBulkDelete(true))
+      return
+    }
+    notifyFailure(error)
   } finally {
     bulkDeleting.value = false
   }
@@ -217,9 +287,21 @@ onMounted(fetchData)
         </a-empty>
         <MobileCard v-for="record in mobileItems" :key="record.username">
           <template #head>
-            <a-typography-text strong>{{ record.username }}</a-typography-text>
+            <a-space>
+              <a-typography-text strong>{{ record.username }}</a-typography-text>
+              <a-tag :color="record.enabled ? 'green' : 'default'">
+                {{ record.enabled ? t('pages.users.status.enabled') : t('pages.users.status.disabled') }}
+              </a-tag>
+            </a-space>
           </template>
           <template #actions>
+            <a-switch
+              size="small"
+              :checked="record.enabled"
+              :loading="toggling === record.username"
+              :data-testid="`user-toggle-${record.username}`"
+              @change="(checked: unknown) => handleToggleEnabled(record, !!checked)"
+            />
             <a-button size="small" @click="showResetModal(record.username)">
               {{ t('pages.users.changePassword') }}
             </a-button>
@@ -256,7 +338,7 @@ onMounted(fetchData)
             :title="t('pages.users.bulkDeleteConfirm', { count: selectedRowKeys.length })"
             :ok-text="t('common.delete')"
             :cancel-text="t('common.cancel')"
-            @confirm="handleBulkDelete"
+            @confirm="handleBulkDelete()"
           >
             <a-button size="small" danger data-testid="users-bulk-delete" :loading="bulkDeleting">
               {{ t('pages.users.bulkDelete') }}
@@ -273,7 +355,16 @@ onMounted(fetchData)
           :scroll="{ x: 480, y: 1 }"
         >
     <template #bodyCell="{ column, record }">
-      <template v-if="column.key === 'action'">
+      <template v-if="column.key === 'status'">
+        <a-switch
+          size="small"
+          :checked="record.enabled"
+          :loading="toggling === record.username"
+          :data-testid="`user-toggle-${record.username}`"
+          @change="(checked: unknown) => handleToggleEnabled(record, !!checked)"
+        />
+      </template>
+      <template v-else-if="column.key === 'action'">
         <a-space>
           <a-button type="link" size="small" @click="showResetModal(record.username)">
             {{ t('pages.users.changePassword') }}
@@ -367,5 +458,23 @@ onMounted(fetchData)
         />
       </a-form-item>
     </a-form>
+  </a-modal>
+
+  <a-modal
+    v-model:open="riskModalVisible"
+    data-testid="users-anonymous-risk"
+    :title="t('pages.users.anonymousRisk.title')"
+    :ok-text="t('pages.users.anonymousRisk.confirm')"
+    :cancel-text="t('common.cancel')"
+    ok-type="danger"
+    @ok="confirmAnonymousRisk"
+    @cancel="cancelAnonymousRisk"
+  >
+    <a-typography-paragraph>
+      {{ t('pages.users.anonymousRisk.description') }}
+    </a-typography-paragraph>
+    <a-typography-paragraph type="secondary">
+      {{ t('pages.users.anonymousRisk.detail') }}
+    </a-typography-paragraph>
   </a-modal>
 </template>
