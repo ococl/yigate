@@ -76,6 +76,9 @@ function emptyHealthCheck(): HealthCheckConfig {
 const form = ref({
   name: '',
   url: '',
+  // 独立认证凭据：不再需要把用户名密码塞进 URL
+  username: '',
+  password: '',
   enabled: true,
   types: [] as string[],
   priority: 1,
@@ -84,21 +87,37 @@ const form = ref({
   health_check: emptyHealthCheck(),
 })
 
+// 编辑态下用于判断凭据是否被改动：密码从不回显，留空即表示保持原密码
+const originalUsername = ref('')
+const originalHasPassword = ref(false)
+
 // 表单内联校验：输入变化后自动清除对应错误
 const nameError = ref('')
 const urlError = ref('')
+const usernameError = ref('')
+const passwordError = ref('')
 const typesError = ref('')
 const pathError = ref('')
 
 function resetFieldErrors() {
   nameError.value = ''
   urlError.value = ''
+  usernameError.value = ''
+  passwordError.value = ''
   typesError.value = ''
   pathError.value = ''
 }
 
 watch(
-  () => [form.value.name, form.value.url, form.value.types.join(','), form.value.health_check.type, form.value.health_check.path],
+  () => [
+    form.value.name,
+    form.value.url,
+    form.value.username,
+    form.value.password,
+    form.value.types.join(','),
+    form.value.health_check.type,
+    form.value.health_check.path,
+  ],
   () => resetFieldErrors(),
 )
 
@@ -170,9 +189,13 @@ function showAddModal() {
   editingName.value = ''
   originalUrl.value = ''
   resetFieldErrors()
+  originalUsername.value = ''
+  originalHasPassword.value = false
   form.value = {
     name: '',
     url: '',
+    username: '',
+    password: '',
     enabled: true,
     types: ['socks5'],
     priority: 1,
@@ -188,10 +211,15 @@ function showEditModal(record: UpstreamInfo) {
   editingName.value = record.name
   const hc = record.health_check || emptyHealthCheck()
   originalUrl.value = record.url
+  originalUsername.value = record.username || ''
+  originalHasPassword.value = record.has_password === true
   resetFieldErrors()
   form.value = {
     name: record.name,
     url: record.url,
+    username: record.username || '',
+    // 密码永不下发，编辑时留空表示沿用原密码
+    password: '',
     enabled: record.enabled !== false,
     types: [...(record.types || [])],
     priority: record.priority,
@@ -214,12 +242,29 @@ function urlUnchanged(): boolean {
   return isEdit.value && form.value.url.trim() === originalUrl.value.trim()
 }
 
-function validateForm(): { name?: string; url?: string; types?: string; path?: string } {
-  const errors: { name?: string; url?: string; types?: string; path?: string } = {}
+function validateForm(): {
+  name?: string
+  url?: string
+  username?: string
+  password?: string
+  types?: string
+  path?: string
+} {
+  const errors: { name?: string; url?: string; username?: string; password?: string; types?: string; path?: string } = {}
   if (!form.value.name.trim()) errors.name = t('pages.upstreams.messages.nameRequired')
   if (!form.value.url.trim()) errors.url = t('pages.upstreams.messages.urlRequired')
   else if (!urlUnchanged() && !/^(https?|socks5h?):\/\/.+/i.test(form.value.url.trim())) {
     errors.url = t('pages.upstreams.messages.urlInvalid')
+  }
+
+  // 用户名与密码必须成对提供；编辑态留空密码表示沿用原密码，仅当原本也没有密码时要求填写
+  const username = form.value.username.trim()
+  const password = form.value.password
+  if (username || password) {
+    if (!username) errors.username = t('pages.upstreams.messages.usernameRequired')
+    if (!password && (!isEdit.value || !originalHasPassword.value)) {
+      errors.password = t('pages.upstreams.messages.passwordRequired')
+    }
   }
   if (form.value.types.length === 0) errors.types = t('pages.upstreams.messages.typesRequired')
   if (form.value.health_check.type === 'http' || form.value.health_check.type === 'https') {
@@ -235,9 +280,11 @@ async function handleSubmit() {
   const errors = validateForm()
   nameError.value = errors.name || ''
   urlError.value = errors.url || ''
+  usernameError.value = errors.username || ''
+  passwordError.value = errors.password || ''
   typesError.value = errors.types || ''
   pathError.value = errors.path || ''
-  if (errors.name || errors.url || errors.types || errors.path) return
+  if (errors.name || errors.url || errors.username || errors.password || errors.types || errors.path) return
 
   const healthCheck: HealthCheckConfig = {
     type: form.value.health_check.type,
@@ -265,6 +312,17 @@ async function handleSubmit() {
         strategy: form.value.strategy,
         health_check: healthCheck,
       }
+      const username = form.value.username.trim()
+      const password = form.value.password
+      // 密码留空表示沿用原密码，因此只在用户实际输入时提交
+      if (password) {
+        data.username = username
+        data.password = password
+      } else if (username !== originalUsername.value.trim()) {
+        data.username = username
+        // 用户名被清空：同时清掉密码，避免留下"无用户名却有密码"的非法组合
+        if (!username) data.password = ''
+      }
       await updateUpstream(editingName.value, data)
       message.success(t('pages.upstreams.messages.updated'))
       if (editingName.value !== data.name) {
@@ -274,6 +332,8 @@ async function handleSubmit() {
       const data: AddUpstreamRequest = {
         name: form.value.name.trim(),
         url: form.value.url.trim(),
+        username: form.value.username.trim() || undefined,
+        password: form.value.password || undefined,
         enabled: form.value.enabled,
         types: form.value.types,
         priority: form.value.priority,
@@ -769,6 +829,45 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             :help="urlError || undefined"
           >
             <a-input id="up-url" v-model:value="form.url" :placeholder="t('pages.upstreams.form.urlPlaceholder')" />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+      <a-row :gutter="16">
+        <a-col :xs="24" :sm="12">
+          <a-form-item
+            html-for="up-username"
+            :label="t('pages.upstreams.form.username')"
+            :tooltip="t('pages.upstreams.form.usernameTooltip')"
+            :validate-status="usernameError ? 'error' : undefined"
+            :help="usernameError || undefined"
+          >
+            <a-input
+              id="up-username"
+              v-model:value="form.username"
+              autocomplete="off"
+              :placeholder="t('pages.upstreams.form.usernamePlaceholder')"
+            />
+          </a-form-item>
+        </a-col>
+        <a-col :xs="24" :sm="12">
+          <a-form-item
+            html-for="up-password"
+            :label="t('pages.upstreams.form.password')"
+            :tooltip="t('pages.upstreams.form.passwordTooltip')"
+            :validate-status="passwordError ? 'error' : undefined"
+            :help="passwordError || undefined"
+          >
+            <a-input-password
+              id="up-password"
+              v-model:value="form.password"
+              autocomplete="new-password"
+              :placeholder="
+                isEdit && originalHasPassword
+                  ? t('pages.upstreams.form.passwordKeepPlaceholder')
+                  : t('pages.upstreams.form.passwordPlaceholder')
+              "
+            />
           </a-form-item>
         </a-col>
       </a-row>
