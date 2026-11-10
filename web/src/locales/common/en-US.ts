@@ -58,7 +58,6 @@ export const common = {
 /** Sidebar navigation and group titles. */
 export const nav = {
   brand: 'YiGate',
-  subtitle: 'Admin console',
   dashboard: 'Dashboard',
   manage: 'Manage',
   upstreams: 'Upstreams',

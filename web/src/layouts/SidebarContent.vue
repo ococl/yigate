@@ -23,9 +23,6 @@ const selectedKeys = computed(() => {
       <span class="logo-text" :style="{ color: token.colorText }">
         {{ collapsed ? 'Y' : 'YiGate' }}
       </span>
-      <span v-if="!collapsed" class="logo-sub" :style="{ color: token.colorTextTertiary }">
-        {{ t('nav.subtitle') }}
-      </span>
     </div>
     <div class="nav-scroll">
       <a-menu :selected-keys="selectedKeys" v-model:open-keys="openKeys" mode="inline" class="nav-menu">
@@ -104,10 +101,6 @@ const selectedKeys = computed(() => {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.5px;
-}
-
-.logo-sub {
-  font-size: 12px;
 }
 
 /* 菜单区域独立滚动，logo 固定在顶部 */

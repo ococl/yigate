@@ -58,7 +58,6 @@ export const common = {
 /** 侧边栏导航与分组标题。 */
 export const nav = {
   brand: 'YiGate',
-  subtitle: '管理后台',
   dashboard: '仪表盘',
   manage: '管理',
   upstreams: '上游管理',
