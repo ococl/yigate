@@ -703,7 +703,7 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 		usernames := editor.ListUsers()
 		result := make([]userInfo, 0, len(usernames))
 		for _, item := range usernames {
-			result = append(result, userInfo{Username: item.Username, Enabled: item.Enabled})
+			result = append(result, userInfo(item))
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"users": result})
 
