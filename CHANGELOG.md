@@ -3,7 +3,9 @@
 本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
 
-## [Unreleased]
+## [0.6.0] - 2026-11-10
+
+本次为上游凭据与用户治理版本。上游支持独立用户名密码（密码可引用 `${ENV}`），用户可以启用/禁用，删除或禁用最后一个启用用户时明确回落为匿名访问；AI 助手文档路径统一为 `llms.txt`，WebUI E2E 全面改用 `data-testid` 定位。
 
 ### Added
 
