@@ -85,18 +85,22 @@ refactor: 将默认配置路径从 config/ 迁移到 data/config.yml
 
 ## CI 通道与门禁
 
-CNB（`.cnb.yml`）是唯一发布通道，GitHub Actions（`.github/workflows/ci.yml`）是等价的镜像验证通道，
-两者都通过 `scripts/check-release-gates.sh`、`scripts/check-release-configs.sh` 和
-`scripts/check-platforms-sync.sh` 复用同一套检查，避免两套门禁漂移。
+CNB（`.cnb.yml`）是**唯一**的构建与发布通道，GitHub 仅作为代码与产物的镜像仓库，
+不运行任何自动 CI（`.github/workflows/ci.yml` 只保留 `workflow_dispatch` 手动排查入口，
+其 `matrix` 仍被 `scripts/check-platforms-sync.sh` 用于平台清单一致性校验）。
 
-| 门禁 | CNB PR | GitHub CI | CNB Beta / 正式 |
+CNB 的各条流水线通过 `scripts/check-release-gates.sh`、`scripts/check-release-configs.sh` 和
+`scripts/check-platforms-sync.sh` 复用同一套检查，避免门禁漂移。
+
+| 门禁 | CNB PR | CNB Beta | CNB 正式 |
 | --- | --- | --- | --- |
 | `go vet` / `go test` / `-race` | 是 | 是 | 是 |
-| `golangci-lint` / `govulncheck` | lint（漏洞扫描由 GitHub CI 承担） | 是 | 是 |
+| `golangci-lint` / `govulncheck` | lint | 否（漏洞扫描由正式流水线承担） | 是 |
 | 前端 `type-check` / `npm audit` / `vitest` | 是 | 是 | 是 |
 | Playwright E2E | 否（构建流水线承担） | 是 | 是 |
-| 发布门禁（版本/工作区/tag） | 否 | 否 | 是 |
+| 发布门禁（版本/工作区/tag） | 否 | 是 | 是 |
 | 配置安全 / 平台清单 / SBOM | 前两者 | 前两者 | 全量 |
+| 同步到 GitHub 镜像 | 否 | 仅代码 | 代码 + 标签 + Release + 附件 |
 
 正式发布执行 `scripts/release.sh` 或 `.cnb.yml` 的 `v*` 流水线，二者共用发布门禁：
 版本号格式、工作区干净、以及正式版 `v<version>` tag 必须指向 HEAD。

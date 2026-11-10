@@ -1,8 +1,20 @@
 # YiGate
 
+[简体中文](README.md) · [English](README.en.md)
+
 轻量级统一代理网关。让 **HTTP / HTTPS CONNECT / SOCKS5 共用单端口**接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和内置管理界面，提供可运维的代理能力。
 
 > 合规、轻量、可运维。明确不支持任何混淆 / 非合规协议。
+
+> **仓库说明**
+>
+> - **主仓库（唯一开发与发布通道）**：<https://cnb.cool/yi.team/yigate>
+> - **GitHub 镜像**：<https://github.com/ococl/yigate>
+>
+> GitHub 仅作镜像：代码、标签与 Release（含全部附件）由 CNB 流水线在正式发布后自动同步，
+> 该仓库**不运行 CI**，也不作为发布来源。Issue、PR 与讨论请提交到主仓库。
+> 版本与发布流程见 [VERSIONING.md](VERSIONING.md)，贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 
 ---
 
@@ -59,7 +71,7 @@
 ├── docs/screenshots/     # 界面截图
 ├── test/e2e/             # 联调与基准脚本
 ├── .cnb.yml              # CNB 主发布通道
-├── .github/workflows/    # GitHub Actions（CI 与 Release 镜像验证通道）
+├── .github/workflows/    # GitHub 手动排查入口（不自动触发，构建发布由 CNB 承担）
 ├── docker-compose.yml    # 一键本地部署
 └── Makefile
 ```
