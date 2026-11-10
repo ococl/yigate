@@ -5,7 +5,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- 上游支持独立 `username` / `password` 认证字段，不必再把凭据拼进 `url`；`password`
+  支持 `${ENV}` 占位符避免明文落盘。列表接口只返回 `username` 与 `has_password`，
+  密码永不下发，编辑其他字段也不会抹掉已配置的密码。两个字段必须成对出现，
+  且不能与 URL 内嵌 userinfo 同时配置（同时出现会在加载期报错）。
+- 用户启用/禁用：`users` 支持 `{password, enabled}` 映射写法，旧的 `username: password`
+  标量写法继续兼容；禁用用户不参与代理认证，全部禁用等价于匿名代理。
+- `PUT /api/v1/config/users/{username}` 支持只传 `enabled` 切换用户状态，
+  `GET /api/v1/config/users` 返回每个用户的 `enabled`。
+
 ### Changed
+
+- 删除或禁用最后一个启用用户时，接口返回 `409`（`code=last_active_user`）而不是直接报错；
+  WebUI 会提示「配置将回落为匿名访问」，用户确认后带 `?force=true` 重试，
+  服务端写入 `allow_anonymous_proxy: true` 让配置自洽生效。批量删除同此语义。
+- 配置保存改为在校验副本上执行，单监听配置不会再被改写成 `listeners` 数组形态。
 
 - WebUI E2E 改为 `data-testid` 定位：页面根节点 `page-<route>`、侧栏 `nav-<route>`、
   表格行内操作 `row-delete` / `row-edit` / `row-move-up` / `row-move-down`，登录、分页、
