@@ -1,8 +1,16 @@
-# YiGate
+<p align="center">
+  <img src="web/public/favicon.svg" alt="YiGate" width="96" height="96">
+</p>
 
-[简体中文](README.md) · [English](README.en.md)
+<h1 align="center">YiGate</h1>
 
-A lightweight unified proxy gateway. It multiplexes **HTTP, HTTPS CONNECT and SOCKS5 on a single port** and adds rule-based routing, multiple upstreams, health checks, socks5h remote resolution, hot configuration reload and a built-in admin UI, so the proxy stays operable in production.
+<p align="center">
+  <a href="README.md">简体中文</a> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
+  A lightweight unified proxy gateway. It multiplexes <strong>HTTP, HTTPS CONNECT and SOCKS5 on a single port</strong> and adds rule-based routing, multiple upstreams, health checks, socks5h remote resolution, hot configuration reload and a built-in admin UI, so the proxy stays operable in production.
+</p>
 
 > Compliant, lightweight, operable. Obfuscation and non-compliant protocols are explicitly unsupported.
 

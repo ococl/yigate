@@ -1,8 +1,16 @@
-# YiGate
+<p align="center">
+  <img src="web/public/favicon.svg" alt="YiGate" width="96" height="96">
+</p>
 
-[简体中文](README.md) · [English](README.en.md)
+<h1 align="center">YiGate</h1>
 
-轻量级统一代理网关。让 **HTTP / HTTPS CONNECT / SOCKS5 共用单端口**接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和内置管理界面，提供可运维的代理能力。
+<p align="center">
+  <a href="README.md">简体中文</a> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
+  轻量级统一代理网关。让 <strong>HTTP / HTTPS CONNECT / SOCKS5 共用单端口</strong>接入，并通过规则路由、多上游、健康检查、socks5h 远端解析、配置热加载和内置管理界面，提供可运维的代理能力。
+</p>
 
 > 合规、轻量、可运维。明确不支持任何混淆 / 非合规协议。
 
