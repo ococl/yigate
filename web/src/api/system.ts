@@ -1,21 +1,11 @@
 import request from './request'
-import type {
-  HealthStatus,
-  StatusSnapshot,
-  TrafficSnapshot,
-  VersionInfo,
-  ApiResult,
-} from '@/types/api'
-
-// silent=true 时不触发全局错误提示，供轮询使用：失败由页面自身的状态位表达
-export function getHealth(options?: { silent?: boolean }): Promise<HealthStatus> {
-  return request.get('/health', options?.silent ? { _skipErrorHandler: true } : undefined).then((r) => r.data)
-}
+import type { StatusSnapshot, TrafficSnapshot, VersionInfo, ApiResult } from '@/types/api'
 
 export function getMetrics(): Promise<string> {
   return request.get('/metrics', { responseType: 'text' }).then((r) => r.data)
 }
 
+// silent=true 时不触发全局错误提示，供轮询使用：失败由页面自身的状态位表达
 export function getStatus(options?: { silent?: boolean }): Promise<StatusSnapshot> {
   return request
     .get('/api/v1/status', options?.silent ? { _skipErrorHandler: true } : undefined)

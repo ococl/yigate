@@ -409,7 +409,7 @@ def _mgmt_get(path):
 
 def test_management_health():
     code, text = _mgmt_get("/health")
-    ok = code == 200 and "up" in text
+    ok = code == 200 and text.strip() == "UP"
     return TestResult("管理接口 /health", ok, f"HTTP {code}" if ok else f"失败 HTTP {code} {text[:40]}")
 
 

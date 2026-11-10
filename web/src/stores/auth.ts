@@ -15,7 +15,8 @@ export const useAuthStore = defineStore('auth', () => {
       // 先验证 Token，不提前写入 localStorage
       // 直接在请求头中携带 Token，绕过拦截器从 localStorage 读取的逻辑
       // _skipErrorHandler 跳过全局错误提示，由登录页统一处理
-      const resp = await request.get('/health', {
+      // 用受鉴权的 /api/v1/status 而非匿名的 /health：后者不校验令牌，无法用于登录。
+      const resp = await request.get('/api/v1/status', {
         headers: { Authorization: `Bearer ${t}` },
         _skipErrorHandler: true,
       })

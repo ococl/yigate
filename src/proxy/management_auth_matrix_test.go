@@ -1,12 +1,14 @@
 package proxy
 
 import (
+	"io"
 	"net/http"
 	"testing"
 )
 
 // TestManagementAuthMatrix 逐路由验证管理接口鉴权覆盖，防止新增 handler 忘记 requireAuth。
 // WebUI 静态资源是登录入口，设计上匿名可读，但必须带基础安全响应头。
+// /health 是有意的匿名例外：探活只需要知道进程在响应，不应依赖令牌。
 func TestManagementAuthMatrix(t *testing.T) {
 	const token = "matrix-secret-token"
 	m := NewManagementServer(func() HealthStatus {
@@ -21,7 +23,6 @@ func TestManagementAuthMatrix(t *testing.T) {
 	addr := m.ln.Addr().String()
 
 	protected := []string{
-		"/health",
 		"/metrics",
 		"/api/v1/status",
 		"/api/v1/version",
@@ -51,6 +52,21 @@ func TestManagementAuthMatrix(t *testing.T) {
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("%s without token = %d, want 401", path, resp.StatusCode)
 		}
+	}
+
+	// /health 有意匿名：只回 UP，且不得泄漏监听地址、上游数量等运行信息。
+	healthResp, err := http.Get("http://" + addr + "/health")
+	if err != nil {
+		t.Fatalf("anonymous /health: %v", err)
+	}
+	if healthResp.StatusCode != http.StatusOK {
+		healthResp.Body.Close()
+		t.Fatalf("/health without token = %d, want 200", healthResp.StatusCode)
+	}
+	healthBody, _ := io.ReadAll(healthResp.Body)
+	healthResp.Body.Close()
+	if got := string(healthBody); got != "UP" {
+		t.Fatalf("/health body = %q, want %q", got, "UP")
 	}
 
 	// 静态资源有意公开（否则登录页无法加载），但不得返回鉴权错误且需带安全头。

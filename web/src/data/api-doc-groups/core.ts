@@ -10,36 +10,17 @@ export const coreGroups: ApiGroup[] = [
         id: 'health',
         method: 'GET',
         path: '/health',
-        summary: '健康检查',
+        summary: '健康检查（匿名）',
         description:
-          '返回网关健康状态。当 router_ready 或 manager_ready 为 false 时返回 HTTP 503，适用于负载均衡健康探测。',
-        auth: true,
-        authNote: '当 management_auth_token 非空时需要认证',
+          '进程探活端点，无需认证，仅返回纯文本 UP，用于容器 healthcheck 与负载均衡探测。它只表示管理端口已在响应，不代表代理功能可用；就绪与上游状态请查 /api/v1/status。',
+        auth: false,
         params: [],
-        responseBody: `{
-  "status": "up",
-  "listen": "0.0.0.0:1080",
-  "upstream_count": 3,
-  "router_ready": true,
-  "manager_ready": true,
-  "timestamp": "2025-01-01T00:00:00Z"
-}`,
+        responseBody: 'UP',
         example: {
           request: 'curl http://127.0.0.1:8890/health',
-          response: `{
-  "status": "up",
-  "listen": "0.0.0.0:1080",
-  "upstream_count": 3,
-  "router_ready": true,
-  "manager_ready": true,
-  "timestamp": "2025-01-01T00:00:00Z"
-}`,
+          response: 'UP',
         },
-        statusCodes: [
-          { code: 200, description: '网关健康' },
-          { code: 503, description: 'router 或 manager 未就绪' },
-          { code: 401, description: '未认证（需 Bearer Token）' },
-        ],
+        statusCodes: [{ code: 200, description: '进程存活，返回纯文本 UP' }],
       },
       {
         id: 'metrics',

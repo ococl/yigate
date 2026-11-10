@@ -111,7 +111,7 @@ const (
 
 // NewManagementServer 创建管理服务器，getStatus 提供当前健康状态。
 // enablePprof 为 true 时注册 /debug/pprof 路由，用于线上问题排查。
-// authToken 非空时，所有管理端点都要求 Authorization: Bearer <token>。
+// authToken 非空时，除匿名的 /health 之外，所有管理端点都要求 Authorization: Bearer <token>。
 func NewManagementServer(getStatus func() HealthStatus, enablePprof bool, authToken ...string) *ManagementServer {
 	token := ""
 	if len(authToken) > 0 {
@@ -480,33 +480,18 @@ func (m *ManagementServer) Stop() {
 	}
 }
 
+// handleHealth 是唯一匿名可读的管理端点，用于容器 / 负载均衡探活。
+// 它只证明管理端口已在响应，不回显监听地址、上游数量或就绪细节，因此不构成信息泄漏。
+// 进程存活与代理功能可用是两回事：后者看需鉴权的 /api/v1/status（router_ready / manager_ready）。
 func (m *ManagementServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if !m.requireAuth(w, r) {
-		return
-	}
 	MetricInc("yigate_management_requests_total", "path=/health")
-	m.mu.Lock()
-	getStatus := m.getStatus
-	m.mu.Unlock()
-	status := HealthStatus{Status: "up"}
-	if getStatus != nil {
-		status = getStatus()
-	}
-	status.Timestamp = time.Now()
-	w.Header().Set("Content-Type", "application/json")
-	if status.Status == "" {
-		status.Status = "up"
-	}
-	code := http.StatusOK
-	if !status.RouterReady || !status.ManagerReady {
-		code = http.StatusServiceUnavailable
-	}
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(status)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("UP"))
 }
 
 func (m *ManagementServer) handleMetrics(w http.ResponseWriter, r *http.Request) {

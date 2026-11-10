@@ -244,11 +244,12 @@ webui:
 	if err := s.LoadAndApply(); err != nil {
 		t.Fatalf("reload token: %v", err)
 	}
-	if got := statusWithToken("/health", "token-1"); got != http.StatusUnauthorized {
-		t.Fatalf("/health with old token = %d, want 401", got)
+	// /health 匿名，无法用于验证令牌轮换，改用受鉴权的 /api/v1/status。
+	if got := statusWithToken("/api/v1/status", "token-1"); got != http.StatusUnauthorized {
+		t.Fatalf("/api/v1/status with old token = %d, want 401", got)
 	}
-	if got := statusWithToken("/health", "token-2"); got != http.StatusOK {
-		t.Fatalf("/health with new token = %d, want 200", got)
+	if got := statusWithToken("/api/v1/status", "token-2"); got != http.StatusOK {
+		t.Fatalf("/api/v1/status with new token = %d, want 200", got)
 	}
 }
 

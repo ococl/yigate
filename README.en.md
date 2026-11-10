@@ -113,7 +113,7 @@ Once running in the foreground:
 
 - Proxy endpoint: `http://127.0.0.1:8891` (HTTP/HTTPS/SOCKS5 share the port)
 - Admin UI: `http://127.0.0.1:8890`
-- Health check: `curl http://127.0.0.1:8890/health`
+- Health check: `curl http://127.0.0.1:8890/health` (anonymous, returns plain-text `UP`; readiness is reported by `/api/v1/status`)
 
 ### Option 2: Docker (recommended)
 
@@ -142,7 +142,7 @@ See `src/config.sample.yml` for the full example. Key fields:
 |------|-------------|
 | `listen` / `listeners` | Proxy listen addresses; `listeners` allows per-port TLS, users and access control, while top-level `users`/`access_control` act as defaults for ports that do not override them |
 | `management` | Dedicated admin port (WebUI + API) |
-| `management_auth_token` | When non-empty, every admin endpoint requires a Bearer token; mandatory when bound to a non-loopback address |
+| `management_auth_token` | When non-empty, every admin endpoint except `/health` requires a Bearer token; mandatory when bound to a non-loopback address |
 | `webui.enabled` | Defaults to true; hot-reloadable, and disabling it leaves only the API on the admin port |
 | `enable_pprof` | Defaults to false; enables `/debug/pprof/*` on the admin port (authenticated), hot-reloadable |
 | `users` | Empty means anonymous proxying is allowed |
@@ -171,7 +171,7 @@ Traffic details are stored in `traffic.json` next to the configuration file (mod
 
 | Path | Description |
 |------|-------------|
-| `GET /health` | Health status |
+| `GET /health` | Process liveness (anonymous, plain-text `UP`; does not reflect proxy availability) |
 | `GET /metrics` | Prometheus metrics (`yigate_` prefix) |
 | `GET /api/v1/status` | Runtime summary (version and uptime) |
 | `GET /api/v1/version` | Version information |

@@ -4,17 +4,16 @@ import { useI18n } from 'vue-i18n'
 import { message, theme } from 'antdv-next'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import { useAppStore } from '@/stores/app'
-import { getHealth, getStatus, getTraffic } from '@/api/system'
+import { getStatus, getTraffic } from '@/api/system'
 import { formatTimeOnly } from '@/utils/datetime'
 import { formatBytes, formatUptime } from '@/utils/format'
 import { copyText } from '@/utils/clipboard'
-import type { HealthStatus, ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
+import type { ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
 
 const { t } = useI18n()
 // 「直连」既作为分组键也作为展示名，内部统一用常量，展示时再翻译
 const DIRECT_NAME = '直连'
 
-const health = ref<HealthStatus | null>(null)
 const status = ref<StatusSnapshot | null>(null)
 const traffic = ref<TrafficSnapshot | null>(null)
 const loading = ref(false)
@@ -26,20 +25,19 @@ const appStore = useAppStore()
 const successText = computed(() => (appStore.isDark ? '#49aa19' : '#237804'))
 const errorText = computed(() => (appStore.isDark ? '#ff7875' : '#cf1322'))
 
-// silent=true 用于定时刷新：避免每次自动刷新都整页 loading 抖动
+// silent=true 用于定时刷新：避免每次自动刷新都整页 loading 抖动。
+// /health 只表示进程存活，Dashboard 需要的就绪与上游信息全部来自 /api/v1/status。
 async function fetchData(silent = false) {
   if (!silent) loading.value = true
   try {
-    const [h, s, t] = await Promise.all([
-      getHealth({ silent }).catch(() => null),
+    const [s, t] = await Promise.all([
       getStatus({ silent }).catch(() => null),
       getTraffic({ silent }).catch(() => null),
     ])
-    health.value = h
     status.value = s
     traffic.value = t
     // 全部接口都失败时保留上一次成功时间，避免把刷新失败显示成「刚刚更新」
-    if (h || s || t) lastRefreshed.value = new Date()
+    if (s || t) lastRefreshed.value = new Date()
   } finally {
     if (!silent) loading.value = false
   }
@@ -337,15 +335,15 @@ const aliveCount = computed(() => upstreams.value.filter((u) => checked(u) && !u
 const deadCount = computed(() => upstreams.value.filter((u) => checked(u) && u.dead).length)
 const uncheckedCount = computed(() => upstreams.value.filter((u) => !checked(u)).length)
 
-// 健康接口失败时不能把「读不到」显示成「异常」，否则会误报网关故障
-const healthUnavailable = computed(() => !health.value && !loading.value)
+// 状态接口失败时不能把「读不到」显示成「异常」，否则会误报网关故障
+const statusUnavailable = computed(() => !status.value && !loading.value)
 const statusColor = computed(() => {
-  if (!health.value) return token.value.colorTextSecondary
-  return health.value.status === 'up' ? successText.value : errorText.value
+  if (!status.value) return token.value.colorTextSecondary
+  return status.value.status === 'up' ? successText.value : errorText.value
 })
 const readyColor = computed(() => {
-  if (!health.value) return token.value.colorTextSecondary
-  return health.value.router_ready && health.value.manager_ready ? successText.value : errorText.value
+  if (!status.value) return token.value.colorTextSecondary
+  return status.value.router_ready && status.value.manager_ready ? successText.value : errorText.value
 })
 
 fetchData()
@@ -374,7 +372,7 @@ useVisiblePolling(() => fetchData(true), 10000)
     </div>
 
     <a-alert
-      v-if="healthUnavailable"
+      v-if="statusUnavailable"
       type="warning"
       show-icon
       style="margin-bottom: 16px;"
@@ -394,7 +392,7 @@ useVisiblePolling(() => fetchData(true), 10000)
           <a-statistic
             data-testid="stat-status"
             :title="t('pages.dashboard.status')"
-            :value="health ? health.status || '-' : '—'"
+            :value="status ? status.status || '-' : '—'"
             :value-style="{ color: statusColor }"
           />
         </a-card>
@@ -405,7 +403,7 @@ useVisiblePolling(() => fetchData(true), 10000)
             data-testid="stat-upstreams"
             :title="t('pages.dashboard.availableUpstreams')"
             :value="status ? aliveCount : '—'"
-            :suffix="status ? `/ ${upstreams.length || health?.upstream_count || 0}` : ''"
+            :suffix="status ? `/ ${upstreams.length || status.upstream_count || 0}` : ''"
           />
           <a-typography-text type="secondary" style="font-size: 12px;">
             {{
@@ -422,8 +420,8 @@ useVisiblePolling(() => fetchData(true), 10000)
             data-testid="stat-ready"
             :title="t('pages.dashboard.routerReady')"
             :value="
-              health
-                ? health.router_ready && health.manager_ready
+              status
+                ? status.router_ready && status.manager_ready
                   ? t('pages.dashboard.ready')
                   : t('pages.dashboard.abnormal')
                 : '—'

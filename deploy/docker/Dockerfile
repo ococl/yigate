@@ -47,4 +47,8 @@ RUN chmod +x /usr/local/bin/entrypoint.sh && \
     mkdir -p /var/lib/yigate/data /var/lib/yigate/logs && \
     chown -R yigate:yigate /var/lib/yigate
 EXPOSE 8891 8890
+# 探活只证明管理端口在响应：/health 匿名且只回纯文本 UP，无需读取配置里的令牌。
+# 代理是否可用是另一回事，看需认证的 /api/v1/status；端口被改动时可在 compose 中覆盖本检查。
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+  CMD ["/usr/bin/wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8890/health"]
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

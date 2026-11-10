@@ -30,15 +30,4 @@ services:
       - SETGID   # setpriv 降权到 yigate 需要 setgid
       - SETUID   # setpriv 降权到 yigate 需要 setuid
     restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          setpriv --reuid=1000 --regid=1000 --clear-groups sh -c
-          'token=$$(grep "^management_auth_token:" /var/lib/yigate/data/config.yml | head -n 1 | cut -d" " -f2- | cut -d\" -f2);
-          wget -q -O /dev/null --header="Authorization: Bearer $$token"
-          http://127.0.0.1:8890/health'
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # 健康检查由镜像内置（Dockerfile HEALTHCHECK，匿名探测 /health），此处不重复定义。

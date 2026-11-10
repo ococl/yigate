@@ -113,7 +113,7 @@ GOPROXY=https://goproxy.cn,direct go build -o yigate .
 
 - 代理入口：`http://127.0.0.1:8891`（HTTP/HTTPS/SOCKS5 共用）
 - 管理界面：`http://127.0.0.1:8890`
-- 健康检查：`curl http://127.0.0.1:8890/health`
+- 健康检查：`curl http://127.0.0.1:8890/health`（匿名，返回纯文本 `UP`；代理是否可用看 `/api/v1/status`）
 
 ### 方式二：Docker（推荐）
 
@@ -142,7 +142,7 @@ sudo systemctl start yigate
 |------|------|
 | `listen` / `listeners` | 代理监听地址；`listeners` 支持每端口独立 TLS / 用户 / 访问控制，顶层 `users`/`access_control` 作为未显式配置端口的默认值 |
 | `management` | 独立管理端口（WebUI + API） |
-| `management_auth_token` | 非空时所有管理接口要求 Bearer Token；非回环暴露时必填 |
+| `management_auth_token` | 非空时除 `/health` 外的管理接口要求 Bearer Token；非回环暴露时必填 |
 | `webui.enabled` | 默认 true；热加载生效，关闭后管理端口仅提供 API |
 | `enable_pprof` | 默认 false；开启后管理端口暴露 `/debug/pprof/*`（需认证），可热加载 |
 | `users` | 为空则允许匿名代理 |
@@ -173,7 +173,7 @@ sudo systemctl start yigate
 
 | 路径 | 说明 |
 |------|------|
-| `GET /health` | 健康状态 |
+| `GET /health` | 进程探活（匿名，返回纯文本 `UP`；不反映代理是否可用） |
 | `GET /metrics` | Prometheus 指标（`yigate_` 前缀） |
 | `GET /api/v1/status` | 运行摘要（含版本与运行时长） |
 | `GET /api/v1/version` | 版本信息 |

@@ -16,13 +16,14 @@ describe('auth store', () => {
     vi.clearAllMocks()
   })
 
-  it('persists a token only after a valid health response', async () => {
+  it('persists a token only after a valid authenticated status response', async () => {
     vi.mocked(request.get).mockResolvedValueOnce({ data: { status: 'up' } } as never)
     const store = useAuthStore()
 
     await expect(store.login(' valid-token ')).resolves.toBe(true)
 
-    expect(request.get).toHaveBeenCalledWith('/health', {
+    // /health 匿名，不校验令牌，登录必须用受鉴权的端点
+    expect(request.get).toHaveBeenCalledWith('/api/v1/status', {
       headers: { Authorization: 'Bearer  valid-token ' },
       _skipErrorHandler: true,
     })
@@ -43,7 +44,7 @@ describe('auth store', () => {
     expect(store.loading).toBe(false)
   })
 
-  it('clears credentials when health authentication fails', async () => {
+  it('clears credentials when token authentication fails', async () => {
     vi.mocked(request.get).mockRejectedValueOnce(new Error('unauthorized'))
     const store = useAuthStore()
 

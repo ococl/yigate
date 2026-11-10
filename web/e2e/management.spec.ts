@@ -92,24 +92,6 @@ test('upstream page survives a network outage', async ({ page }) => {
   await expect(page.getByText(copy.feedback.networkError).first()).toBeVisible()
 })
 
-test('dashboard warns instead of reporting a false outage when the health API fails', async ({ page }) => {
-  await login(page)
-
-  // 健康接口以站点根路径请求（/health），不是 /api/v1 前缀；登录本身也依赖它，所以登录后再拦截
-  await page.route(/\/health$/, (route) =>
-    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
-  )
-  await page.goto('/dashboard')
-
-  await expect(page.getByText(copy.pages.dashboard.healthUnavailableTitle)).toBeVisible()
-  const ready = page.getByTestId('stat-ready')
-  const runState = page.getByTestId('stat-status')
-  // 读不到健康状态时展示「—」，而不是误报「异常」
-  await expect(ready).toContainText('—')
-  await expect(ready).not.toContainText(copy.pages.dashboard.abnormal)
-  await expect(runState).toContainText('—')
-})
-
 test('geosite status failure shows an error state instead of a missing summary', async ({ page }) => {
   await login(page)
 
@@ -127,7 +109,7 @@ test('geosite status failure shows an error state instead of a missing summary',
   await expect(page.getByText(copy.common.loadFailed)).toHaveCount(0)
 })
 
-test('dashboard shows placeholders when the status API fails', async ({ page }) => {
+test('dashboard shows placeholders instead of a false outage when the status API fails', async ({ page }) => {
   await login(page)
 
   await page.route('**/api/v1/status', (route) =>
@@ -135,10 +117,17 @@ test('dashboard shows placeholders when the status API fails', async ({ page }) 
   )
   await page.goto('/dashboard')
 
+  // 读不到状态时提示接口不可用，而不是把「读不到」显示成「异常」
+  await expect(page.getByText(copy.pages.dashboard.healthUnavailableTitle)).toBeVisible()
   const upCard = page.getByTestId('stat-upstreams')
   // 读不到状态时展示「—」而不是 0 个可用上游，另用提示说明接口不可用
   await expect(upCard).toContainText('—')
   await expect(page.getByText(copy.pages.dashboard.statusUnavailable)).toBeVisible()
+  const ready = page.getByTestId('stat-ready')
+  const runState = page.getByTestId('stat-status')
+  await expect(ready).toContainText('—')
+  await expect(ready).not.toContainText(copy.pages.dashboard.abnormal)
+  await expect(runState).toContainText('—')
 })
 
 test('upstream delete shows a loading state and sends only one request', async ({ page, request }) => {
@@ -178,7 +167,7 @@ test('upstream delete shows a loading state and sends only one request', async (
 test('dashboard does not claim a fresh update when every API fails', async ({ page }) => {
   await login(page)
 
-  for (const pattern of ['**/api/v1/status', '**/api/v1/traffic', '**/health']) {
+  for (const pattern of ['**/api/v1/status', '**/api/v1/traffic']) {
     await page.route(pattern, (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
     )
@@ -474,7 +463,7 @@ test('traffic disabled state links to the settings section', async ({ page }) =>
 test('failing polling does not flood the page with error toasts', async ({ page }) => {
   await login(page)
 
-  for (const pattern of ['**/health', '**/api/v1/status', '**/api/v1/traffic']) {
+  for (const pattern of ['**/api/v1/status', '**/api/v1/traffic']) {
     await page.route(pattern, (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom","status":"error"}' }),
     )

@@ -1,14 +1,5 @@
 // API 响应类型定义
 
-export interface HealthStatus {
-  status: string
-  listen: string
-  upstream_count: number
-  router_ready: boolean
-  manager_ready: boolean
-  timestamp: string
-}
-
 export interface UpstreamStatus {
   name: string
   url: string

@@ -92,9 +92,13 @@ def main() -> int:
     check("auth: 无 Token 访问 /api/v1/status 返回 401", anon.status_code == 401, anon.status_code)
     bad = get("/api/v1/status", headers={"Authorization": "Bearer wrong"})
     check("auth: 错误 Token 返回 401", bad.status_code == 401, bad.status_code)
-    for path in ["/health", "/metrics", "/api/v1/traffic", "/api/v1/config/upstreams", "/api/v1/geosite"]:
+    for path in ["/metrics", "/api/v1/traffic", "/api/v1/config/upstreams", "/api/v1/geosite"]:
         resp = get(path)
         check(f"auth: 匿名 {path} -> 401", resp.status_code == 401, resp.status_code)
+    # /health 有意匿名：只回纯文本 UP，供容器与负载均衡探活。
+    resp = get("/health")
+    check("auth: 匿名 /health -> 200 UP", resp.status_code == 200 and resp.text.strip() == "UP",
+          (resp.status_code, resp.text[:40]))
 
     # ---------- 静态 WebUI ----------
     resp = get("/login")
@@ -127,11 +131,16 @@ def main() -> int:
     check("webui: 缺失静态资源返回 404", resp.status_code == 404, resp.status_code)
 
     # ---------- 基础信息 ----------
-    resp = auth_get("/health")
-    health = resp.json()
-    check("health: 200 且 status=up", resp.status_code == 200 and health.get("status") == "up",
-          (resp.status_code, health))
-    check("health: 含 router/manager ready", "router_ready" in health and "manager_ready" in health, health)
+    resp = get("/health")
+    check("health: 匿名 200 且纯文本 UP", resp.status_code == 200 and resp.text.strip() == "UP",
+          (resp.status_code, resp.text[:40]))
+
+    resp = auth_get("/api/v1/status")
+    status = resp.json()
+    check("status: 200 且 status=up", resp.status_code == 200 and status.get("status") == "up",
+          (resp.status_code, status))
+    check("status: 含 router/manager ready",
+          "router_ready" in status and "manager_ready" in status, status)
 
     resp = auth_get("/metrics")
     check("metrics: 200 且含 yigate_ 指标", resp.status_code == 200 and "yigate_" in resp.text, resp.status_code)
@@ -303,9 +312,10 @@ def main() -> int:
 
     # ---------- 暴力破解封禁（会封禁来源 IP 数分钟，默认关闭） ----------
     if RUN_BAN:
+        # /health 匿名，无法累计认证失败；用受鉴权的端点触发封禁。
         for _ in range(10):
-            get("/health", headers={"Authorization": "Bearer wrong"})
-        banned = get("/health", headers=AUTH)
+            get("/api/v1/status", headers={"Authorization": "Bearer wrong"})
+        banned = get("/api/v1/status", headers=AUTH)
         check("auth: 连续失败后正确 Token 也被临时封禁", banned.status_code == 401, banned.status_code)
     else:
         skip("auth: 暴力破解临时封禁", "需要 RUN_BAN=1（会封禁来源 IP 数分钟）")

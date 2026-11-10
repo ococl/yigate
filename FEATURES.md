@@ -82,7 +82,7 @@
 
 ## 8. 可观测性
 
-- `GET /health`：健康状态。
+- `GET /health`：进程探活（匿名，返回纯文本 `UP`；不代表代理功能可用）。
 - `GET /metrics`：Prometheus 文本指标，前缀 `yigate_`，含流量审计指标。
 - `GET /api/v1/status`：运行摘要。
 - `GET /api/v1/traffic`：流量统计快照。

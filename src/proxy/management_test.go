@@ -56,9 +56,12 @@ func TestManagementServerHealthAndMetrics(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("health status = %d", resp.StatusCode)
 	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("health Content-Type = %q, want text/plain", ct)
+	}
 	body, _ := io.ReadAll(resp.Body)
-	if len(body) == 0 {
-		t.Fatal("expected health body")
+	if got := string(body); got != "UP" {
+		t.Fatalf("health body = %q, want %q", got, "UP")
 	}
 
 	resp, err = http.Get("http://" + addr + "/metrics")
@@ -71,7 +74,9 @@ func TestManagementServerHealthAndMetrics(t *testing.T) {
 	}
 }
 
-func TestManagementServerHealthNotReady(t *testing.T) {
+// /health 只表示管理端口存活，不参与就绪判定：router / manager 未就绪时也回 UP。
+// 就绪细节由需鉴权的 /api/v1/status 提供，避免把两件事混成一个探测信号。
+func TestManagementServerHealthIgnoresReadiness(t *testing.T) {
 	m := NewManagementServer(func() HealthStatus {
 		return HealthStatus{Status: "up", RouterReady: false, ManagerReady: true}
 	}, false)
@@ -85,8 +90,8 @@ func TestManagementServerHealthNotReady(t *testing.T) {
 		t.Fatalf("get health: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 503 {
-		t.Fatalf("status = %d, want 503", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -261,13 +266,14 @@ func TestManagementServerAuthToken(t *testing.T) {
 	defer m.Stop()
 	addr := m.ln.Addr().String()
 
+	// /health 有意匿名：探活不应依赖令牌，也不因令牌错误而被拒。
 	resp, err := http.Get("http://" + addr + "/health")
 	if err != nil {
 		t.Fatalf("unauthenticated health: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("health without token = %d, want 401", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health without token = %d, want 200", resp.StatusCode)
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
@@ -277,8 +283,18 @@ func TestManagementServerAuthToken(t *testing.T) {
 		t.Fatalf("wrong token health: %v", err)
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health with wrong token = %d, want 200", resp.StatusCode)
+	}
+
+	// 其余管理端点仍然强制鉴权。
+	resp, err = http.Get("http://" + addr + "/api/v1/status")
+	if err != nil {
+		t.Fatalf("unauthenticated status: %v", err)
+	}
+	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("health with wrong token = %d, want 401", resp.StatusCode)
+		t.Fatalf("status without token = %d, want 401", resp.StatusCode)
 	}
 
 	req, _ = http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
@@ -494,9 +510,10 @@ func TestManagementBruteForceProtection(t *testing.T) {
 	defer m.Stop()
 	addr := m.ln.Addr().String()
 
-	// 连续发送错误 token 的请求，达到 authMaxFailures 次后应被封禁
+	// 连续发送错误 token 的请求，达到 authMaxFailures 次后应被封禁。
+	// 用受鉴权的 /api/v1/status：/health 匿名，无法触发认证失败计数。
 	for i := 0; i < authMaxFailures; i++ {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 		req.Header.Set("Authorization", "Bearer wrong-token")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -509,7 +526,7 @@ func TestManagementBruteForceProtection(t *testing.T) {
 	}
 
 	// 第 authMaxFailures+1 次请求应仍返回 401（已被封禁）
-	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -521,7 +538,7 @@ func TestManagementBruteForceProtection(t *testing.T) {
 	}
 
 	// 即使使用正确 token，被封禁 IP 也应被拒绝
-	req2, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+	req2, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 	req2.Header.Set("Authorization", "Bearer correct-token")
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
@@ -543,16 +560,16 @@ func TestManagementAuthSuccessClearsFailures(t *testing.T) {
 	defer m.Stop()
 	addr := m.ln.Addr().String()
 
-	// 发送几次错误请求（未达阈值）
+	// 发送几次错误请求（未达阈值）。同样使用受鉴权的 /api/v1/status。
 	for i := 0; i < authMaxFailures-1; i++ {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 		req.Header.Set("Authorization", "Bearer wrong-token")
 		resp, _ := http.DefaultClient.Do(req)
 		resp.Body.Close()
 	}
 
 	// 使用正确 token 应成功，并清除失败记录
-	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 	req.Header.Set("Authorization", "Bearer correct-token")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -565,7 +582,7 @@ func TestManagementAuthSuccessClearsFailures(t *testing.T) {
 
 	// 再次发送错误请求，计数应从 0 重新开始
 	for i := 0; i < authMaxFailures-1; i++ {
-		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 		req.Header.Set("Authorization", "Bearer wrong-token")
 		resp, _ := http.DefaultClient.Do(req)
 		resp.Body.Close()
@@ -575,7 +592,7 @@ func TestManagementAuthSuccessClearsFailures(t *testing.T) {
 	}
 
 	// 此时使用正确 token 仍应成功（未达封禁阈值）
-	req2, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/health", nil)
+	req2, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/status", nil)
 	req2.Header.Set("Authorization", "Bearer correct-token")
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {

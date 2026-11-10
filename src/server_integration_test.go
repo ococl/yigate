@@ -152,7 +152,7 @@ func TestIntegrationHTTPProxy(t *testing.T) {
 		t.Fatalf("body = %q, want %q", body, "hello from origin")
 	}
 
-	// 验证管理端点 /health
+	// 验证管理端点 /health：匿名，仅回纯文本 UP
 	hreq := mgmtRequest("GET", mgmtAddr, "/health", nil)
 	hresp, err := http.DefaultClient.Do(hreq)
 	if err != nil {
@@ -162,10 +162,9 @@ func TestIntegrationHTTPProxy(t *testing.T) {
 	if hresp.StatusCode != 200 {
 		t.Fatalf("health status = %d, want 200", hresp.StatusCode)
 	}
-	var hs proxy.HealthStatus
-	json.NewDecoder(hresp.Body).Decode(&hs)
-	if hs.Status != "up" {
-		t.Fatalf("health status = %q, want up", hs.Status)
+	hbody, _ := io.ReadAll(hresp.Body)
+	if string(hbody) != "UP" {
+		t.Fatalf("health body = %q, want %q", hbody, "UP")
 	}
 }
 
@@ -295,17 +294,21 @@ func TestIntegrationManagementHealth(t *testing.T) {
 	s, _, mgmtAddr := startTestServer(t, cfg)
 	defer stopTestServer(s)
 
-	// 无认证应 401
+	// /health 匿名可读：探活不应依赖令牌，且响应体只有 UP。
 	resp, err := http.Get("http://" + mgmtAddr + "/health")
 	if err != nil {
 		t.Fatalf("health no auth: %v", err)
 	}
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 401 {
-		t.Fatalf("no auth status = %d, want 401", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		t.Fatalf("no auth status = %d, want 200", resp.StatusCode)
+	}
+	if string(body) != "UP" {
+		t.Fatalf("health body = %q, want %q", body, "UP")
 	}
 
-	// 有认证应 200
+	// 带令牌同样 200：令牌不影响探活结果。
 	req := mgmtRequest("GET", mgmtAddr, "/health", nil)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

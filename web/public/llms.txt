@@ -28,7 +28,7 @@
 ## 端点速查
 
 状态与系统
-- GET  /health                       健康检查（无需认证）
+- GET  /health                       进程探活（无需认证，返回纯文本 UP；不代表代理可用）
 - GET  /metrics                      Prometheus 指标
 - GET  /api/v1/status                运行状态摘要
 - GET  /api/v1/version               版本信息

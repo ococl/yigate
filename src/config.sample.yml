@@ -46,7 +46,8 @@ listeners:
 # users:
 #   username: "your-password"
 management: "127.0.0.1:8892"  # 可选管理端口，提供 /health、/metrics 与 /api/v1/*
-# management_auth_token: 非空时所有管理端点要求 Authorization: Bearer <token>。
+# management_auth_token: 非空时除 /health 外的管理端点要求 Authorization: Bearer <token>。
+# /health 有意匿名：只回纯文本 UP，用于容器/负载均衡探活，不含运行信息。
 # 若配置文件由程序首次自动生成，会注入一个随机高强度令牌（请从中读取）；
 # 需要更换时直接修改此项或调用 PUT /api/v1/config/settings（WebUI 仅显示是否已设置，不回显明文）。
 # 修改后热加载即生效，且无需重启管理端口。
@@ -58,7 +59,7 @@ webui:
 # 因涉及堆栈与内存信息，非回环管理地址会强制要求 management_auth_token。
 # enable_pprof: false
 # 运行时配置 API：通过管理端口动态增删 upstream/规则/用户，变更持久化到 YAML 并热加载。
-# 所有端点均要求 management_auth_token 认证。
+# 这些端点均要求 management_auth_token 认证（/health 除外）。
 #   GET    /api/v1/config/upstreams          列出上游（URL 脱敏）
 #   POST   /api/v1/config/upstreams          添加上游
 #   PUT    /api/v1/config/upstreams/{name}   更新上游

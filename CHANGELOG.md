@@ -3,6 +3,18 @@
 本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
 
+## [Unreleased]
+
+### Changed
+
+- `GET /health` 改为匿名探活：不再要求 `management_auth_token`，只返回纯文本 `UP`，
+  且不再回显监听地址 / 上游数量 / 就绪状态，router 未就绪时也不再返回 `503`。
+  进程存活与代理可用性是两件事，就绪判定请使用需认证的 `GET /api/v1/status`；
+  依赖原 JSON 响应或 `503` 语义的外部脚本需要调整。
+- 健康检查收进镜像 `HEALTHCHECK`（匿名探测 `/health`），`docker-compose.yml` 与
+  `deploy/docker/compose.*.yml` 不再重复定义，也不再从 `config.yml` 解析令牌。
+- WebUI 登录校验与 Dashboard 改用 `/api/v1/status`，不再依赖 `/health`。
+
 ## [0.6.0] - 2026-11-10
 
 本次为上游凭据与用户治理版本。上游支持独立用户名密码（密码可引用 `${ENV}`），用户可以启用/禁用，删除或禁用最后一个启用用户时明确回落为匿名访问；AI 助手文档路径统一为 `llms.txt`，WebUI E2E 全面改用 `data-testid` 定位。

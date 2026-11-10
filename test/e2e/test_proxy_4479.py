@@ -1009,7 +1009,7 @@ def test_ssrf_metadata_unreachable():
 def test_management_health():
     try:
         r = requests.get(f"http://{MGMT_HOST}:{MGMT_PORT}/health", timeout=8)
-        ok = r.status_code == 200 and ("ok" in r.text.lower() or "status" in r.text.lower())
+        ok = r.status_code == 200 and r.text.strip() == "UP"
         return TestResult("管理接口 /health", ok, f"HTTP {r.status_code}")
     except Exception as e:
         return TestResult("管理接口 /health", False, str(e))

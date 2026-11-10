@@ -54,6 +54,8 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		"COPY --from=builder /build/entrypoint.sh /usr/local/bin/entrypoint.sh",
 		"chown -R yigate:yigate /var/lib/yigate",
 		"EXPOSE 8891",
+		"HEALTHCHECK",
+		"http://127.0.0.1:8890/health",
 		"ENTRYPOINT",
 	} {
 		if !bytes.Contains(dockerfile, []byte(want)) {
@@ -71,10 +73,14 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{"services:", "yigate:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "cap_drop:", "cap_add:", "CHOWN", "SETGID", "SETUID", "restart: unless-stopped", "healthcheck:", "setpriv --reuid=1000", "Authorization: Bearer"} {
+		for _, want := range []string{"services:", "yigate:", "build:", "context: ../..", "dockerfile: deploy/docker/Dockerfile", "volumes:", "cap_drop:", "cap_add:", "CHOWN", "SETGID", "SETUID", "restart: unless-stopped"} {
 			if !bytes.Contains(compose, []byte(want)) {
 				t.Fatalf("%s missing %q", composeFile, want)
 			}
+		}
+		// 健康检查统一由镜像内置，compose 不得重复定义（否则会覆盖镜像的 HEALTHCHECK）。
+		if bytes.Contains(compose, []byte("healthcheck:")) {
+			t.Fatalf("%s must not define healthcheck (inherited from the image)", composeFile)
 		}
 	}
 
@@ -82,10 +88,13 @@ func TestDeliveryArtifactsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"YIGATE_DEFAULT_LISTEN", "YIGATE_DEFAULT_MANAGEMENT", "CHOWN", "SETGID", "SETUID", "setpriv --reuid=1000", "Authorization: Bearer", "build:", "YIGATE_PROXY_BIND:-127.0.0.1"} {
+	for _, want := range []string{"YIGATE_DEFAULT_LISTEN", "YIGATE_DEFAULT_MANAGEMENT", "CHOWN", "SETGID", "SETUID", "build:", "YIGATE_PROXY_BIND:-127.0.0.1"} {
 		if !bytes.Contains(rootCompose, []byte(want)) {
 			t.Fatalf("docker-compose.yml missing %q", want)
 		}
+	}
+	if bytes.Contains(rootCompose, []byte("healthcheck:")) {
+		t.Fatal("docker-compose.yml must not define healthcheck (inherited from the image)")
 	}
 
 	// systemd unit 已迁移至 deploy/systemd/
