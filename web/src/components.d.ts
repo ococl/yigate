@@ -38,6 +38,7 @@ declare module 'vue' {
     AModal: typeof import('antdv-next')['Modal']
     APagination: typeof import('antdv-next')['Pagination']
     APopconfirm: typeof import('antdv-next')['Popconfirm']
+    AppLogo: typeof import('./components/AppLogo.vue')['default']
     ARadioGroup: typeof import('antdv-next')['RadioGroup']
     AResult: typeof import('antdv-next')['Result']
     ARow: typeof import('antdv-next')['Row']

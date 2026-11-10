@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { theme } from 'antdv-next'
 import { useI18n } from 'vue-i18n'
+import AppLogo from '@/components/AppLogo.vue'
 
 withDefaults(defineProps<{ collapsed?: boolean }>(), { collapsed: false })
 
@@ -20,9 +21,8 @@ const selectedKeys = computed(() => {
 <template>
   <div class="sidebar-content" :style="{ background: token.colorBgContainer }">
     <div class="logo">
-      <span class="logo-text" :style="{ color: token.colorText }">
-        {{ collapsed ? 'Y' : 'YiGate' }}
-      </span>
+      <AppLogo :size="collapsed ? 26 : 24" />
+      <span v-if="!collapsed" class="logo-text" :style="{ color: token.colorText }">YiGate</span>
     </div>
     <div class="nav-scroll">
       <a-menu :selected-keys="selectedKeys" v-model:open-keys="openKeys" mode="inline" class="nav-menu">
@@ -90,17 +90,18 @@ const selectedKeys = computed(() => {
 .logo {
   flex: 0 0 56px;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 8px;
+  padding: 0 12px;
   border-bottom: 1px solid rgba(128, 128, 128, 0.18);
 }
 
 .logo-text {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 /* 菜单区域独立滚动，logo 固定在顶部 */
