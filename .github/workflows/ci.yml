@@ -1,16 +1,11 @@
 name: CI
 
+# GitHub 仅作为镜像仓库：代码与产物由 CNB 流水线同步推送，
+# 所有质量门禁在 CNB（.cnb.yml）执行，GitHub 侧不触发任何自动构建。
+# 这里保留同一份矩阵配置供 scripts/check-platforms-sync.sh 校验平台一致性，
+# 同时保留手动入口，便于在 GitHub 上做一次性排查。
 on:
-  push:
-    branches: [main, dev]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-  pull_request:
-    branches: [main, dev]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -70,6 +70,30 @@ for dir in "${REPO_ROOT}/deploy/config" "${REPO_ROOT}/deploy/docker"; do
   done
 done
 
+# GitHub 仓库只是镜像：发布必须由 CNB 流水线 + scripts/sync-github.sh 承担，
+# 禁止在 .github/workflows 中重新引入 tag 触发或自动发布 Release 的步骤。
+check_github_publish_guard() {
+  local wf
+  for wf in "${REPO_ROOT}"/.github/workflows/*.y*ml; do
+    [[ -f "$wf" ]] || continue
+    if grep -Eqi 'action-gh-release|gh release (create|upload)|softprops/' "$wf"; then
+      echo "error: ${wf} 含自动发布 Release 的步骤；发布统一由 CNB 承担" >&2
+      status=1
+    fi
+    if grep -qE '^[[:space:]]+tags:' "$wf"; then
+      echo "error: ${wf} 由 tag 触发；GitHub 镜像仓不得在打 tag 时运行流水线" >&2
+      status=1
+    fi
+  done
+
+  # release.yml 负责发版，已迁移到 CNB，不得回流。
+  if [[ -f "${REPO_ROOT}/.github/workflows/release.yml" ]]; then
+    echo "error: .github/workflows/release.yml 不应存在；发行由 CNB + scripts/sync-github.sh 完成" >&2
+    status=1
+  fi
+}
+check_github_publish_guard
+
 if [[ $status -eq 0 ]]; then
   echo "OK: 发布配置模板安全检查通过"
 fi
