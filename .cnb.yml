@@ -24,6 +24,8 @@ main:
         GOPROXY: https://goproxy.cn,direct
         CGO_ENABLED: "0"
         YIGATE_REQUIRE_SBOM: "1"
+        # GitHub 镜像仓坐标（scripts/sync-github.sh 据此推送代码、标签与 Release）
+        GITHUB_REPO: ococl/yigate
       label:
         type: BETA
       stages:
@@ -87,6 +89,11 @@ main:
           script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main -f deploy/docker/Dockerfile .
         - name: docker-push
           script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main
+        # ---- GitHub 镜像：仅同步代码（分支构建不产出 Release，附件无处可挂）----
+        # 镜像滞后不影响本仓构建，故允许失败；正式版同步见 v* 流水线。
+        - name: sync-github-code
+          script: bash scripts/sync-github.sh code
+          allowFailure: true
 
 # ==================== PR 检查: 代码质量守护 ====================
 "(main|dev)":
@@ -143,6 +150,8 @@ main:
         GOPROXY: https://goproxy.cn,direct
         CGO_ENABLED: "0"
         YIGATE_REQUIRE_SBOM: "1"
+        # GitHub 镜像仓坐标（scripts/sync-github.sh 据此推送代码、标签与 Release）
+        GITHUB_REPO: ococl/yigate
       label:
         type: RELEASE
       stages:
@@ -247,4 +256,21 @@ main:
               - "./release/*.zip"
               - "./release/*.spdx.json"
               - "./release/SHA256SUMS"
+          allowFailure: false
+        # ---- 同步到 GitHub 镜像仓：代码 + 标签 + Release + 全部附件 ----
+        # GitHub 侧不跑任何 CI（.github/workflows 仅保留手动入口），
+        # 由本阶段一次性完成镜像：git push 代码与标签 → 创建/复用 Release
+        # → 逐个上传归档、SBOM 与 SHA256SUMS（同名附件先删后传，可重复执行）。
+        #
+        # 需要环境变量 GITHUB_TOKEN，二选一注入：
+        #   1) 密钥仓库：在 job（本轮 release 流水线）级加 imports，内容是一行
+        #      GITHUB_TOKEN: github_pat_xxx 的 yml 文件：
+        #        imports: https://cnb.cool/<group>/<secret-repo>/-/blob/main/github-env.yml
+        #   2) 仓库设置中的环境变量（若平台已开该能力），直接可用
+        # token 为 fine-grained PAT，权限 Contents: Read and write；
+        # 另需 Administration: Read and write 才能同步仓库简介与 topics（缺失只告警）。
+        # 推送含 .github/workflows 变更的提交还需要 Workflows: Read and write。
+        # 本地手动补同步：GITHUB_TOKEN=xxx bash scripts/sync-github.sh all
+        - name: sync-github
+          script: bash scripts/sync-github.sh all
           allowFailure: false
