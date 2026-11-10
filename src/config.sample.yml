@@ -66,9 +66,12 @@ webui:
 #   GET    /api/v1/config/rules              列出路由规则
 #   POST   /api/v1/config/rules              添加路由规则（追加到末尾）
 #   DELETE /api/v1/config/rules/{index}      删除路由规则
-#   GET    /api/v1/config/users              列出用户名（不含密码）
+#   GET    /api/v1/config/users              列出用户名与启用状态（不含密码）
 #   POST   /api/v1/config/users              添加用户
+#   PUT    /api/v1/config/users/{username}   修改密码或启用状态（enabled）
 #   DELETE /api/v1/config/users/{username}   删除用户
+#   删除或禁用最后一个启用用户会返回 409（code=last_active_user），
+#   确认风险后带 ?force=true 重试，服务端会写入 allow_anonymous_proxy: true 回落匿名。
 # TLS 服务端终止：配置后代理端口升级为 HTTPS/SOCKS5 over TLS，并可选 mTLS 客户端认证。
 # tls:
 #   cert_file: "certs/server.crt"
@@ -76,9 +79,18 @@ webui:
 #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
 users:
   # username: "your-password"  # 留空表示允许匿名代理；需认证时在此或 WebUI 添加
+  # 需要临时停用某个用户时写成映射形式（禁用用户不参与认证，
+  # 全部用户被禁用等价于没有用户，非回环监听会要求 allow_anonymous_proxy: true）：
+  # username:
+  #   password: "your-password"
+  #   enabled: false
 upstreams:
   - name: "default"
     url: "socks5h://${UPSTREAM_HOST}:${UPSTREAM_PORT}"
+    # 上游认证推荐用独立字段，不必把用户名密码拼进 URL：
+    #   username: "proxy-user"
+    #   password: "${UPSTREAM_PASSWORD}"   # 支持环境变量，避免明文落盘
+    # 两者必须成对出现；与 URL 内嵌 userinfo 二选一（同时配置会启动失败）。
     # enabled 可选，默认 true。设为 false 后该上游不参与流量调度与健康检查，
     # 配置保留，可在 WebUI 上游管理中随时重新启用。
     enabled: true

@@ -43,16 +43,21 @@ type ConfigEditor interface {
 	// 索引按调用前的原始位置解释，越界项记入失败但不影响其它项。
 	SetRulesDisabled(indexes []int, disabled bool) (BatchUpdateResult, error)
 
-	// ListUsers 返回当前用户名列表（不含密码）。
-	ListUsers() []string
+	// ListUsers 返回当前用户名与启用状态（不含密码）。
+	ListUsers() []UserSummary
 	// AddUser 添加用户并持久化。
 	AddUser(username, password string) error
 	// UpdateUser 修改用户密码并持久化。
 	UpdateUser(username, password string) error
+	// SetUserEnabled 启用或禁用用户并持久化。
+	// 禁用最后一个启用用户会回落匿名访问，force 为 false 时返回 ErrLastActiveUser。
+	SetUserEnabled(username string, enabled, force bool) error
 	// RemoveUser 按用户名删除用户并持久化。
-	RemoveUser(username string) error
+	// 删除最后一个启用用户会回落匿名访问，force 为 false 时返回 ErrLastActiveUser。
+	RemoveUser(username string, force bool) error
 	// RemoveUsers 批量删除用户：一次落盘一次热加载。
-	RemoveUsers(usernames []string) (BatchDeleteResult, error)
+	// 删除后若无剩余启用用户，force 为 false 时返回 ErrLastActiveUser。
+	RemoveUsers(usernames []string, force bool) (BatchDeleteResult, error)
 
 	// GetSettings 返回全局设置视图。
 	GetSettings() (SettingsView, error)
@@ -132,9 +137,12 @@ func (h healthCheckRequest) toConfig() HealthCheckConfig {
 }
 
 // upstreamInfo 是上游的 API 响应表示，URL 中的凭证被脱敏。
+// 密码永不回显，只返回是否已设置，避免通过管理接口泄露凭据。
 type upstreamInfo struct {
 	Name        string          `json:"name"`
 	URL         string          `json:"url"`
+	Username    string          `json:"username,omitempty"`
+	HasPassword bool            `json:"has_password"`
 	Enabled     bool            `json:"enabled"`
 	Types       []string        `json:"types,omitempty"`
 	Priority    int             `json:"priority"`
@@ -147,6 +155,8 @@ type upstreamInfo struct {
 type addUpstreamRequest struct {
 	Name        string              `json:"name"`
 	URL         string              `json:"url"`
+	Username    string              `json:"username,omitempty"`
+	Password    string              `json:"password,omitempty"`
 	Enabled     *bool               `json:"enabled,omitempty"`
 	Types       []string            `json:"types,omitempty"`
 	Priority    int                 `json:"priority,omitempty"`
@@ -160,6 +170,8 @@ type addUpstreamRequest struct {
 type updateUpstreamRequest struct {
 	Name        string              `json:"name,omitempty"` // 非空且与路径中旧名称不同时执行改名
 	URL         string              `json:"url"`
+	Username    *string             `json:"username,omitempty"` // nil 表示不变，显式空字符串表示清除
+	Password    *string             `json:"password,omitempty"` // nil 表示保持原密码，避免脱敏回传时抹掉凭据
 	Enabled     *bool               `json:"enabled,omitempty"`
 	Types       []string            `json:"types,omitempty"`
 	Priority    *int                `json:"priority,omitempty"`
@@ -173,9 +185,11 @@ type moveRuleRequest struct {
 	Direction string `json:"direction"` // up / down
 }
 
-// updateUserRequest 是修改用户密码的请求体。
+// updateUserRequest 是修改用户密码或启用状态的请求体，两个字段至少提供一个。
+// Password 用指针是为了区分"未提供"与"显式传空"。
 type updateUserRequest struct {
-	Password string `json:"password"`
+	Password *string `json:"password,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
 }
 
 // ruleInfo 是路由规则的 API 响应表示。
@@ -216,9 +230,20 @@ type BatchUpdateResult struct {
 	Failed  []BatchDeleteFailure `json:"failed,omitempty"`
 }
 
+// UserSummary 是用户列表项：用户名与启用状态（不含密码）。
+type UserSummary struct {
+	Username string
+	Enabled  bool
+}
+
+// ErrLastActiveUser 表示该操作会让代理端口失去全部认证手段、回落为匿名访问。
+// 调用方应提示用户确认风险，再以 force=true 重试。
+var ErrLastActiveUser = errors.New("last active user")
+
 // userInfo 是用户的 API 响应表示。
 type userInfo struct {
 	Username string `json:"username"`
+	Enabled  bool   `json:"enabled"`
 }
 
 // addUserRequest 是添加用户的请求体。
@@ -294,6 +319,8 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			result = append(result, upstreamInfo{
 				Name:        up.Name,
 				URL:         redactURLString(up.URL),
+				Username:    up.Username,
+				HasPassword: up.Password != "",
 				Enabled:     up.IsEnabled(),
 				Types:       up.Types,
 				Priority:    up.Priority,
@@ -319,6 +346,8 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			up := UpstreamConfig{
 				Name:     strings.TrimSpace(req.Name),
 				URL:      req.URL,
+				Username: strings.TrimSpace(req.Username),
+				Password: req.Password,
 				Enabled:  req.Enabled,
 				Types:    req.Types,
 				Priority: req.Priority,
@@ -415,6 +444,8 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			if up.URL == "" {
 				up.URL = existing.URL
 			}
+			up.Username = existing.Username
+			up.Password = existing.Password
 			up.Enabled = existing.Enabled
 			if up.Types == nil {
 				up.Types = existing.Types
@@ -425,6 +456,14 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			up.HealthCheck = existing.HealthCheck
 			up.Priority = existing.Priority
 			up.Weight = existing.Weight
+		}
+		if req.Username != nil {
+			up.Username = strings.TrimSpace(*req.Username)
+		}
+		// 密码采用"未提供即保留"语义：列表接口从不回显密码，
+		// 前端编辑其他字段时不会把凭据抹掉。
+		if req.Password != nil {
+			up.Password = *req.Password
 		}
 		if req.Priority != nil {
 			up.Priority = *req.Priority
@@ -663,8 +702,8 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 		}
 		usernames := editor.ListUsers()
 		result := make([]userInfo, 0, len(usernames))
-		for _, name := range usernames {
-			result = append(result, userInfo{Username: name})
+		for _, item := range usernames {
+			result = append(result, userInfo{Username: item.Username, Enabled: item.Enabled})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"users": result})
 
@@ -678,8 +717,12 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 				writeJSONError(w, http.StatusBadRequest, "usernames must not be empty")
 				return
 			}
-			res, err := editor.RemoveUsers(req.Usernames)
+			res, err := editor.RemoveUsers(req.Usernames, queryBool(r, "force"))
 			if err != nil {
+				if errors.Is(err, ErrLastActiveUser) {
+					writeJSONErrorCode(w, http.StatusConflict, "last_active_user", err.Error())
+					return
+				}
 				writeJSONError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -720,17 +763,36 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if strings.TrimSpace(req.Password) == "" {
-			writeJSONError(w, http.StatusBadRequest, "password must not be empty")
+		if req.Password == nil && req.Enabled == nil {
+			writeJSONError(w, http.StatusBadRequest, "password or enabled must be provided")
 			return
 		}
-		if err := editor.UpdateUser(username, req.Password); err != nil {
-			if errors.Is(err, errNotFound) {
-				writeJSONError(w, http.StatusNotFound, err.Error())
-			} else {
-				writeJSONError(w, http.StatusBadRequest, err.Error())
+		if req.Password != nil {
+			if strings.TrimSpace(*req.Password) == "" {
+				writeJSONError(w, http.StatusBadRequest, "password must not be empty")
+				return
 			}
-			return
+			if err := editor.UpdateUser(username, *req.Password); err != nil {
+				if errors.Is(err, errNotFound) {
+					writeJSONError(w, http.StatusNotFound, err.Error())
+				} else {
+					writeJSONError(w, http.StatusBadRequest, err.Error())
+				}
+				return
+			}
+		}
+		if req.Enabled != nil {
+			if err := editor.SetUserEnabled(username, *req.Enabled, queryBool(r, "force")); err != nil {
+				switch {
+				case errors.Is(err, ErrLastActiveUser):
+					writeJSONErrorCode(w, http.StatusConflict, "last_active_user", err.Error())
+				case errors.Is(err, errNotFound):
+					writeJSONError(w, http.StatusNotFound, err.Error())
+				default:
+					writeJSONError(w, http.StatusBadRequest, err.Error())
+				}
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "username": username})
 
@@ -740,10 +802,13 @@ func (m *ManagementServer) handleUsersAPI(w http.ResponseWriter, r *http.Request
 			return
 		}
 		username := rest[0]
-		if err := editor.RemoveUser(username); err != nil {
-			if errors.Is(err, errNotFound) {
+		if err := editor.RemoveUser(username, queryBool(r, "force")); err != nil {
+			switch {
+			case errors.Is(err, ErrLastActiveUser):
+				writeJSONErrorCode(w, http.StatusConflict, "last_active_user", err.Error())
+			case errors.Is(err, errNotFound):
 				writeJSONError(w, http.StatusNotFound, err.Error())
-			} else {
+			default:
 				writeJSONError(w, http.StatusBadRequest, err.Error())
 			}
 			return
@@ -772,6 +837,16 @@ var ErrNotFound = errors.New("not found")
 
 // errNotFound 保留包内别名，便于既有代码与测试引用。
 var errNotFound = ErrNotFound
+
+// queryBool 解析布尔型查询参数（1/true/yes 视为真）。
+func queryBool(r *http.Request, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get(key))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
 
 // decodeBatchDelete 解析批量删除请求体；失败时已写好响应，调用方直接 return。
 func decodeBatchDelete(w http.ResponseWriter, r *http.Request) (batchDeleteRequest, bool) {

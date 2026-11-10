@@ -400,8 +400,8 @@ upstreams:
 	if cfg.ManagementAuthToken != "mgmt-token" {
 		t.Fatalf("management token = %q", cfg.ManagementAuthToken)
 	}
-	if cfg.Users["alice"] != "proxy-pass" {
-		t.Fatalf("user password = %q", cfg.Users["alice"])
+	if cfg.Users["alice"].Password != "proxy-pass" {
+		t.Fatalf("user password = %q", cfg.Users["alice"].Password)
 	}
 	if cfg.Upstreams[0].URL != "socks5h://127.0.0.1:1080" {
 		t.Fatalf("upstream url = %q", cfg.Upstreams[0].URL)
@@ -537,8 +537,8 @@ upstreams:
 	if reloaded.ManagementAuthToken != "old-token" {
 		t.Fatalf("management token = %q", reloaded.ManagementAuthToken)
 	}
-	if reloaded.Users["alice"] != "old-pass" {
-		t.Fatalf("user password = %q", reloaded.Users["alice"])
+	if reloaded.Users["alice"].Password != "old-pass" {
+		t.Fatalf("user password = %q", reloaded.Users["alice"].Password)
 	}
 	if reloaded.Upstreams[0].URL != "socks5h://127.0.0.1:1080" {
 		t.Fatalf("upstream url = %q", reloaded.Upstreams[0].URL)
@@ -629,7 +629,7 @@ max_connections: 512
 	if cfg.Listeners[0].Listen != "127.0.0.1:8891" {
 		t.Fatalf("listener address = %q", cfg.Listeners[0].Listen)
 	}
-	if cfg.Listeners[0].Users["alice"] != "Str0ng-Pass-2026" {
+	if cfg.Listeners[0].Users["alice"].Password != "Str0ng-Pass-2026" {
 		t.Fatalf("listener user not propagated")
 	}
 	if cfg.Listeners[0].MaxConnections != 512 {
@@ -660,7 +660,7 @@ func TestLoadConfigMultipleListeners(t *testing.T) {
 	if cfg.Listeners[0].Listen != "127.0.0.1:8891" || cfg.Listeners[1].Listen != "127.0.0.1:8892" {
 		t.Fatalf("listener addresses = %v", cfg.Listeners)
 	}
-	if cfg.Listeners[0].Users["alice"] != "pass1" || cfg.Listeners[1].Users["bob"] != "pass2" {
+	if cfg.Listeners[0].Users["alice"].Password != "pass1" || cfg.Listeners[1].Users["bob"].Password != "pass2" {
 		t.Fatalf("per-listener users not loaded")
 	}
 	if cfg.Listeners[0].MaxConnections != 100 || cfg.Listeners[1].MaxConnections != 200 {

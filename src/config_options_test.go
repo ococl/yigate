@@ -282,7 +282,7 @@ listeners:
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.Listeners[0].Users["alice"] != "Str0ng-Pass-2026" {
+	if cfg.Listeners[0].Users["alice"].Password != "Str0ng-Pass-2026" {
 		t.Fatal("listener without users should inherit global users")
 	}
 	if len(cfg.Listeners[1].Users) != 0 {

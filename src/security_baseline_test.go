@@ -34,13 +34,13 @@ func TestSecurityBaselineRejectsAnonymousPprof(t *testing.T) {
 func TestSecurityBaselineRejectsWeakCredentials(t *testing.T) {
 	for _, weak := range []string{"123456", "password", "admin", "token", "__replace_me__"} {
 		cfg := defaultConfig()
-		cfg.Users = map[string]string{"alice": weak}
+		cfg.Users = map[string]UserConfig{"alice": {Password: weak}}
 		if err := validateConfig(cfg); err == nil {
 			t.Fatalf("weak credential %q should be rejected", weak)
 		}
 	}
 	cfg := defaultConfig()
-	cfg.Users = map[string]string{"alice": "Str0ng-Pass-2026"}
+	cfg.Users = map[string]UserConfig{"alice": {Password: "Str0ng-Pass-2026"}}
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("strong credential should be accepted: %v", err)
 	}

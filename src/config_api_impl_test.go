@@ -410,7 +410,7 @@ routing:
   final: auto
 `)
 
-	err := editor.RemoveUser("alice")
+	err := editor.RemoveUser("alice", false)
 	if err != nil {
 		t.Fatalf("RemoveUser: %v", err)
 	}
@@ -436,7 +436,7 @@ routing:
   final: auto
 `)
 
-	err := editor.RemoveUser("nonexistent")
+	err := editor.RemoveUser("nonexistent", false)
 	if err == nil {
 		t.Fatal("expected error for non-existent user")
 	}
@@ -524,7 +524,7 @@ routing:
 	}
 	seen := make(map[string]bool)
 	for _, u := range users {
-		seen[u] = true
+		seen[u.Username] = true
 	}
 	for _, name := range []string{"alice", "bob", "carol"} {
 		if !seen[name] {
@@ -582,7 +582,7 @@ routing:
   final: auto
 `)
 
-	err := editor.RemoveUser("alice")
+	err := editor.RemoveUser("alice", false)
 	if err != nil {
 		t.Fatalf("RemoveUser: %v", err)
 	}
@@ -610,7 +610,7 @@ routing:
   final: auto
 `)
 
-	err := editor.RemoveUser("nonexistent")
+	err := editor.RemoveUser("nonexistent", false)
 	if err == nil {
 		t.Fatal("expected error for non-existent user in multi-listener config")
 	}
@@ -895,7 +895,7 @@ routing:
 		return nil
 	})
 
-	res, err := editor.RemoveUsers([]string{"alice", "bob", "nobody"})
+	res, err := editor.RemoveUsers([]string{"alice", "bob", "nobody"}, false)
 	if err != nil {
 		t.Fatalf("RemoveUsers: %v", err)
 	}

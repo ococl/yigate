@@ -239,6 +239,10 @@ func ValidateProxyTypes(values []string) error {
 type UpstreamConfig struct {
 	Name string `yaml:"name"`
 	URL  string `yaml:"url"`
+	// Username/Password 是上游代理的独立认证凭据。
+	// 与 URL 内嵌的 userinfo 二选一：配置了独立凭据时会覆盖 URL 中的 userinfo。
+	Username string `yaml:"username,omitempty"`
+	Password string `yaml:"password,omitempty"`
 	// Enabled 控制该上游是否参与流量调度与健康检查。
 	// nil 表示未配置，按启用处理，兼容旧配置文件。
 	Enabled     *bool             `yaml:"enabled,omitempty"`
@@ -247,6 +251,11 @@ type UpstreamConfig struct {
 	Weight      int               `yaml:"weight"`
 	Strategy    string            `yaml:"strategy"`
 	HealthCheck HealthCheckConfig `yaml:"health_check"`
+}
+
+// HasCredentials 返回是否配置了独立的上游认证凭据。
+func (c UpstreamConfig) HasCredentials() bool {
+	return c.Username != "" || c.Password != ""
 }
 
 // IsEnabled 返回上游是否启用。未显式配置 enabled 时默认启用。
@@ -373,6 +382,11 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 		}
 		if u.Host == "" {
 			return nil, fmt.Errorf("upstream host missing in %q", redactURLString(c.URL))
+		}
+		// 独立凭据统一注入 URL 的 userinfo，后续 SOCKS5/HTTP/健康检查
+		// 三条链路都从 u.URL.User 读取，无需各自处理两套来源。
+		if c.HasCredentials() {
+			u.User = url.UserPassword(c.Username, c.Password)
 		}
 		name := strings.TrimSpace(c.Name)
 		if name == "" {

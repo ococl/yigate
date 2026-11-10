@@ -761,8 +761,8 @@ func TestIntegrationMultiListener(t *testing.T) {
 
 	cfg := defaultConfig()
 	cfg.Listeners = []ListenerConfig{
-		{Listen: addr1, Users: map[string]string{"user1": "pass1"}},
-		{Listen: addr2, Users: map[string]string{"user2": "pass2"}},
+		{Listen: addr1, Users: map[string]UserConfig{"user1": {Password: "pass1"}}},
+		{Listen: addr2, Users: map[string]UserConfig{"user2": {Password: "pass2"}}},
 	}
 	cfg.Management = mgmtAddr
 	cfg.ManagementAuthToken = "test-token"

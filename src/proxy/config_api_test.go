@@ -16,10 +16,11 @@ import (
 
 // mockConfigEditor 是测试用的 ConfigEditor 实现。
 type mockConfigEditor struct {
-	upstreams []UpstreamConfig
-	rules     []RouteRule
-	users     map[string]string
-	applyErr  error
+	upstreams     []UpstreamConfig
+	rules         []RouteRule
+	users         map[string]string
+	disabledUsers map[string]bool
+	applyErr      error
 }
 
 func newMockConfigEditor() *mockConfigEditor {
@@ -198,12 +199,27 @@ func (m *mockConfigEditor) RemoveRules(indexes []int) (BatchDeleteResult, error)
 	return res, nil
 }
 
-func (m *mockConfigEditor) ListUsers() []string {
-	result := make([]string, 0, len(m.users))
+func (m *mockConfigEditor) ListUsers() []UserSummary {
+	result := make([]UserSummary, 0, len(m.users))
 	for name := range m.users {
-		result = append(result, name)
+		result = append(result, UserSummary{Username: name, Enabled: !m.disabledUsers[name]})
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Username < result[j].Username })
 	return result
+}
+
+func (m *mockConfigEditor) SetUserEnabled(username string, enabled, force bool) error {
+	if m.applyErr != nil {
+		return m.applyErr
+	}
+	if _, exists := m.users[username]; !exists {
+		return errNotFound
+	}
+	if m.disabledUsers == nil {
+		m.disabledUsers = make(map[string]bool)
+	}
+	m.disabledUsers[username] = !enabled
+	return nil
 }
 
 func (m *mockConfigEditor) AddUser(username, password string) error {
@@ -231,7 +247,7 @@ func (m *mockConfigEditor) UpdateUser(username, password string) error {
 	return nil
 }
 
-func (m *mockConfigEditor) RemoveUser(username string) error {
+func (m *mockConfigEditor) RemoveUser(username string, force bool) error {
 	if m.applyErr != nil {
 		return m.applyErr
 	}
@@ -239,16 +255,17 @@ func (m *mockConfigEditor) RemoveUser(username string) error {
 		return errNotFound
 	}
 	delete(m.users, username)
+	delete(m.disabledUsers, username)
 	return nil
 }
 
-func (m *mockConfigEditor) RemoveUsers(usernames []string) (BatchDeleteResult, error) {
+func (m *mockConfigEditor) RemoveUsers(usernames []string, force bool) (BatchDeleteResult, error) {
 	res := BatchDeleteResult{Deleted: []string{}}
 	if m.applyErr != nil {
 		return res, m.applyErr
 	}
 	for _, username := range usernames {
-		if err := m.RemoveUser(username); err != nil {
+		if err := m.RemoveUser(username, force); err != nil {
 			res.Failed = append(res.Failed, BatchDeleteFailure{Target: username, Error: err.Error()})
 			continue
 		}

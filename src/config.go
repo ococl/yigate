@@ -35,16 +35,79 @@ type TLSConfig struct {
 	ClientCAFile string `yaml:"client_ca_file"`
 }
 
+// UserConfig 单个代理用户配置。
+// 为兼容旧配置文件，YAML 中仍可直接写 "用户名: 密码" 标量；
+// 需要禁用用户时写成映射形式 {password: "...", enabled: false}。
+type UserConfig struct {
+	Password string `yaml:"password"`
+	// Enabled 为 nil 表示未配置，按启用处理，兼容旧配置文件。
+	Enabled *bool `yaml:"enabled,omitempty"`
+}
+
+// IsEnabled 返回用户是否启用。未显式配置 enabled 时默认启用。
+func (u UserConfig) IsEnabled() bool {
+	return u.Enabled == nil || *u.Enabled
+}
+
+// UnmarshalYAML 同时兼容旧版密码标量与带 enabled 开关的映射写法。
+func (u *UserConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		u.Password = node.Value
+		u.Enabled = nil
+		return nil
+	}
+	var raw struct {
+		Password string `yaml:"password"`
+		Enabled  *bool  `yaml:"enabled"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	u.Password = raw.Password
+	u.Enabled = raw.Enabled
+	return nil
+}
+
+// MarshalYAML 在用户启用时回写为密码标量，保持配置文件形态与旧版本一致；
+// 仅被禁用的用户才写成带 enabled: false 的映射，避免无谓的结构膨胀。
+func (u UserConfig) MarshalYAML() (any, error) {
+	if u.IsEnabled() {
+		return u.Password, nil
+	}
+	disabled := false
+	return struct {
+		Password string `yaml:"password"`
+		Enabled  *bool  `yaml:"enabled"`
+	}{Password: u.Password, Enabled: &disabled}, nil
+}
+
+// ActiveUsers 返回处于启用状态的用户名到密码映射，供协议层认证使用。
+// 禁用用户不参与认证，等价于不存在；当全部用户被禁用时返回空映射，即匿名代理。
+func ActiveUsers(users map[string]UserConfig) map[string]string {
+	active := make(map[string]string, len(users))
+	for name, u := range users {
+		if u.IsEnabled() {
+			active[name] = u.Password
+		}
+	}
+	return active
+}
+
 // ListenerConfig 单个代理监听端口配置。
 // 多监听端口策略下，每个 listener 可拥有独立的认证、访问控制、SOCKS5 命令与 TLS 配置。
 type ListenerConfig struct {
 	Listen         string                    `yaml:"listen"`
 	TLS            TLSConfig                 `yaml:"tls"`
-	Users          map[string]string         `yaml:"users"`
+	Users          map[string]UserConfig     `yaml:"users"`
 	AccessControl  proxy.AccessControlConfig `yaml:"access_control"`
 	Socks5         Socks5Config              `yaml:"socks5"`
 	MaxConnections int                       `yaml:"max_connections"`
 	TProxy         proxy.TProxyConfig        `yaml:"tproxy"`
+}
+
+// ActiveUsers 返回该监听端口上启用状态的用户映射。
+func (lc ListenerConfig) ActiveUsers() map[string]string {
+	return ActiveUsers(lc.Users)
 }
 
 // Config 代理服务器配置
@@ -56,7 +119,7 @@ type Config struct {
 	// 下面两个开关是显式的风险确认：默认关闭，只有确实需要匿名代理或访问私网目标时才打开。
 	AllowAnonymousProxy bool                          `yaml:"allow_anonymous_proxy"`
 	AllowPrivateTargets bool                          `yaml:"allow_private_targets"`
-	Users               map[string]string             `yaml:"users"`
+	Users               map[string]UserConfig         `yaml:"users"`
 	Upstreams           []proxy.UpstreamConfig        `yaml:"upstreams"`
 	Routing             proxy.RoutingConfig           `yaml:"routing"`
 	DestinationPolicy   proxy.DestinationPolicyConfig `yaml:"destination_policy"`
@@ -95,7 +158,7 @@ const (
 func defaultConfig() *Config {
 	return &Config{
 		Listen:    "127.0.0.1:8891",
-		Users:     make(map[string]string),
+		Users:     make(map[string]UserConfig),
 		Upstreams: []proxy.UpstreamConfig{},
 		Routing: proxy.RoutingConfig{
 			Final: "auto",
@@ -166,7 +229,7 @@ func loadConfig(path string, previous *Config) (*Config, error) {
 		return nil, err
 	}
 	if cfg.Users == nil {
-		cfg.Users = make(map[string]string)
+		cfg.Users = make(map[string]UserConfig)
 	}
 	if cfg.Upstreams == nil {
 		cfg.Upstreams = []proxy.UpstreamConfig{}
@@ -195,7 +258,7 @@ func normalizeListeners(cfg *Config, baseDir string) error {
 	if len(cfg.Listeners) == 0 {
 		users := cfg.Users
 		if users == nil {
-			users = make(map[string]string)
+			users = make(map[string]UserConfig)
 		}
 		cfg.Listeners = []ListenerConfig{{
 			Listen:         cfg.Listen,
@@ -215,13 +278,13 @@ func normalizeListeners(cfg *Config, baseDir string) error {
 		// 显式写 users: {} 表示该端口匿名，不继承。
 		if cfg.Listeners[i].Users == nil {
 			if len(cfg.Users) > 0 {
-				users := make(map[string]string, len(cfg.Users))
-				for name, pass := range cfg.Users {
-					users[name] = pass
+				users := make(map[string]UserConfig, len(cfg.Users))
+				for name, u := range cfg.Users {
+					users[name] = u
 				}
 				cfg.Listeners[i].Users = users
 			} else {
-				cfg.Listeners[i].Users = make(map[string]string)
+				cfg.Listeners[i].Users = make(map[string]UserConfig)
 			}
 		}
 		if isZeroAccessControl(cfg.Listeners[i].AccessControl) {
@@ -240,6 +303,32 @@ func isZeroAccessControl(cfg proxy.AccessControlConfig) bool {
 		cfg.MaxConnsPerUser == 0
 }
 
+// anonymousProxyViolation 判断单个 listener 是否会在无认证、无客户端白名单的情况下
+// 对网络开放。被禁用的用户不计入认证手段，因此"全部用户禁用"与"没有用户"等价。
+func anonymousProxyViolation(cfg *Config, idx int, lc ListenerConfig) error {
+	if cfg.AllowAnonymousProxy || containsEnvPlaceholder(lc.Listen) || isLoopbackListen(lc.Listen) || lc.TProxy.Enabled {
+		return nil
+	}
+	if len(lc.ActiveUsers()) > 0 || len(ActiveUsers(cfg.Users)) > 0 {
+		return nil
+	}
+	if len(lc.AccessControl.AllowedClients) > 0 || len(cfg.AccessControl.AllowedClients) > 0 {
+		return nil
+	}
+	return fmt.Errorf("listeners[%d].listen %q is reachable from the network without authentication or a client allowlist; configure users/allowed_clients, bind to loopback, or set allow_anonymous_proxy: true", idx, lc.Listen)
+}
+
+// checkAnonymousBaseline 检查当前配置是否会让某个端口回落为对外开放的匿名代理。
+// 运行时配置 API 用它判断删除或禁用最后一个用户是否需要用户二次确认。
+func checkAnonymousBaseline(cfg *Config) error {
+	for i, lc := range cfg.Listeners {
+		if err := anonymousProxyViolation(cfg, i, lc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func expandConfigEnv(cfg *Config, previous *Config) error {
 	if cfg.ManagementAuthToken != "" {
 		fallback := ""
@@ -255,22 +344,23 @@ func expandConfigEnv(cfg *Config, previous *Config) error {
 			return fmt.Errorf("management_auth_token must not be empty")
 		}
 	}
-	for user, pass := range cfg.Users {
+	for user, item := range cfg.Users {
 		if strings.TrimSpace(user) == "" {
 			return fmt.Errorf("users contains empty username")
 		}
 		fallback := ""
 		if previous != nil {
-			fallback = previous.Users[user]
+			fallback = previous.Users[user].Password
 		}
-		expanded, err := expandSecretEnv(fmt.Sprintf("users[%q]", user), pass, fallback)
+		expanded, err := expandSecretEnv(fmt.Sprintf("users[%q]", user), item.Password, fallback)
 		if err != nil {
 			return err
 		}
 		if expanded == "" {
 			return fmt.Errorf("users[%q] password must not be empty", user)
 		}
-		cfg.Users[user] = expanded
+		item.Password = expanded
+		cfg.Users[user] = item
 	}
 	for i := range cfg.Upstreams {
 		fallback := previousUpstreamURL(previous, i, cfg.Upstreams[i].Name)
@@ -279,6 +369,15 @@ func expandConfigEnv(cfg *Config, previous *Config) error {
 			return err
 		}
 		cfg.Upstreams[i].URL = expanded
+		// 独立密码同样支持 ${ENV} 注入，避免明文落盘。
+		if strings.TrimSpace(cfg.Upstreams[i].Password) != "" {
+			pwFallback := previousUpstreamPassword(previous, i, cfg.Upstreams[i].Name)
+			pw, err := expandSecretEnv(fmt.Sprintf("upstreams[%d].password", i), cfg.Upstreams[i].Password, pwFallback)
+			if err != nil {
+				return err
+			}
+			cfg.Upstreams[i].Password = pw
+		}
 	}
 	// GeoSite 同步令牌支持 ${ENV} 注入，避免在配置文件中保存明文。
 	for _, item := range []struct {
@@ -351,6 +450,26 @@ func previousUpstreamURL(previous *Config, idx int, name string) string {
 	return ""
 }
 
+// previousUpstreamPassword 按名称（找不到时按索引）取上一次生效的上游密码，
+// 用于热加载时环境变量缺失的回退。
+func previousUpstreamPassword(previous *Config, idx int, name string) string {
+	if previous == nil {
+		return ""
+	}
+	name = strings.TrimSpace(name)
+	if name != "" {
+		for _, up := range previous.Upstreams {
+			if strings.TrimSpace(up.Name) == name {
+				return up.Password
+			}
+		}
+	}
+	if idx >= 0 && idx < len(previous.Upstreams) {
+		return previous.Upstreams[idx].Password
+	}
+	return ""
+}
+
 func previousGeoSiteToken(previous *Config, kind string) string {
 	if previous == nil {
 		return ""
@@ -380,22 +499,23 @@ func expandSecretEnv(field, value, fallback string) (string, error) {
 }
 
 func expandListenerUsersEnv(lc *ListenerConfig, idx int, previous *ListenerConfig) error {
-	for user, pass := range lc.Users {
+	for user, item := range lc.Users {
 		if strings.TrimSpace(user) == "" {
 			return fmt.Errorf("listeners[%d].users contains empty username", idx)
 		}
 		fallback := ""
 		if previous != nil {
-			fallback = previous.Users[user]
+			fallback = previous.Users[user].Password
 		}
-		expanded, err := expandSecretEnv(fmt.Sprintf("listeners[%d].users[%q]", idx, user), pass, fallback)
+		expanded, err := expandSecretEnv(fmt.Sprintf("listeners[%d].users[%q]", idx, user), item.Password, fallback)
 		if err != nil {
 			return err
 		}
 		if expanded == "" {
 			return fmt.Errorf("listeners[%d].users[%q] password must not be empty", idx, user)
 		}
-		lc.Users[user] = expanded
+		item.Password = expanded
+		lc.Users[user] = item
 	}
 	return nil
 }
@@ -575,15 +695,12 @@ func validateConfig(cfg *Config) error {
 		// 非回环监听且既无认证也无客户端白名单时，等于对外开放匿名代理。
 		// 显式设置 allow_anonymous_proxy: true 才能绕过这道基线（例如容器内监听 0.0.0.0
 		// 但宿主机仅映射回环地址的本地开发模板）。
-		if !cfg.AllowAnonymousProxy && !containsEnvPlaceholder(lc.Listen) &&
-			!isLoopbackListen(lc.Listen) && len(lc.Users) == 0 && len(cfg.Users) == 0 &&
-			len(lc.AccessControl.AllowedClients) == 0 && len(cfg.AccessControl.AllowedClients) == 0 &&
-			!lc.TProxy.Enabled {
-			return fmt.Errorf("listeners[%d].listen %q is reachable from the network without authentication or a client allowlist; configure users/allowed_clients, bind to loopback, or set allow_anonymous_proxy: true", i, lc.Listen)
+		if err := anonymousProxyViolation(cfg, i, lc); err != nil {
+			return err
 		}
 		if lc.TProxy.Enabled {
 			// 透明代理的客户端不会发送代理认证头，配了 users 只会造成「以为有认证」的开放代理。
-			if len(lc.Users) > 0 {
+			if len(lc.ActiveUsers()) > 0 {
 				return fmt.Errorf("listeners[%d].tproxy: transparent proxy cannot enforce proxy authentication; remove users or disable tproxy", i)
 			}
 			if !proxy.IsTProxySupported() {
@@ -643,14 +760,14 @@ func validateConfig(cfg *Config) error {
 	if err := validateCredentialStrength("management_auth_token", cfg.ManagementAuthToken); err != nil {
 		return err
 	}
-	for username, password := range cfg.Users {
-		if err := validateCredentialStrength(fmt.Sprintf("proxy user %q password", username), password); err != nil {
+	for username, user := range cfg.Users {
+		if err := validateCredentialStrength(fmt.Sprintf("proxy user %q password", username), user.Password); err != nil {
 			return err
 		}
 	}
 	for i, lc := range cfg.Listeners {
-		for username, password := range lc.Users {
-			if err := validateCredentialStrength(fmt.Sprintf("listeners[%d] user %q password", i, username), password); err != nil {
+		for username, user := range lc.Users {
+			if err := validateCredentialStrength(fmt.Sprintf("listeners[%d] user %q password", i, username), user.Password); err != nil {
 				return err
 			}
 		}
@@ -882,6 +999,20 @@ func validateUpstreamConfig(up proxy.UpstreamConfig) error {
 			n, err := strconv.Atoi(port)
 			if err != nil || n < 1 || n > 65535 {
 				return fmt.Errorf("url port must be between 1 and 65535, got %q", port)
+			}
+		}
+	}
+	// 独立凭据必须成对出现，且不能与 URL 内嵌 userinfo 同时配置，避免认证来源歧义。
+	if up.HasCredentials() {
+		if strings.TrimSpace(up.Username) == "" {
+			return fmt.Errorf("username must not be empty when password is set")
+		}
+		if strings.TrimSpace(up.Password) == "" {
+			return fmt.Errorf("password must not be empty when username is set")
+		}
+		if !containsEnvPlaceholder(rawURL) {
+			if parsed, err := url.Parse(rawURL); err == nil && parsed.User != nil {
+				return fmt.Errorf("url must not embed credentials when username/password are configured")
 			}
 		}
 	}

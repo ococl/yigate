@@ -22,6 +22,8 @@ import (
 type listenerRuntime struct {
 	config ListenerConfig
 	access *proxy.AccessController
+	// users 只包含启用状态的用户，禁用用户不参与认证。
+	users map[string]string
 }
 
 type runtimeState struct {
@@ -37,6 +39,7 @@ type runtimeState struct {
 type listenerContext struct {
 	config ListenerConfig
 	access *proxy.AccessController
+	users  map[string]string
 }
 
 // Server 统一代理服务器，支持配置热加载
@@ -190,6 +193,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		listenerRuntimes[lc.Listen] = &listenerRuntime{
 			config: lc,
 			access: access,
+			users:  lc.ActiveUsers(),
 		}
 	}
 	updater := proxy.NewGeoSiteUpdater(cfg.Routing.GeoSite, mgr)
@@ -880,9 +884,9 @@ func (s *Server) handle(conn net.Conn, addr string) {
 	}
 
 	if b[0] == 0x05 {
-		proxy.HandleSOCKS5(conn, br, lc.config.Users, mgr, router, lc.access, lc.config.Socks5.AllowBind, lc.config.Socks5.AllowUDPAssociate)
+		proxy.HandleSOCKS5(conn, br, lc.users, mgr, router, lc.access, lc.config.Socks5.AllowBind, lc.config.Socks5.AllowUDPAssociate)
 	} else {
-		proxy.HandleHTTP(conn, br, lc.config.Users, mgr, router, lc.access)
+		proxy.HandleHTTP(conn, br, lc.users, mgr, router, lc.access)
 	}
 }
 
@@ -898,5 +902,6 @@ func (s *Server) listenerContext(addr string) *listenerContext {
 	return &listenerContext{
 		config: lr.config,
 		access: lr.access,
+		users:  lr.users,
 	}
 }

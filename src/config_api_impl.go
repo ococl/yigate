@@ -70,7 +70,7 @@ func (e *configEditor) loadRawConfig() (*Config, error) {
 		}
 	}
 	if cfg.Users == nil {
-		cfg.Users = make(map[string]string)
+		cfg.Users = make(map[string]UserConfig)
 	}
 	if cfg.Upstreams == nil {
 		cfg.Upstreams = []proxy.UpstreamConfig{}
@@ -132,7 +132,11 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 	e.applyMu.Lock()
 	defer e.applyMu.Unlock()
 
-	if err := validateConfig(cfg); err != nil {
+	// 校验在副本上执行：validateConfig 会把顶层 listen 折叠成 listeners 数组，
+	// 若直接作用在原配置上，每次保存都会把用户的单监听配置改写成数组形态。
+	probe := *cfg
+	probe.Listeners = append([]ListenerConfig(nil), cfg.Listeners...)
+	if err := validateConfig(&probe); err != nil {
 		return err
 	}
 
@@ -644,29 +648,34 @@ func (e *configEditor) SetRulesDisabled(indexes []int, disabled bool) (BatchUpda
 	return res, nil
 }
 
-func (e *configEditor) ListUsers() []string {
+// ListUsers 返回用户名与启用状态。
+// 多 listener 模式下按用户名聚合，任一端口启用即视为启用。
+func (e *configEditor) ListUsers() []proxy.UserSummary {
 	cfg, err := e.loadRawConfig()
 	if err != nil {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	result := make([]string, 0, len(cfg.Users))
-	for name := range cfg.Users {
-		if _, ok := seen[name]; !ok {
-			seen[name] = struct{}{}
-			result = append(result, name)
-		}
-	}
-	// 多 listener 模式下聚合各 listener 的用户
-	for i := range cfg.Listeners {
-		for name := range cfg.Listeners[i].Users {
-			if _, ok := seen[name]; !ok {
-				seen[name] = struct{}{}
-				result = append(result, name)
+	enabled := make(map[string]bool)
+	collect := func(users map[string]UserConfig) {
+		for name, user := range users {
+			if user.IsEnabled() {
+				enabled[name] = true
+				continue
+			}
+			if _, ok := enabled[name]; !ok {
+				enabled[name] = false
 			}
 		}
 	}
-	sort.Strings(result)
+	collect(cfg.Users)
+	for i := range cfg.Listeners {
+		collect(cfg.Listeners[i].Users)
+	}
+	result := make([]proxy.UserSummary, 0, len(enabled))
+	for name, on := range enabled {
+		result = append(result, proxy.UserSummary{Username: name, Enabled: on})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Username < result[j].Username })
 	return result
 }
 
@@ -688,18 +697,19 @@ func (e *configEditor) AddUser(username, password string) error {
 		return err
 	}
 	if cfg.Users == nil {
-		cfg.Users = make(map[string]string)
+		cfg.Users = make(map[string]UserConfig)
 	}
 	if _, exists := cfg.Users[username]; exists {
 		return fmt.Errorf("user %q already exists", username)
 	}
-	cfg.Users[username] = password
+	user := UserConfig{Password: password}
+	cfg.Users[username] = user
 	// 多 listener 模式下同步添加到所有 listener
 	for i := range cfg.Listeners {
 		if cfg.Listeners[i].Users == nil {
-			cfg.Listeners[i].Users = make(map[string]string)
+			cfg.Listeners[i].Users = make(map[string]UserConfig)
 		}
-		cfg.Listeners[i].Users[username] = password
+		cfg.Listeners[i].Users[username] = user
 	}
 	return e.saveAndApply(cfg)
 }
@@ -719,16 +729,18 @@ func (e *configEditor) UpdateUser(username, password string) error {
 		return err
 	}
 	found := false
-	if _, exists := cfg.Users[username]; exists {
-		cfg.Users[username] = password
+	if user, exists := cfg.Users[username]; exists {
+		user.Password = password
+		cfg.Users[username] = user
 		found = true
 	}
 	for i := range cfg.Listeners {
 		if cfg.Listeners[i].Users == nil {
 			continue
 		}
-		if _, exists := cfg.Listeners[i].Users[username]; exists {
-			cfg.Listeners[i].Users[username] = password
+		if user, exists := cfg.Listeners[i].Users[username]; exists {
+			user.Password = password
+			cfg.Listeners[i].Users[username] = user
 			found = true
 		}
 	}
@@ -738,11 +750,73 @@ func (e *configEditor) UpdateUser(username, password string) error {
 	return e.saveAndApply(cfg)
 }
 
+// SetUserEnabled 启用或禁用用户并持久化。
+// 禁用最后一个启用用户会让代理端口失去全部认证手段、回落为匿名访问；
+// 未显式 force 时返回 proxy.ErrLastActiveUser，由调用方提示用户二次确认。
+func (e *configEditor) SetUserEnabled(username string, enabled, force bool) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return errors.New("username must not be empty")
+	}
+	cfg, err := e.loadRawConfig()
+	if err != nil {
+		return err
+	}
+	// 启用时清除开关（写回配置仍是 "用户名: 密码" 简写形式）；
+	// 禁用时写入显式的 enabled: false，便于人工审阅。
+	var flag *bool
+	if !enabled {
+		disabled := false
+		flag = &disabled
+	}
+	found := false
+	if user, exists := cfg.Users[username]; exists {
+		user.Enabled = flag
+		cfg.Users[username] = user
+		found = true
+	}
+	for i := range cfg.Listeners {
+		if cfg.Listeners[i].Users == nil {
+			continue
+		}
+		if user, exists := cfg.Listeners[i].Users[username]; exists {
+			user.Enabled = flag
+			cfg.Listeners[i].Users[username] = user
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("%w: user %q not found", errNotFound, username)
+	}
+	return e.saveWithAnonymousCheck(cfg, force)
+}
+
+// saveWithAnonymousCheck 在落盘前判断改动是否会让某个端口回落为匿名代理。
+// force 为 true 时显式打开 allow_anonymous_proxy，让配置保持自洽并通过基线校验。
+//
+// 检查在配置副本上执行：磁盘态可能仍是"顶层 listen + users"的旧形态，
+// 需要先折叠成 listeners 才能判断真实生效的端口。副本同时保证原配置不被改写，
+// 避免删除操作把配置文件整体改写成 listeners 数组形态。
+func (e *configEditor) saveWithAnonymousCheck(cfg *Config, force bool) error {
+	probe := *cfg
+	probe.Listeners = append([]ListenerConfig(nil), cfg.Listeners...)
+	if err := normalizeListeners(&probe, filepath.Dir(e.cfgPath)); err != nil {
+		return err
+	}
+	if err := checkAnonymousBaseline(&probe); err != nil {
+		if !force {
+			return fmt.Errorf("%w: %v", proxy.ErrLastActiveUser, err)
+		}
+		cfg.AllowAnonymousProxy = true
+	}
+	return e.saveAndApply(cfg)
+}
+
 // removeUserFromConfig 在内存中删除用户（含所有 listener），返回是否真的删掉了。
 func removeUserFromConfig(cfg *Config, username string) bool {
 	username = strings.TrimSpace(username)
 	if cfg.Users == nil {
-		cfg.Users = make(map[string]string)
+		cfg.Users = make(map[string]UserConfig)
 	}
 	found := false
 	if _, exists := cfg.Users[username]; exists {
@@ -762,7 +836,7 @@ func removeUserFromConfig(cfg *Config, username string) bool {
 	return found
 }
 
-func (e *configEditor) RemoveUser(username string) error {
+func (e *configEditor) RemoveUser(username string, force bool) error {
 	cfg, err := e.loadRawConfig()
 	if err != nil {
 		return err
@@ -770,11 +844,11 @@ func (e *configEditor) RemoveUser(username string) error {
 	if !removeUserFromConfig(cfg, username) {
 		return fmt.Errorf("%w: user %q not found", errNotFound, strings.TrimSpace(username))
 	}
-	return e.saveAndApply(cfg)
+	return e.saveWithAnonymousCheck(cfg, force)
 }
 
 // RemoveUsers 批量删除用户：一次写盘一次热加载，删空即回到匿名代理。
-func (e *configEditor) RemoveUsers(usernames []string) (BatchDeleteResult, error) {
+func (e *configEditor) RemoveUsers(usernames []string, force bool) (BatchDeleteResult, error) {
 	res := BatchDeleteResult{Deleted: []string{}}
 	cfg, err := e.loadRawConfig()
 	if err != nil {
@@ -799,7 +873,7 @@ func (e *configEditor) RemoveUsers(usernames []string) (BatchDeleteResult, error
 	if len(res.Deleted) == 0 {
 		return res, nil
 	}
-	if err := e.saveAndApply(cfg); err != nil {
+	if err := e.saveWithAnonymousCheck(cfg, force); err != nil {
 		return BatchDeleteResult{Deleted: []string{}}, err
 	}
 	return res, nil
