@@ -135,6 +135,16 @@ sync_code() {
   # 禁止凭据协商交互：CNB 构建容器可能带有指向本仓的 credential helper。
   export GIT_TERMINAL_PROMPT=0
   ensure_full_history
+
+  # tag 流水线以 detached HEAD 检出，且只 fetch 了 tag ref，本地可能没有 refs/heads/$BRANCH，
+  # 直接推送分支引用会报 "src refspec refs/heads/main does not match any"。
+  # 按当前 HEAD 补一个本地分支：tag 检出时 HEAD 就是该 Release 的提交。
+  local ref="refs/heads/${BRANCH}"
+  if ! git -C "$REPO_ROOT" rev-parse --verify --quiet "$ref" >/dev/null; then
+    log "本地缺少分支 ${BRANCH}，按当前 HEAD 创建"
+    git -C "$REPO_ROOT" branch -f "${BRANCH}" HEAD
+  fi
+
   log "推送代码 ${BRANCH} -> ${SLUG}"
 
   if [[ -n "$DRY_RUN" ]]; then
