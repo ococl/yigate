@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -262,5 +263,35 @@ func TestE2EUDPAssociateSurvivesHandshakeTimeout(t *testing.T) {
 			t.Fatalf("udp echo %d payload mismatch: got %q want %q", i, got, payload)
 		}
 		time.Sleep(350 * time.Millisecond)
+	}
+}
+
+// TestE2EUDPSessionCapKeepsFDUsageBounded 验收：多目标 UDP 流量不会线性吃 fd。
+// 会话上限在 proxy 包内为 128，这里向 192 个不同目标各发一包，
+// 进程 fd 增量必须被上限压住（旧实现会多出 192 个 socket）。
+func TestE2EUDPSessionCapKeepsFDUsageBounded(t *testing.T) {
+	proxyAddr, _ := startE2EServer(t, nil)
+	_, udpConn, relayAddr := udpAssociate(t, proxyAddr)
+
+	countFD := func() int {
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			t.Skipf("cannot inspect fd table: %v", err)
+		}
+		return len(entries)
+	}
+	before := countFD()
+	for i := 0; i < 192; i++ {
+		target := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 21000 + i}
+		if _, err := udpConn.WriteToUDP(buildUDPPacket(target, []byte("x")), relayAddr); err != nil {
+			t.Fatalf("send udp packet %d: %v", i, err)
+		}
+	}
+	// 等中继把队列里的包处理完、会话建立稳定。
+	time.Sleep(700 * time.Millisecond)
+	after := countFD()
+	// 128 个会话上限 + 少量运行时波动余量。
+	if grew := after - before; grew > 160 {
+		t.Fatalf("fd usage grew by %d after 192 distinct udp targets, session cap not effective", grew)
 	}
 }

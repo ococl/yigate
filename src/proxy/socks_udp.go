@@ -7,8 +7,14 @@ import (
 	"time"
 )
 
+// maxUDPSessions 限制单个 UDP 关联里并存的目标会话数。
+// 每个会话独占一个 socket 和一个 goroutine，不设上限时多目标 UDP 流量
+// 可以在 90s 空闲回收之前耗尽 fd。
+const maxUDPSessions = 128
+
 // udpSession 表示一个 UDP 目标会话。
 type udpSession struct {
+	key        string
 	targetAddr *net.UDPAddr
 	conn       *net.UDPConn
 	lastUsed   time.Time
@@ -64,15 +70,40 @@ func (r *udpRelay) clientAddr() *net.UDPAddr {
 	return cloneUDPAddr(r.clientUDPAddr)
 }
 
+// touchSession 刷新会话的活跃时间。必须按 key 直接定位：
+// 遍历整个 map 会让每个回程包都付出 O(n) 代价，会话多时是自我放大。
+// 会话已被淘汰或替换时不再更新。
 func (r *udpRelay) touchSession(sess *udpSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, current := range r.sessions {
-		if current == sess {
-			sess.lastUsed = time.Now()
-			return
+	if current, ok := r.sessions[sess.key]; ok && current == sess {
+		sess.lastUsed = time.Now()
+	}
+}
+
+// sessionActive 判断会话是否仍在管理之中（未被淘汰）。
+func (r *udpRelay) sessionActive(sess *udpSession) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.sessions[sess.key]
+	return ok && current == sess
+}
+
+// evictOldestSessionLocked 淘汰最久未使用的会话，为建立新会话腾出位置。
+// 调用方必须持有 r.mu。
+func (r *udpRelay) evictOldestSessionLocked() {
+	var oldestKey string
+	var oldest *udpSession
+	for key, sess := range r.sessions {
+		if oldest == nil || sess.lastUsed.Before(oldest.lastUsed) {
+			oldestKey, oldest = key, sess
 		}
 	}
+	if oldest == nil {
+		return
+	}
+	_ = oldest.conn.Close()
+	delete(r.sessions, oldestKey)
 }
 
 func (r *udpRelay) run(clientReader *bufio.Reader) {
@@ -184,12 +215,15 @@ func (r *udpRelay) forwardToTarget(target string, data []byte) error {
 	r.mu.Lock()
 	sess, ok := r.sessions[target]
 	if !ok {
+		if len(r.sessions) >= maxUDPSessions {
+			r.evictOldestSessionLocked()
+		}
 		conn, err := net.DialUDP("udp", nil, udpAddr)
 		if err != nil {
 			r.mu.Unlock()
 			return err
 		}
-		sess = &udpSession{targetAddr: udpAddr, conn: conn, lastUsed: time.Now()}
+		sess = &udpSession{key: target, targetAddr: udpAddr, conn: conn, lastUsed: time.Now()}
 		r.sessions[target] = sess
 		go r.readFromTarget(sess)
 	}
@@ -221,6 +255,11 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 			default:
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
+				}
+				// 会话被上限淘汰或被回收时 socket 已关闭，属于正常退出，
+				// 不按故障告警。
+				if !r.sessionActive(sess) {
+					return
 				}
 				Logger().Warnw("udp session read failed", "error", err)
 				return
