@@ -30,6 +30,33 @@
 - `socks5h_redirect.enabled: true` 但配置里没有可用 SOCKS5 上游时，按"未开启"
   处理：请求直接走普通路由，不再每个请求都白试一次并打出
   `no available socks5 upstream` 告警。启动/热加载时会记录一条 info 说明该状态。
+- 监听 `Accept` 失败改为指数退避（5ms 起步、封顶 1s，成功后重置）。fd 耗尽
+  （EMFILE/ENFILE）时 `Accept` 会立即持续报错，原先的不退避重试会形成忙循环，
+  把 CPU 打满并刷爆日志，进程在故障期失去自愈能力。
+- 修复 UDP ASSOCIATE 被握手超时误杀：控制连接在进入中继前清除握手 deadline，
+  不再把"握手超时"当成"客户端离开"；中继停止时立即关闭 UDP 监听 socket，
+  退出不再等满 30s 读超时。
+- UDP 目标会话数加上限（单关联 128，满了淘汰最久未使用会话）。原先每个目标
+  独占一个 socket 与 goroutine 且只有 90s 空闲回收，多目标 UDP 流量可在回收前
+  耗尽 fd；会话活跃时间刷新也从遍历全表的 O(n) 改为按 key 的 O(1)。
+- 级联 BIND 等待上游第二次回复增加 30s 超时（与本地 BIND 等待 Accept 对齐），
+  上游不推送时不再让 goroutine 与客户端连接永久挂起。
+- 级联 BIND / UDP ASSOCIATE 在已经回复过客户端后不再回退本地实现，避免同一
+  连接收到两次响应、拿到两个不同监听地址；级联 UDP 的控制连接改为 defer 关闭，
+  成功路径不再泄漏。
+- 修复半关闭截断：TLS 等不支持 `CloseRead` 的连接不再退化为整体 `Close`，
+  对端读到 EOF 后才回写的响应现在能完整送达。
+- 周期恢复探测与手动全量巡检共用同一并发上限（8），上游同时到期时一轮探测
+  不再瞬间打出大量连接与业务流量争抢 fd。
+
+### Changed
+
+- `yigate_traffic_bytes_total` 指标去掉高基数 `target` 标签，只保留
+  `direction/user/upstream`；目标级明细仍由流量 history 与审计接口提供。
+  原先 `target` 随访问目标数增长，打满注册表上限后新组合被静默丢弃。
+- Accept 失败、UDP 中继/会话读写失败、流量审计记录失败等热路径告警改为按
+  固定类别限频（每秒一条），被抑制条数以 `suppressed=N` 附在下一条日志里，
+  故障风暴下不再刷爆日志。
 
 ### Changed
 
