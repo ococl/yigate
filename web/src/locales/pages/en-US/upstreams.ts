@@ -89,6 +89,7 @@ export default {
     priority: 'Priority',
     weight: 'Weight',
     strategy: 'Strategy',
+    basicTab: 'Basic info',
     healthCheckSection: 'Health check',
     probeType: 'Probe type',
     probeTarget: 'Deep probe target',

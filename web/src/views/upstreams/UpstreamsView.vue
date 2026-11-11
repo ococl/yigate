@@ -51,6 +51,8 @@ const lastChecks = ref<Map<string, UpstreamCheckResult>>(new Map())
 const runtimeStatus = ref<Map<string, UpstreamStatus>>(new Map())
 
 const modalVisible = ref(false)
+// 弹窗内按“基本信息 / 健康检查”分组展示；校验失败时自动切到出错的分组。
+const activeFormTab = ref<'basic' | 'health'>('basic')
 const isEdit = ref(false)
 const editingName = ref('')
 // 弹窗标题随语言与编辑状态变化，不再手工维护字符串
@@ -191,6 +193,7 @@ function showAddModal() {
   isEdit.value = false
   editingName.value = ''
   originalUrl.value = ''
+  activeFormTab.value = 'basic'
   resetFieldErrors()
   originalUsername.value = ''
   originalHasPassword.value = false
@@ -216,6 +219,7 @@ function showEditModal(record: UpstreamInfo) {
   originalUrl.value = record.url
   originalUsername.value = record.username || ''
   originalHasPassword.value = record.has_password === true
+  activeFormTab.value = 'basic'
   resetFieldErrors()
   form.value = {
     name: record.name,
@@ -294,7 +298,11 @@ async function handleSubmit() {
   typesError.value = errors.types || ''
   targetError.value = errors.target || ''
   pathError.value = errors.path || ''
-  if (errors.name || errors.url || errors.username || errors.password || errors.types || errors.target || errors.path) return
+  if (errors.name || errors.url || errors.username || errors.password || errors.types || errors.target || errors.path) {
+    // 错误分布在两个分组里，切到出错的那个，否则用户看不到提示。
+    activeFormTab.value = errors.target || errors.path ? 'health' : 'basic'
+    return
+  }
 
   const healthCheck: HealthCheckConfig = {
     type: form.value.health_check.type,
@@ -800,221 +808,230 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
     :confirm-loading="submitting"
     :ok-text="isEdit ? t('pages.upstreams.form.okUpdate') : t('pages.upstreams.form.okAdd')"
     :cancel-text="t('common.cancel')"
-    width="720px"
+    width="800px"
     @ok="handleSubmit"
   >
     <a-form layout="vertical">
-      <a-form-item
-        html-for="up-enabled"
-        :label="t('pages.upstreams.form.enable')"
-        :tooltip="t('pages.upstreams.form.enableTooltip')"
-      >
-        <a-switch
-          id="up-enabled"
-          v-model:checked="form.enabled"
-          :checked-children="t('pages.upstreams.form.enableOn')"
-          :un-checked-children="t('pages.upstreams.form.enableOff')"
-        />
-      </a-form-item>
+      <a-tabs v-model:activeKey="activeFormTab">
+        <a-tab-pane key="basic" :tab="t('pages.upstreams.form.basicTab')">
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="6">
+              <a-form-item
+                html-for="up-enabled"
+                :label="t('pages.upstreams.form.enable')"
+                :tooltip="t('pages.upstreams.form.enableTooltip')"
+              >
+                <a-switch
+                  id="up-enabled"
+                  v-model:checked="form.enabled"
+                  :checked-children="t('pages.upstreams.form.enableOn')"
+                  :un-checked-children="t('pages.upstreams.form.enableOff')"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="18">
+              <a-form-item
+                :label="t('pages.upstreams.form.type')"
+                :tooltip="typeHelp"
+                required
+                :validate-status="typesError ? 'error' : undefined"
+                :help="typesError || undefined"
+              >
+                <a-checkbox-group v-model:value="form.types" :options="typeOptions" />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-row :gutter="16">
-        <a-col :xs="24" :sm="12">
-          <a-form-item
-            html-for="up-name"
-            :label="t('pages.upstreams.form.name')"
-            required
-            :tooltip="t('pages.upstreams.form.nameTooltip')"
-            :validate-status="nameError ? 'error' : undefined"
-            :help="nameError || undefined"
-          >
-            <a-input id="up-name" v-model:value="form.name" :placeholder="t('pages.upstreams.form.namePlaceholder')" />
-          </a-form-item>
-        </a-col>
-        <a-col :xs="24" :sm="12">
-          <a-form-item
-            html-for="up-url"
-            :label="t('pages.upstreams.form.url')"
-            required
-            :tooltip="t('pages.upstreams.form.urlTooltip')"
-            :validate-status="urlError ? 'error' : undefined"
-            :help="urlError || undefined"
-          >
-            <a-input id="up-url" v-model:value="form.url" :placeholder="t('pages.upstreams.form.urlPlaceholder')" />
-          </a-form-item>
-        </a-col>
-      </a-row>
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-name"
+                :label="t('pages.upstreams.form.name')"
+                required
+                :tooltip="t('pages.upstreams.form.nameTooltip')"
+                :validate-status="nameError ? 'error' : undefined"
+                :help="nameError || undefined"
+              >
+                <a-input id="up-name" v-model:value="form.name" :placeholder="t('pages.upstreams.form.namePlaceholder')" />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-url"
+                :label="t('pages.upstreams.form.url')"
+                required
+                :tooltip="t('pages.upstreams.form.urlTooltip')"
+                :validate-status="urlError ? 'error' : undefined"
+                :help="urlError || undefined"
+              >
+                <a-input id="up-url" v-model:value="form.url" :placeholder="t('pages.upstreams.form.urlPlaceholder')" />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-row :gutter="16">
-        <a-col :xs="24" :sm="12">
-          <a-form-item
-            html-for="up-username"
-            :label="t('pages.upstreams.form.username')"
-            :tooltip="t('pages.upstreams.form.usernameTooltip')"
-            :validate-status="usernameError ? 'error' : undefined"
-            :help="usernameError || undefined"
-          >
-            <a-input
-              id="up-username"
-              v-model:value="form.username"
-              autocomplete="off"
-              :placeholder="t('pages.upstreams.form.usernamePlaceholder')"
-            />
-          </a-form-item>
-        </a-col>
-        <a-col :xs="24" :sm="12">
-          <a-form-item
-            html-for="up-password"
-            :label="t('pages.upstreams.form.password')"
-            :tooltip="t('pages.upstreams.form.passwordTooltip')"
-            :validate-status="passwordError ? 'error' : undefined"
-            :help="passwordError || undefined"
-          >
-            <a-input-password
-              id="up-password"
-              v-model:value="form.password"
-              autocomplete="new-password"
-              :placeholder="
-                isEdit && originalHasPassword
-                  ? t('pages.upstreams.form.passwordKeepPlaceholder')
-                  : t('pages.upstreams.form.passwordPlaceholder')
-              "
-            />
-          </a-form-item>
-        </a-col>
-      </a-row>
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-username"
+                :label="t('pages.upstreams.form.username')"
+                :tooltip="t('pages.upstreams.form.usernameTooltip')"
+                :validate-status="usernameError ? 'error' : undefined"
+                :help="usernameError || undefined"
+              >
+                <a-input
+                  id="up-username"
+                  v-model:value="form.username"
+                  autocomplete="off"
+                  :placeholder="t('pages.upstreams.form.usernamePlaceholder')"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-password"
+                :label="t('pages.upstreams.form.password')"
+                :tooltip="t('pages.upstreams.form.passwordTooltip')"
+                :validate-status="passwordError ? 'error' : undefined"
+                :help="passwordError || undefined"
+              >
+                <a-input-password
+                  id="up-password"
+                  v-model:value="form.password"
+                  autocomplete="new-password"
+                  :placeholder="
+                    isEdit && originalHasPassword
+                      ? t('pages.upstreams.form.passwordKeepPlaceholder')
+                      : t('pages.upstreams.form.passwordPlaceholder')
+                  "
+                />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-form-item
-        :label="t('pages.upstreams.form.type')"
-        :tooltip="typeHelp"
-        required
-        :validate-status="typesError ? 'error' : undefined"
-        :help="typesError || undefined"
-      >
-        <a-checkbox-group v-model:value="form.types" :options="typeOptions" />
-      </a-form-item>
+          <a-row :gutter="16">
+            <a-col :span="8">
+              <a-form-item
+                html-for="up-priority"
+                :label="t('pages.upstreams.form.priority')"
+                :tooltip="priorityHelp"
+              >
+                <a-input-number id="up-priority" v-model:value="form.priority" :min="0" style="width: 100%;" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="8">
+              <a-form-item html-for="up-weight" :label="t('pages.upstreams.form.weight')" :tooltip="weightHelp">
+                <a-input-number id="up-weight" v-model:value="form.weight" :min="0" style="width: 100%;" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="8">
+              <a-form-item html-for="up-strategy" :label="t('pages.upstreams.form.strategy')" :tooltip="strategyHelp">
+                <a-select id="up-strategy" v-model:value="form.strategy" :options="strategySelectOptions" />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-row :gutter="16">
-        <a-col :span="8">
-          <a-form-item
-            html-for="up-priority"
-            :label="t('pages.upstreams.form.priority')"
-            :tooltip="priorityHelp"
-          >
-            <a-input-number id="up-priority" v-model:value="form.priority" :min="0" style="width: 100%;" />
-          </a-form-item>
-        </a-col>
-        <a-col :span="8">
-          <a-form-item html-for="up-weight" :label="t('pages.upstreams.form.weight')" :tooltip="weightHelp">
-            <a-input-number id="up-weight" v-model:value="form.weight" :min="0" style="width: 100%;" />
-          </a-form-item>
-        </a-col>
-        <a-col :span="8">
-          <a-form-item html-for="up-strategy" :label="t('pages.upstreams.form.strategy')" :tooltip="strategyHelp">
-            <a-select id="up-strategy" v-model:value="form.strategy" :options="strategySelectOptions" />
-          </a-form-item>
-        </a-col>
-      </a-row>
+        </a-tab-pane>
+        <a-tab-pane key="health" :tab="t('pages.upstreams.form.healthCheckSection')">
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-type"
+                :label="t('pages.upstreams.form.probeType')"
+                :tooltip="healthCheckHelp"
+              >
+                <a-select id="up-type" v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-target"
+                :label="t('pages.upstreams.form.probeTarget')"
+                :tooltip="t('pages.upstreams.form.probeTargetTooltip')"
+                :validate-status="targetError ? 'error' : undefined"
+                :help="targetError || undefined"
+              >
+                <a-input
+                  id="up-target"
+                  v-model:value="form.health_check.target"
+                  placeholder="www.example.com:443"
+                />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-divider style="margin: 4px 0 16px;">{{ t('pages.upstreams.form.healthCheckSection') }}</a-divider>
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="12">
+              <a-form-item
+                html-for="up-path"
+                :label="t('pages.upstreams.form.probePath')"
+                :tooltip="t('pages.upstreams.form.probePathTooltip')"
+                :validate-status="pathError ? 'error' : undefined"
+                :help="pathError || undefined"
+              >
+                <a-input
+                  id="up-path"
+                  v-model:value="form.health_check.path"
+                  :disabled="!showHealthCheckPath"
+                  placeholder="/health"
+                />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-row :gutter="16">
-        <a-col :xs="24" :sm="12">
-          <a-form-item
-            html-for="up-type"
-            :label="t('pages.upstreams.form.probeType')"
-            :tooltip="healthCheckHelp"
-          >
-            <a-select id="up-type" v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
-          </a-form-item>
-        </a-col>
-        <a-col :xs="24" :sm="12">
-          <a-form-item
-            html-for="up-target"
-            :label="t('pages.upstreams.form.probeTarget')"
-            :tooltip="t('pages.upstreams.form.probeTargetTooltip')"
-            :validate-status="targetError ? 'error' : undefined"
-            :help="targetError || undefined"
-          >
-            <a-input
-              id="up-target"
-              v-model:value="form.health_check.target"
-              placeholder="www.example.com:443"
-            />
-          </a-form-item>
-        </a-col>
-      </a-row>
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-form-item
+                html-for="up-interval-seconds"
+                :label="t('pages.upstreams.form.interval')"
+                :tooltip="t('pages.upstreams.form.intervalTooltip')"
+              >
+                <a-input-number id="up-interval-seconds" v-model:value="form.health_check.interval_seconds" :min="0" style="width: 100%;" />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-form-item
+                html-for="up-timeout-seconds"
+                :label="t('pages.upstreams.form.timeout')"
+                :tooltip="t('pages.upstreams.form.timeoutTooltip')"
+              >
+                <a-input-number id="up-timeout-seconds" v-model:value="form.health_check.timeout_seconds" :min="0" style="width: 100%;" />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-form-item
+                html-for="up-failure-threshold"
+                :label="t('pages.upstreams.form.failureThreshold')"
+                :tooltip="t('pages.upstreams.form.failureThresholdTooltip')"
+              >
+                <a-input-number id="up-failure-threshold" v-model:value="form.health_check.failure_threshold" :min="0" style="width: 100%;" />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="12" :md="6">
+              <a-form-item
+                html-for="up-success-threshold"
+                :label="t('pages.upstreams.form.successThreshold')"
+                :tooltip="t('pages.upstreams.form.successThresholdTooltip')"
+              >
+                <a-input-number id="up-success-threshold" v-model:value="form.health_check.success_threshold" :min="0" style="width: 100%;" />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-      <a-row :gutter="16">
-        <a-col :xs="24" :sm="12">
           <a-form-item
-            html-for="up-path"
-            :label="t('pages.upstreams.form.probePath')"
-            :tooltip="t('pages.upstreams.form.probePathTooltip')"
-            :validate-status="pathError ? 'error' : undefined"
-            :help="pathError || undefined"
+            html-for="up-expected-codes"
+            :label="t('pages.upstreams.form.expectedCodes')"
+            :tooltip="t('pages.upstreams.form.expectedCodesTooltip')"
           >
-            <a-input
-              id="up-path"
-              v-model:value="form.health_check.path"
+            <a-select id="up-expected-codes"
+              v-model:value="form.health_check.expected_codes"
+              mode="tags"
               :disabled="!showHealthCheckPath"
-              placeholder="/health"
+              :placeholder="t('pages.upstreams.form.expectedCodesPlaceholder')"
+              style="width: 100%;"
             />
           </a-form-item>
-        </a-col>
-      </a-row>
-
-      <a-row :gutter="16">
-        <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item
-            html-for="up-interval-seconds"
-            :label="t('pages.upstreams.form.interval')"
-            :tooltip="t('pages.upstreams.form.intervalTooltip')"
-          >
-            <a-input-number id="up-interval-seconds" v-model:value="form.health_check.interval_seconds" :min="0" style="width: 100%;" />
-          </a-form-item>
-        </a-col>
-        <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item
-            html-for="up-timeout-seconds"
-            :label="t('pages.upstreams.form.timeout')"
-            :tooltip="t('pages.upstreams.form.timeoutTooltip')"
-          >
-            <a-input-number id="up-timeout-seconds" v-model:value="form.health_check.timeout_seconds" :min="0" style="width: 100%;" />
-          </a-form-item>
-        </a-col>
-        <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item
-            html-for="up-failure-threshold"
-            :label="t('pages.upstreams.form.failureThreshold')"
-            :tooltip="t('pages.upstreams.form.failureThresholdTooltip')"
-          >
-            <a-input-number id="up-failure-threshold" v-model:value="form.health_check.failure_threshold" :min="0" style="width: 100%;" />
-          </a-form-item>
-        </a-col>
-        <a-col :xs="24" :sm="12" :md="6">
-          <a-form-item
-            html-for="up-success-threshold"
-            :label="t('pages.upstreams.form.successThreshold')"
-            :tooltip="t('pages.upstreams.form.successThresholdTooltip')"
-          >
-            <a-input-number id="up-success-threshold" v-model:value="form.health_check.success_threshold" :min="0" style="width: 100%;" />
-          </a-form-item>
-        </a-col>
-      </a-row>
-
-      <a-form-item
-        html-for="up-expected-codes"
-        :label="t('pages.upstreams.form.expectedCodes')"
-        :tooltip="t('pages.upstreams.form.expectedCodesTooltip')"
-      >
-        <a-select id="up-expected-codes"
-          v-model:value="form.health_check.expected_codes"
-          mode="tags"
-          :disabled="!showHealthCheckPath"
-          :placeholder="t('pages.upstreams.form.expectedCodesPlaceholder')"
-          style="width: 100%;"
-        />
-      </a-form-item>
+        </a-tab-pane>
+      </a-tabs>
     </a-form>
   </a-modal>
 </template>

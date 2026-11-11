@@ -87,6 +87,7 @@ export default {
     priority: '优先级',
     weight: '权重',
     strategy: '策略',
+    basicTab: '基本信息',
     healthCheckSection: '健康检查',
     probeType: '探测方式',
     probeTarget: '深度探测目标',

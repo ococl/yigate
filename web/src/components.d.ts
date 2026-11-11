@@ -50,6 +50,8 @@ declare module 'vue' {
     ASubMenu: typeof import('antdv-next')['SubMenu']
     ASwitch: typeof import('antdv-next')['Switch']
     ATable: typeof import('antdv-next')['Table']
+    ATabPane: typeof import('antdv-next')['TabPane']
+    ATabs: typeof import('antdv-next')['Tabs']
     ATag: typeof import('antdv-next')['Tag']
     ATextarea: typeof import('antdv-next')['TextArea']
     ATooltip: typeof import('antdv-next')['Tooltip']
