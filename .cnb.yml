@@ -81,12 +81,9 @@ main:
               script: |
                 cd web && npm audit --audit-level=high --registry=https://registry.npmjs.org \
                   && npm run check && npm test
-        - name: e2e-binary
-          script: |
-            mkdir -p build
-            (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
-        # ---- 三路并行：单测 / 26 平台构建 / 浏览器 E2E ----
-        # lint、race、漏洞扫描是 PR 门禁的职责，main 上不重复跑。
+        # ---- 两路并行：单测 / 构建 ----
+        # lint、race、漏洞扫描是 PR 门禁的职责，main 上不重复跑；
+        # 浏览器 E2E 见下方的 beta-e2e（独立流水线并行跑，不占本流水线时间）。
         - name: verify
           jobs:
             unit-test:
@@ -96,15 +93,6 @@ main:
                 cd .. && bash scripts/check-coverage.sh 70 src/coverage.out
             cross-build:
               script: bash scripts/ci-build.sh "$BUILD_VERSION"
-            e2e:
-              image: mcr.microsoft.com/playwright:v1.65.0-noble
-              script: |
-                # 装依赖与装中文字体互不依赖，并行走；字体缺失只告警，不阻塞测试。
-                (cd web && npm ci) & ci_pid=$!
-                bash scripts/install-e2e-fonts.sh & font_pid=$!
-                wait "$ci_pid" || exit 1
-                wait "$font_pid" || true
-                cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
         # ---- 发布态产物：镜像、附件、GitHub 代码镜像并行 ----
         - name: publish
           jobs:
@@ -134,6 +122,47 @@ main:
                 - https://cnb.cool/o_c/yiteam/screct/-/blob/main/signing/envs.yml
               script: bash scripts/sync-github.sh code
               allowFailure: true
+
+    # ---- 浏览器 E2E：同一次 push，与上面的 beta 流水线并行 ----
+    # 48 个用例串行跑约 100 秒，是整个 CI 里最长的单点；把它留在主流水线里，
+    # 2 分钟的目标就没有可能。拆成独立流水线后：主流水线约 2 分钟出产物与镜像，
+    # E2E 自己跑完（失败仍然可见、仍然红），互不阻塞。
+    - name: beta-e2e
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 4
+      docker:
+        image: golang:1.27.4
+        volumes:
+          - /go/pkg/mod
+          - /root/.cache/go-build
+          - /root/.npm
+      env:
+        GOPROXY: https://goproxy.cn,direct
+        CGO_ENABLED: "0"
+      label:
+        type: BETA
+      stages:
+        - name: webui-deps
+          image: node:26.13.0-alpine
+          script: cd web && npm ci
+        - name: webui
+          image: node:26.13.0-alpine
+          script: |
+            cd web && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+        - name: e2e-binary
+          script: |
+            mkdir -p build
+            (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
+        - name: e2e
+          image: mcr.microsoft.com/playwright:v1.65.0-noble
+          script: |
+            # 装依赖与装中文字体互不依赖，并行走；字体缺失只告警，不阻塞测试。
+            (cd web && npm ci) & ci_pid=$!
+            bash scripts/install-e2e-fonts.sh & font_pid=$!
+            wait "$ci_pid" || exit 1
+            wait "$font_pid" || true
+            cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
 
 # ==================== PR 检查: 代码质量守护 ====================
 "(main|dev)":
