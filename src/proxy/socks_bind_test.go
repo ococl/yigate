@@ -539,3 +539,33 @@ func itoa(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// TestRelaySOCKS5BindSecondReplyTimeout 验证上游迟迟不给第二次回复时，
+// 中继会在限定时间内失败返回，而不是把 goroutine 和客户端连接永久挂住。
+func TestRelaySOCKS5BindSecondReplyTimeout(t *testing.T) {
+	old := bindSecondReplyTimeout
+	bindSecondReplyTimeout = 200 * time.Millisecond
+	defer func() { bindSecondReplyTimeout = old }()
+
+	clientSide, client := net.Pipe()
+	defer clientSide.Close()
+	defer client.Close()
+	upSide, upConn := net.Pipe()
+	defer upSide.Close()
+	defer upConn.Close()
+
+	// 客户端只读走第一次回复，之后不再收到任何数据。
+	go func() {
+		buf := make([]byte, 64)
+		_, _ = client.Read(buf)
+	}()
+
+	start := time.Now()
+	err := relaySOCKS5Bind(clientSide, upConn, "127.0.0.1:1080", "u")
+	if err == nil {
+		t.Fatal("expected error when upstream never sends the second reply")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("second reply wait took %v, deadline not applied", elapsed)
+	}
+}

@@ -10,6 +10,11 @@ import (
 
 // handleSOCKS5Bind 实现 SOCKS5 BIND 命令。
 // 优先尝试通过 SOCKS5 上游级联；失败时自动回退到本地监听。
+
+// bindSecondReplyTimeout 是等待上游 BIND 第二次回复的最长时间，
+// 与本地 BIND 等待对端连入的 Accept 超时一致。测试可调小。
+var bindSecondReplyTimeout = 30 * time.Second
+
 func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, router *Router, user string) {
 	if router != nil && router.Policy() != nil {
 		if err := router.Policy().CheckTarget(target); err != nil {
@@ -40,7 +45,13 @@ func relaySOCKS5Bind(client, upConn net.Conn, listenAddr string, user string) er
 		return errors.New("failed to send first bind reply to client")
 	}
 
-	// 读取上游第二次回复（包含目标地址）并转发给客户端
+	// 读取上游第二次回复（包含目标地址）并转发给客户端。
+	// 上游握手成功后会清除连接 deadline，而第二次回复取决于对端何时连入，
+	// 不设超时就会让 goroutine 与客户端连接永久挂起。与本地 BIND 等待
+	// Accept 的 30s 保持一致。
+	if err := upConn.SetReadDeadline(time.Now().Add(bindSecondReplyTimeout)); err != nil {
+		return fmt.Errorf("set upstream bind read deadline: %w", err)
+	}
 	reply, err := readSOCKS5Reply(upConn)
 	if err != nil {
 		return fmt.Errorf("read second bind reply from upstream: %w", err)
