@@ -133,15 +133,18 @@ type RouteDecision struct {
 }
 
 type Router struct {
-	final    RouteDecision
-	rules    []compiledRouteRule
-	geoSite  *GeoSiteMatcher
-	auto     autoRuntimeConfig
-	socks5h  Socks5HConfig
-	cache    *RouteCache
-	sfGroup  singleflight.Group
-	policy   *DestinationPolicy
-	resolver *DNSResolver
+	final   RouteDecision
+	rules   []compiledRouteRule
+	geoSite *GeoSiteMatcher
+	auto    autoRuntimeConfig
+	socks5h Socks5HConfig
+	// socks5hAvail 由装配方注入，用于判定当前是否真有可用的 SOCKS5 上游。
+	// 没有时 socks5h 重定向按未开启处理。
+	socks5hAvail func(names []string) bool
+	cache        *RouteCache
+	sfGroup      singleflight.Group
+	policy       *DestinationPolicy
+	resolver     *DNSResolver
 
 	// ipPrecedence 控制 DNS 解析后 IPv4/IPv6 的优先级。
 	ipPrecedence string

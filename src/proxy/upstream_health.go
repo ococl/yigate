@@ -121,7 +121,10 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 			if alive {
 				m.markAlive(u)
 			} else {
-				m.markDead(u)
+				m.markProbeFailure(u)
+				// 一次失败后按更短的间隔重试，避免必须等满一个检查周期
+				// 才凑够失败阈值（例如 30s 周期 × 3 次 = 90s 才发现）。
+				m.scheduleQuickRetry(u, globalIv)
 			}
 			m.mu.Lock()
 			u.lastCheckAt = time.Now()
@@ -136,6 +139,27 @@ func (m *UpstreamManager) checkDue(globalInterval int) {
 		}(u)
 	}
 	wg.Wait()
+}
+
+// scheduleQuickRetry 在探测失败后提前下一次检查时间（仅针对仍未摘除的节点，
+// 已摘除节点由恢复探测器接管）。
+func (m *UpstreamManager) scheduleQuickRetry(u *Upstream, globalIv time.Duration) {
+	iv := u.HealthCheckInterval()
+	if iv <= 0 {
+		iv = globalIv
+	}
+	if iv <= probeFailureRetryInterval {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u.dead {
+		return
+	}
+	next := time.Now().Add(probeFailureRetryInterval)
+	if u.nextCheckAt.IsZero() || next.Before(u.nextCheckAt) {
+		u.nextCheckAt = next
+	}
 }
 
 // StopHealthCheck 停止健康检查
@@ -186,7 +210,7 @@ func (m *UpstreamManager) checkUpstreamOnce(name string) (UpstreamCheckResult, e
 	if alive {
 		m.markAlive(u)
 	} else {
-		m.markDead(u)
+		m.markProbeFailure(u)
 	}
 
 	checkedAt := time.Now()
@@ -331,39 +355,76 @@ func checkTLSUpstream(addr string, timeout time.Duration) bool {
 	return true
 }
 
+// checkHTTPProtocol 探测 HTTP 代理上游。
+//
+// 两种模式：
+//   - 浅探测（未配置 health_check.target）：向 127.0.0.1:1 发起 CONNECT。
+//     目标必然立即失败，探测目的只是验证上游能按 HTTP 代理协议正确应答，
+//     既不依赖外网，也不会把上游自身地址当目标而形成自环。
+//     任何合法响应（含 403/502/503）都说明节点在服务；401/407 表示凭据
+//     不可用，仍判为不可用。
+//   - 深探测（配置了 target）：真实发起一次 CONNECT（或 absolute-URI GET，
+//     当同时配置了 path），按 expected_codes 判定，默认 2xx 为可用。
 func checkHTTPProtocol(conn net.Conn, up *Upstream, timeout time.Duration) bool {
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return false
 	}
 	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 
+	target := up.HealthCheckTarget()
+	path := up.HealthCheckPath()
+	deep := target != ""
+	if !deep {
+		target = livenessProbeTarget
+	}
+
 	creds := proxyCredentials(up)
 	auth := ""
 	if creds != "" {
 		auth = "Proxy-Authorization: Basic " + creds + "\r\n"
 	}
-	path := up.HealthCheckPath()
-	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", path, up.URL.Host, auth)
+
+	var req string
+	reqMethod := http.MethodConnect
+	if deep && path != "" {
+		// 正向代理只接受 absolute-URI 形式，origin-form 会被视为非法请求。
+		req = fmt.Sprintf("GET http://%s%s HTTP/1.1\r\nHost: %s\r\n%sConnection: close\r\n\r\n", target, path, target, auth)
+		reqMethod = http.MethodGet
+	} else {
+		req = fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", target, target, auth)
+	}
 	if _, err := conn.Write([]byte(req)); err != nil {
 		return false
 	}
 
 	br := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(br, nil)
+	// 传入请求方法，ReadResponse 才能识别 CONNECT 200 是隧道响应而不是
+	// 无长度 body，避免后续读取卡到超时。
+	resp, err := http.ReadResponse(br, &http.Request{Method: reqMethod})
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
-	codes := up.HealthCheckExpectedCodes()
-	if len(codes) == 0 {
-		return resp.StatusCode/100 == 2
+	// 不断开 body：探测只关心状态码，连接由调用方关闭，
+	// 强行 Close 会在隧道场景下阻塞到超时。
+	status := resp.StatusCode
+
+	// 认证失败意味着这组凭据用不了，属于节点不可用。
+	if status == http.StatusProxyAuthRequired || status == http.StatusUnauthorized {
+		return false
 	}
-	for _, code := range codes {
-		if resp.StatusCode == code {
-			return true
+	if codes := up.HealthCheckExpectedCodes(); len(codes) > 0 {
+		for _, code := range codes {
+			if status == code {
+				return true
+			}
 		}
+		return false
 	}
-	return false
+	if deep {
+		return status/100 == 2
+	}
+	// 浅探测：能正确应答协议就说明节点在服务，负载保护返回的 503 不算故障。
+	return true
 }
 
 func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) bool {
@@ -399,7 +460,6 @@ func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) boo
 	switch resp[1] {
 	case 0x00:
 		// 无需认证，协议握手成功。
-		return true
 	case 0x02:
 		// 用户名/密码认证 (RFC 1929)。
 		if user == "" && pass == "" {
@@ -416,11 +476,22 @@ func checkSOCKS5Protocol(conn net.Conn, up *Upstream, timeout time.Duration) boo
 		if _, err := io.ReadFull(conn, authResp[:]); err != nil {
 			return false
 		}
-		return authResp[0] == 0x01 && authResp[1] == 0x00
+		if authResp[0] != 0x01 || authResp[1] != 0x00 {
+			return false
+		}
 	case 0xff:
 		// 服务器不接受任何支持的认证方法。
 		return false
 	default:
 		return false
 	}
+
+	// 深探测：真实发起一次 CONNECT，验证上游能把流量带出去。
+	// 未配置 target 时到此即完成"协议层存活"判定。
+	if target := up.HealthCheckTarget(); target != "" {
+		if _, err := socks5SendRequest(conn, 0x01, target); err != nil {
+			return false
+		}
+	}
+	return true
 }

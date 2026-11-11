@@ -72,6 +72,9 @@ export interface TrafficSnapshot {
 
 export interface HealthCheckConfig {
   type: string
+  /** 深度探测目标 host:port；为空时只做协议层存活探测。 */
+  target: string
+  /** 深度探测路径；为空时使用 CONNECT。 */
   path: string
   expected_codes: number[]
   interval_seconds: number

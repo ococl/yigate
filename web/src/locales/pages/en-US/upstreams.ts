@@ -22,8 +22,8 @@ export default {
   healthTypes: {
     inherit: 'Inherit default (inferred from type)',
     tcp: 'tcp (TCP connect)',
-    http: 'http (HTTP GET)',
-    https: 'https (HTTPS GET)',
+    http: 'http (HTTP proxy)',
+    https: 'https (HTTPS proxy)',
     tls: 'tls (TLS handshake)',
     socks5: 'socks5 (SOCKS5 handshake)',
     socks5h: 'socks5h (SOCKS5 handshake, remote DNS)',
@@ -37,7 +37,7 @@ export default {
     strategy:
       'Selection algorithm inside a priority group. weighted_round_robin rotates by weight; least_connections picks the fewest active connections; consistent_hash hashes the target; source_ip_hash hashes the client address.',
     healthCheck:
-      'Empty numbers inherit the global defaults. An upstream is marked down once failures reach the threshold and comes back after enough successes.',
+      'Empty numbers inherit the global defaults. An upstream is marked down once probe failures reach the threshold and comes back after enough successes; only node-level hard failures (connect/TLS/auth) from business traffic are counted, so unreachable targets are not mistaken for a broken upstream.',
   },
   status: {
     disabled: 'Disabled',
@@ -91,8 +91,10 @@ export default {
     strategy: 'Strategy',
     healthCheckSection: 'Health check',
     probeType: 'Probe type',
-    probePath: 'Probe path',
-    probePathTooltip: 'Only used by http/https probes, e.g. /health.',
+    probeTarget: 'Deep probe target',
+    probeTargetTooltip: 'host:port. Leave empty to only verify the proxy protocol is healthy (no external dependency); when set, a real CONNECT is issued.',
+    probePath: 'Deep probe path',
+    probePathTooltip: 'Only used by http/https probes when a deep probe target is set, e.g. /health; leave empty to use CONNECT.',
     interval: 'Interval (s)',
     intervalTooltip: '0 uses the global default interval',
     timeout: 'Timeout (s)',
@@ -102,7 +104,7 @@ export default {
     successThreshold: 'Recovery threshold',
     successThresholdTooltip: 'Consecutive successes before it comes back; 0 uses the global default',
     expectedCodes: 'Expected status codes',
-    expectedCodesTooltip: 'Only used by http/https probes; empty means the default 200-299',
+    expectedCodesTooltip: 'Only used by deep probes; empty means the default 200-299',
     expectedCodesPlaceholder: 'e.g. 200,204',
   },
   messages: {
@@ -112,7 +114,8 @@ export default {
     usernameRequired: 'Username is required when a password is provided',
     passwordRequired: 'Password is required when a username is provided',
     typesRequired: 'Select at least one type',
-    pathRequired: 'HTTP health checks need a probe path',
+    targetInvalid: 'Deep probe target must be host:port',
+    pathInvalid: 'Probe path must start with /',
     updated: 'Upstream updated',
     added: 'Upstream added',
     deleted: 'Upstream deleted',

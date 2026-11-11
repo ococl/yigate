@@ -178,7 +178,10 @@ func dialTargetForRequest(target string, mgr *UpstreamManager, router *Router, s
 		if err == nil {
 			return conn, nil
 		}
-		Logger().Warnw("socks5h redirect failed, fallback to routing", "target", target, "error", err)
+		if !errors.Is(err, ErrSocks5HNoUpstream) {
+			// 没有可用 SOCKS5 上游时按未开启处理，静默回退，不产生告警噪音。
+			Logger().Warnw("socks5h redirect failed, fallback to routing", "target", target, "error", err)
+		}
 	}
 	return router.Dial(target, mgr, sip)
 }

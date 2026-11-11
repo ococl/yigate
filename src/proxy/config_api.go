@@ -88,6 +88,7 @@ type batchDeleteRequest struct {
 // healthCheckInfo 是健康检查配置的 API 表示（时间单位为秒）。
 type healthCheckInfo struct {
 	Type             string  `json:"type"`
+	Target           string  `json:"target,omitempty"`
 	Path             string  `json:"path,omitempty"`
 	ExpectedCodes    []int   `json:"expected_codes,omitempty"`
 	IntervalSeconds  float64 `json:"interval_seconds"`
@@ -99,6 +100,7 @@ type healthCheckInfo struct {
 // healthCheckRequest 是健康检查配置的写入请求（时间单位为秒）。
 type healthCheckRequest struct {
 	Type             string  `json:"type"`
+	Target           string  `json:"target"`
 	Path             string  `json:"path"`
 	ExpectedCodes    []int   `json:"expected_codes"`
 	IntervalSeconds  float64 `json:"interval_seconds"`
@@ -110,6 +112,7 @@ type healthCheckRequest struct {
 func newHealthCheckInfo(hc HealthCheckConfig) healthCheckInfo {
 	return healthCheckInfo{
 		Type:             hc.Type,
+		Target:           hc.Target,
 		Path:             hc.Path,
 		ExpectedCodes:    hc.ExpectedCodes,
 		IntervalSeconds:  time.Duration(hc.Interval).Seconds(),
@@ -122,6 +125,7 @@ func newHealthCheckInfo(hc HealthCheckConfig) healthCheckInfo {
 func (h healthCheckRequest) toConfig() HealthCheckConfig {
 	hc := HealthCheckConfig{
 		Type:             strings.TrimSpace(h.Type),
+		Target:           strings.TrimSpace(h.Target),
 		Path:             strings.TrimSpace(h.Path),
 		ExpectedCodes:    h.ExpectedCodes,
 		FailureThreshold: h.FailureThreshold,

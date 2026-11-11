@@ -76,7 +76,8 @@ func TestClassifyHTTPConnectStatus(t *testing.T) {
 		{407, ErrCategoryUpstream},
 		{502, ErrCategoryTarget},
 		{504, ErrCategoryTarget},
-		{503, ErrCategoryUpstream},
+		{503, ErrCategoryBusy},
+		{429, ErrCategoryBusy},
 		{500, ErrCategoryUpstream},
 		{404, ErrCategoryUpstream},
 	}

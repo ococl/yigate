@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -65,6 +66,10 @@ type Server struct {
 	connCount          atomic.Int64
 	maxConns           atomic.Int64
 	listenerConnCounts sync.Map // map[string]*atomic.Int64，每个监听地址独立计算并发上限
+	// rejectSem 限制同时进行"协议级过载拒绝"的连接数。超限连接不再静默
+	// 关闭，而是按协议回一个明确的忙时响应，让对端能区分"节点繁忙"与
+	// "节点故障"；信号量兜住极端流量，避免拒绝路径自身被拖垮。
+	rejectSem chan struct{}
 }
 
 // NewServer 创建服务器，cfg 为初始配置
@@ -74,6 +79,7 @@ func NewServer(cfgPath string, cfg *Config) (*Server, error) {
 		quit:        make(chan struct{}),
 		connections: make(map[net.Conn]struct{}),
 		listeners:   make(map[string]net.Listener),
+		rejectSem:   make(chan struct{}, 128),
 	}
 	if err := s.ApplyConfig(cfg); err != nil {
 		return nil, err
@@ -221,6 +227,15 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	router, err := proxy.NewRouter(cfg.Routing, cfg.DNS)
 	if err != nil {
 		return err
+	}
+	// socks5h_redirect 只对 SOCKS5 上游有意义。配置开启但没有任何可用的
+	// SOCKS5 上游时按未开启处理：请求直接走普通路由，不再每个请求都白试
+	// 一次并打一条 "no available socks5 upstream" 的告警。
+	router.SetSocks5HAvailable(func(names []string) bool {
+		return mgr != nil && mgr.Socks5AttemptCount(names) > 0
+	})
+	if cfg.Routing.Socks5HRedirect.Enabled && !router.Socks5HEnabled() {
+		proxy.Logger().Infow("socks5h_redirect enabled but no socks5 upstream available, treating it as disabled")
 	}
 	if err := proxy.InitLogger(cfg.Log); err != nil {
 		return err
@@ -531,7 +546,9 @@ func (s *Server) serveListener(addr string, ln net.Listener) {
 		// 避免一个端口的连接挤占另一个端口的配额。
 		releaseListenerSlot, ok := s.acquireListenerConnSlot(addr, s.maxConnsForListener(addr))
 		if !ok {
-			_ = conn.Close()
+			// 超限时不再静默关闭：对端（含健康探测）会把"连上即被关"
+			// 读成节点故障。改为按协议回明确的忙时响应。
+			go s.rejectOverLimit(conn)
 			continue
 		}
 		if !s.acquireConnSlot(conn, 0) {
@@ -546,6 +563,43 @@ func (s *Server) serveListener(addr string, ln net.Listener) {
 	}
 }
 
+// rejectOverLimit 对超出并发上限的连接回一个协议级的忙时响应。
+// HTTP 回 503（带 Retry-After），SOCKS5 先回"无需认证"再回通用失败。
+// 这样对端（尤其是健康探测）能识别出节点在服务、只是当前繁忙，
+// 而不是把"连上即被关闭"读成节点故障。
+func (s *Server) rejectOverLimit(conn net.Conn) {
+	select {
+	case s.rejectSem <- struct{}{}:
+		defer func() { <-s.rejectSem }()
+	default:
+		// 拒绝路径本身也过载了：直接关闭，避免 goroutine 无界增长。
+		_ = conn.Close()
+		return
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+
+	br := bufio.NewReader(conn)
+	b, err := br.Peek(1)
+	if err != nil {
+		return
+	}
+	if b[0] == 0x05 {
+		if _, err := conn.Write([]byte{0x05, 0x00}); err != nil {
+			return
+		}
+		// 尽力读掉请求头再回 REP=0x01；读不到（例如对端只做握手探测）
+		// 也不影响它已经收到的 05 00。
+		_ = conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		head := make([]byte, 4)
+		if _, err := io.ReadFull(br, head); err == nil && head[0] == 0x05 {
+			_, _ = conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+		}
+		return
+	}
+	_, _ = conn.Write([]byte("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+}
+
 // acquireListenerConnSlot 为单个监听地址独立占用一个并发槽位，返回释放函数。
 // max<=0 时不做限制。
 func (s *Server) acquireListenerConnSlot(addr string, max int64) (func(), bool) {
@@ -558,7 +612,7 @@ func (s *Server) acquireListenerConnSlot(addr string, max int64) (func(), bool) 
 	for {
 		cur := counter.Load()
 		if cur >= max {
-			proxy.Logger().Warnw("listener connection limit reached, closing connection", "address", addr, "active", cur, "max", max)
+			proxy.Logger().Warnw("listener connection limit reached, rejecting connection", "address", addr, "active", cur, "max", max)
 			return noop, false
 		}
 		if counter.CompareAndSwap(cur, cur+1) {

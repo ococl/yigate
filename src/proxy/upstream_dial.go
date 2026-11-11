@@ -80,10 +80,10 @@ func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names [
 		lastErr = err
 		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
 		MetricInc("yigate_upstream_dial_failures_total", "upstream="+up.Name)
-		// 只有归因于上游本身的错误才推进健康状态转换；
-		// 目标不可达或上游不支持某能力不影响节点整体健康。
-		if IsUpstreamError(err) {
-			m.markDead(up)
+		// 只有"节点级硬失败"（连不上 / 握不上手 / 认证失败）才计入被动熔断；
+		// 目标不可达、负载保护、上游不支持某能力都不影响节点整体健康。
+		if IsNodeFailure(err) {
+			m.markPassiveFailure(up)
 		}
 	}
 	if lastErr == nil {
@@ -95,18 +95,17 @@ func (m *UpstreamManager) DialProxyWithSourceIP(target, sourceIP string, names [
 func (m *UpstreamManager) DialOne(target, name string) (net.Conn, *Upstream, error) {
 	m.mu.Lock()
 	up := m.byName[name]
-	if up != nil && !m.isSelectable(up) {
-		up = nil
-	}
 	m.mu.Unlock()
+	// 按名字指定即视为显式选择：即使节点当前是 dead 也尝试一次
+	// （half-open），成功即可恢复，避免钉死上游被永久摘除。
 	if up == nil {
 		return nil, nil, fmt.Errorf("upstream %q unavailable", name)
 	}
 	conn, err := up.Dial(target)
 	if err != nil {
 		Logger().Warnw("upstream dial failed", "upstream", up.Name, "target", target, "error", err)
-		if IsUpstreamError(err) {
-			m.markDead(up)
+		if IsNodeFailure(err) {
+			m.markPassiveFailure(up)
 		}
 		return nil, nil, err
 	}
@@ -200,10 +199,12 @@ func (m *UpstreamManager) DialSOCKS5Bind(target string, names []string) (net.Con
 		}
 		lastErr = err
 		Logger().Warnw("upstream bind failed", "upstream", up.Name, "target", target, "error", err)
+		// 能力不支持只降级该能力；节点级硬失败计入被动熔断，
+		// 不用单次 BIND 失败直接摘除整个节点。
 		if IsCapabilityError(err) {
 			m.markCapabilityUnsupported(up, "bind")
-		} else if IsUpstreamError(err) {
-			m.markDeadImmediate(up)
+		} else if IsNodeFailure(err) {
+			m.markPassiveFailure(up)
 		}
 	}
 	if lastErr == nil {
@@ -228,10 +229,11 @@ func (m *UpstreamManager) DialSOCKS5UDP(target string, names []string) (net.Conn
 		}
 		lastErr = err
 		Logger().Warnw("upstream udp associate failed", "upstream", up.Name, "target", target, "error", err)
+		// 同 BIND：能力错误只降级能力，节点级硬失败计入被动熔断。
 		if IsCapabilityError(err) {
 			m.markCapabilityUnsupported(up, "udp_associate")
-		} else if IsUpstreamError(err) {
-			m.markDeadImmediate(up)
+		} else if IsNodeFailure(err) {
+			m.markPassiveFailure(up)
 		}
 	}
 	if lastErr == nil {

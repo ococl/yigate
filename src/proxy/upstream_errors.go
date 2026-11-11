@@ -25,6 +25,10 @@ const (
 	// ErrCategoryCanceled：调用方主动取消。
 	ErrCategoryCanceled ErrorCategory = "canceled"
 
+	// ErrCategoryBusy：上游明确处于负载保护 / 暂时不可服务（如 503、429）。
+	// 节点本身是活的，不应推进熔断；只影响本次请求的重试选择。
+	ErrCategoryBusy ErrorCategory = "busy"
+
 	// ErrCategoryUnknown：无法确定归因的未知错误。
 	// 保守处理，不直接推进熔断。
 	ErrCategoryUnknown ErrorCategory = "unknown"
@@ -60,6 +64,7 @@ func newDialErrorCode(cat ErrorCategory, phase string, code int, msg string) *Di
 }
 
 // IsUpstreamError 判断错误是否归因于上游本身（连接、TLS、认证、协议）。
+// 负载保护（busy）不算：节点是活的，只是暂时不接活。
 func IsUpstreamError(err error) bool {
 	var de *DialError
 	if errors.As(err, &de) {
@@ -67,6 +72,33 @@ func IsUpstreamError(err error) bool {
 	}
 	// 未分类的错误（裸 net.Error 等）默认视为上游错误，
 	// 因为拨号到上游的连接失败最可能是上游问题。
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+// IsNodeFailure 判断错误是否足以证明"这个上游节点本身不可用"，
+// 也就是是否允许计入被动熔断计数。
+//
+// 只有连接 / TLS / 认证 / 握手阶段的失败才算：这些阶段出错说明连
+// 代理本身都握不上手。协议协商之后的失败（CONNECT 返回 5xx、SOCKS5
+// 返回 0x01、目标不可达等）可能来自上游自己的下游链路，不能据此
+// 判定节点死亡，否则会把链路上的抖动放大成整节点摘除。
+func IsNodeFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var de *DialError
+	if errors.As(err, &de) {
+		if de.Category != ErrCategoryUpstream {
+			return false
+		}
+		switch de.Phase {
+		case "dial", "tls", "auth", "handshake":
+			return true
+		}
+		return false
+	}
+	// 未包装的连接类错误（如直接 dial 失败）
 	var netErr net.Error
 	return errors.As(err, &netErr)
 }
@@ -99,8 +131,10 @@ func classifyHTTPConnectStatus(statusCode int, status string) *DialError {
 	case statusCode == 502 || statusCode == 504:
 		// 502 Bad Gateway / 504 Gateway Timeout 通常表示上游无法到达目标。
 		return newDialErrorCode(ErrCategoryTarget, "connect", statusCode, "upstream CONNECT target error: "+status)
-	case statusCode == 503:
-		return newDialErrorCode(ErrCategoryUpstream, "connect", statusCode, "upstream CONNECT unavailable: "+status)
+	case statusCode == 503 || statusCode == 429:
+		// 503 / 429 是明确的"暂时不接活"信号（负载保护、限流），
+		// 节点本身是活的，不应计入熔断。
+		return newDialErrorCode(ErrCategoryBusy, "connect", statusCode, "upstream CONNECT busy: "+status)
 	case statusCode/100 == 5:
 		return newDialErrorCode(ErrCategoryUpstream, "connect", statusCode, "upstream CONNECT server error: "+status)
 	case statusCode/100 == 4:

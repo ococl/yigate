@@ -119,21 +119,38 @@ func TestUpstreamSupportsProxyType(t *testing.T) {
 	}
 }
 
-func TestOpenUpstreamDoesNotReenterTrafficPoolWhenProbeIsDue(t *testing.T) {
-	mgr, err := NewUpstreamManager([]UpstreamConfig{{
-		Name: "u1", URL: "http://127.0.0.1:1",
-		HealthCheck: HealthCheckConfig{FailureThreshold: 1},
-	}})
+// markDeadForTest 直接把上游置为 dead，供状态机相关用例使用。
+func markDeadForTest(t *testing.T, mgr *UpstreamManager, up *Upstream) {
+	t.Helper()
+	mgr.mu.Lock()
+	mgr.markDeadLocked(up, time.Now())
+	mgr.mu.Unlock()
+}
+
+// TestDeadUpstreamIsOnlyHalfOpenFallback 验证被摘除的节点不再参与常规调度，
+// 但在没有任何存活节点时仍会作为兜底被尝试（避免 100% 失败且无法自愈）。
+func TestDeadUpstreamIsOnlyHalfOpenFallback(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{
+		{Name: "u1", URL: "http://127.0.0.1:1", Priority: 1},
+		{Name: "u2", URL: "http://127.0.0.1:2", Priority: 2},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	up := mgr.Select()
-	mgr.markDead(up)
-	mgr.mu.Lock()
-	up.nextProbeAt = time.Now().Add(-time.Second)
-	mgr.mu.Unlock()
-	if got := mgr.Select(); got != nil {
-		t.Fatalf("open upstream must remain outside traffic pool before probe succeeds, got %q", got.Name)
+	dead := mgr.byName["u1"]
+	markDeadForTest(t, mgr, dead)
+
+	// 仍有存活节点时，dead 节点不得被选中。
+	for i := 0; i < 20; i++ {
+		if got := mgr.Select(); got == nil || got.Name != "u2" {
+			t.Fatalf("expected alive u2 selected, got %v", got)
+		}
+	}
+
+	// 只剩 dead 节点时退化为 half-open 兜底，而不是直接返回 nil。
+	markDeadForTest(t, mgr, mgr.byName["u2"])
+	if got := mgr.Select(); got == nil {
+		t.Fatal("expected half-open fallback when no alive upstream remains")
 	}
 }
 
@@ -143,7 +160,7 @@ func TestProbeLeaseIsSingleFlightAndRejectsStaleResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	up := mgr.Select()
-	mgr.markDeadImmediate(up)
+	markDeadForTest(t, mgr, up)
 	mgr.mu.Lock()
 	up.nextProbeAt = time.Now().Add(-time.Second)
 	mgr.mu.Unlock()
@@ -165,8 +182,11 @@ func TestProbeLeaseIsSingleFlightAndRejectsStaleResult(t *testing.T) {
 }
 
 func TestProbeBackoffIsCappedWithoutOverflow(t *testing.T) {
-	if got := probeBackoff(1000); got != deadProbeMaxInterval {
-		t.Fatalf("probeBackoff(1000) = %v, want %v", got, deadProbeMaxInterval)
+	got := probeBackoff(1000)
+	lower := deadProbeMaxInterval - deadProbeMaxInterval/5
+	upper := deadProbeMaxInterval + deadProbeMaxInterval/5
+	if got < lower || got > upper {
+		t.Fatalf("probeBackoff(1000) = %v, want within [%v, %v]", got, lower, upper)
 	}
 }
 
@@ -179,7 +199,7 @@ func TestMarkAliveRequiresConfiguredSuccessThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	up := mgr.Select()
-	mgr.markDeadImmediate(up)
+	markDeadForTest(t, mgr, up)
 	mgr.markAlive(up)
 	if !up.dead {
 		t.Fatal("one success must not revive an upstream with success_threshold=2")
@@ -253,7 +273,7 @@ func TestUpstreamManagerMarkDead(t *testing.T) {
 	}
 	// 连续失败达到阈值才标记 dead，避免单次抖动误判。
 	for i := 0; i < deadFailureThreshold; i++ {
-		mgr.markDead(up)
+		mgr.markProbeFailure(up)
 	}
 	if !up.dead {
 		t.Fatal("expected upstream marked dead")
@@ -287,7 +307,7 @@ func TestMarkDeadFailureThreshold(t *testing.T) {
 	if up == nil {
 		t.Fatal("expected upstream")
 	}
-	mgr.markDead(up)
+	mgr.markProbeFailure(up)
 	if up.dead {
 		t.Fatal("expected NOT dead after single failure")
 	}
@@ -631,4 +651,70 @@ func TestMergeRuntimeStateNilOld(t *testing.T) {
 	}
 	// Should not panic
 	mgr.MergeRuntimeState(nil)
+}
+
+// TestPassiveBreakerThresholdAndNodeFailureFilter 验证业务失败单独计数、
+// 阈值更高，并且只有节点级硬失败才计入。
+func TestPassiveBreakerThresholdAndNodeFailureFilter(t *testing.T) {
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "u", URL: "http://127.0.0.1:1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := mgr.Select()
+	for i := 0; i < passiveFailureThreshold-1; i++ {
+		mgr.markPassiveFailure(up)
+	}
+	if up.dead {
+		t.Fatalf("expected still alive after %d passive failures", passiveFailureThreshold-1)
+	}
+	mgr.markPassiveFailure(up)
+	if !up.dead {
+		t.Fatalf("expected dead after %d passive failures", passiveFailureThreshold)
+	}
+
+	// 连不上 / 认证失败 → 计入。
+	if !IsNodeFailure(newDialErrorCode(ErrCategoryUpstream, "dial", 0, "dial refused")) {
+		t.Fatal("expected dial failure to be a node failure")
+	}
+	if !IsNodeFailure(newDialErrorCode(ErrCategoryUpstream, "auth", 407, "auth failed")) {
+		t.Fatal("expected auth failure to be a node failure")
+	}
+	// 协议协商之后的失败可能来自上游自身链路，不能据此摘节点。
+	if IsNodeFailure(newDialErrorCode(ErrCategoryUpstream, "request", 0x01, "general failure")) {
+		t.Fatal("expected SOCKS5 general failure NOT to be a node failure")
+	}
+	if IsNodeFailure(newDialErrorCode(ErrCategoryTarget, "connect", 502, "target error")) {
+		t.Fatal("expected target error NOT to be a node failure")
+	}
+	if IsNodeFailure(newDialErrorCode(ErrCategoryBusy, "connect", 503, "busy")) {
+		t.Fatal("expected busy NOT to be a node failure")
+	}
+	if IsUpstreamError(newDialErrorCode(ErrCategoryBusy, "connect", 503, "busy")) {
+		t.Fatal("expected busy NOT to be an upstream error")
+	}
+}
+
+// TestDeadUpstreamRevivedByBusinessDial 验证 half-open 兜底：全部摘除时业务
+// 拨号仍会尝试，成功后立即恢复，即使关闭了主动健康检查。
+func TestDeadUpstreamRevivedByBusinessDial(t *testing.T) {
+	proxyAddr := startMockHTTPProxy(t)
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "http", URL: "http://" + proxyAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := mgr.Select()
+	markDeadForTest(t, mgr, up)
+	if mgr.Select() == nil {
+		t.Fatal("expected half-open fallback to return the only upstream")
+	}
+
+	target := startMockTarget(t)
+	conn, got, err := mgr.DialOne(target, "http")
+	if err != nil {
+		t.Fatalf("DialOne on dead upstream: %v", err)
+	}
+	conn.Close()
+	if got == nil || got.dead {
+		t.Fatal("expected dead upstream revived by successful business dial")
+	}
 }

@@ -102,14 +102,21 @@ upstreams:
     strategy: "weighted_round_robin"
     # health_check 可选：未配置时按全局 check_interval 与默认探测。
     # socks5/socks5h 上游默认执行真实 SOCKS5 协议握手探测（含认证），而非裸 TCP。
+    # 未配置 target 时为"存活探测"：只验证上游能按协议正确应答，
+    # 不依赖外网、也不访问上游自身地址；负载保护返回的 503 不算故障。
     health_check:
       type: "socks5"            # tcp / http / https / tls / socks5 / socks5h
-      path: "/"                 # HTTP 检查路径（仅 http/https）
-      expected_codes: [200]     # HTTP 预期响应码（仅 http/https）
+      # target 可选：host:port。配置后改为"深度探测"，真实发起一次 CONNECT
+      # 验证上游能把流量带出去（会依赖该目标的可达性）。
+      # target: "www.example.com:443"
+      path: ""                  # 深度探测路径（仅 http/https，留空使用 CONNECT）
+      expected_codes: []        # 预期响应码（留空按默认语义：深度探测要求 2xx）
       interval: 0               # 0 表示使用全局 check_interval
       timeout: 5s
-      failure_threshold: 3      # 连续失败次数达到阈值后标记 dead
+      failure_threshold: 3      # 连续探测失败次数达到阈值后标记 dead
       success_threshold: 1      # dead 节点连续探测成功次数达到阈值后恢复
+      # 注意：业务拨号失败单独计数（阈值 10），且只有连不上/认证失败这类
+      # 节点级硬失败才计入，避免把目标站点不可达误判为上游故障。
 routing:
   # final 为未命中任何规则时的兜底动作：direct / proxy / auto / deny（默认 auto）。
   final: auto

@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -135,6 +136,7 @@ func TestCheckHTTPProtocolCustomPathAndCodes(t *testing.T) {
 		URL: mustURL("http://" + ln.Addr().String()),
 		HealthCheck: HealthCheckConfig{
 			Type:          "http",
+			Target:        ln.Addr().String(),
 			Path:          "/health",
 			ExpectedCodes: []int{204},
 			Timeout:       Duration(5 * time.Second),
@@ -415,5 +417,203 @@ func TestStartHealthCheckZeroStopsExistingChecker(t *testing.T) {
 	mgr.mu.Unlock()
 	if done != nil {
 		t.Fatal("expected health check stopped after StartHealthCheck(0)")
+	}
+}
+
+// TestCheckHTTPProtocolLivenessAcceptsBusyResponses 验证浅探测只关心
+// "上游是否按协议应答"：403/502/503 等说明节点在服务，不应判死；
+// 401/407 说明凭据不可用，仍判为不可用。
+func TestCheckHTTPProtocolLivenessAcceptsBusyResponses(t *testing.T) {
+	cases := []struct {
+		code int
+		want bool
+	}{
+		{200, true},
+		{403, true},
+		{502, true},
+		{503, true},
+		{401, false},
+		{407, false},
+	}
+	for _, tc := range cases {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := http.StatusText(tc.code)
+		go func(ln net.Listener, code int, status string) {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			br := bufio.NewReader(conn)
+			req, err := http.ReadRequest(br)
+			if err != nil {
+				return
+			}
+			if req.Method != http.MethodConnect {
+				// 浅探测必须是合法的 CONNECT 请求，而不是 origin-form GET。
+				conn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+				return
+			}
+			conn.Write([]byte("HTTP/1.1 " + strconv.Itoa(code) + " " + status + "\r\nContent-Length: 0\r\n\r\n"))
+		}(ln, tc.code, status)
+
+		up := &Upstream{
+			URL:         mustURL("http://" + ln.Addr().String()),
+			HealthCheck: HealthCheckConfig{Type: "http", Timeout: Duration(2 * time.Second)},
+		}
+		conn, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			ln.Close()
+			t.Fatal(err)
+		}
+		got := checkHTTPProtocol(conn, up, 2*time.Second)
+		conn.Close()
+		ln.Close()
+		if got != tc.want {
+			t.Errorf("status %d: alive = %v, want %v", tc.code, got, tc.want)
+		}
+	}
+}
+
+// TestCheckHTTPProtocolDeepTarget 验证配置 target 后按真实 CONNECT 结果判定。
+func TestCheckHTTPProtocolDeepTarget(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				br := bufio.NewReader(c)
+				req, err := http.ReadRequest(br)
+				if err != nil {
+					return
+				}
+				if req.Method == http.MethodConnect && req.Host == "target.example:443" {
+					c.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+					return
+				}
+				c.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"))
+			}(conn)
+		}
+	}()
+
+	ok := &Upstream{
+		URL: mustURL("http://" + ln.Addr().String()),
+		HealthCheck: HealthCheckConfig{
+			Type: "http", Target: "target.example:443", Timeout: Duration(2 * time.Second),
+		},
+	}
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !checkHTTPProtocol(conn, ok, 2*time.Second) {
+		conn.Close()
+		t.Fatal("expected deep probe to pass on 200 Connection Established")
+	}
+	conn.Close()
+
+	bad := &Upstream{
+		URL: mustURL("http://" + ln.Addr().String()),
+		HealthCheck: HealthCheckConfig{
+			Type: "http", Target: "blocked.example:443", Timeout: Duration(2 * time.Second),
+		},
+	}
+	conn, err = net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if checkHTTPProtocol(conn, bad, 2*time.Second) {
+		t.Fatal("expected deep probe to fail on 502")
+	}
+}
+
+// TestCheckSOCKS5ProtocolDeepTarget 验证配置 target 后真实发起 CONNECT。
+func TestCheckSOCKS5ProtocolDeepTarget(t *testing.T) {
+	proxyAddr := startMockSocks5Proxy(t)
+	targetLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer targetLn.Close()
+
+	reachable := &Upstream{
+		URL:         mustURL("socks5://" + proxyAddr),
+		HealthCheck: HealthCheckConfig{Type: "socks5", Target: targetLn.Addr().String()},
+	}
+	conn, err := net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !checkSOCKS5Protocol(conn, reachable, 3*time.Second) {
+		conn.Close()
+		t.Fatal("expected deep socks5 probe to pass for reachable target")
+	}
+	conn.Close()
+
+	unreachable := &Upstream{
+		URL:         mustURL("socks5://" + proxyAddr),
+		HealthCheck: HealthCheckConfig{Type: "socks5", Target: "127.0.0.1:1"},
+	}
+	conn, err = net.Dial("tcp", proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if checkSOCKS5Protocol(conn, unreachable, 3*time.Second) {
+		t.Fatal("expected deep socks5 probe to fail for unreachable target")
+	}
+}
+
+// TestCheckHTTPProtocolDeepTargetDoesNotBlockOnTunnel 验证深探测在拿到
+// "200 Connection Established" 后立即返回，不会去读隧道 body 卡到超时。
+func TestCheckHTTPProtocolDeepTargetDoesNotBlockOnTunnel(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			br := bufio.NewReader(c)
+			if _, err := http.ReadRequest(br); err != nil {
+				c.Close()
+				continue
+			}
+			c.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+			// 故意保持隧道打开，模拟真实代理不断开连接。
+			time.AfterFunc(3*time.Second, func() { c.Close() })
+		}
+	}()
+
+	up := &Upstream{
+		URL: mustURL("http://" + ln.Addr().String()),
+		HealthCheck: HealthCheckConfig{
+			Type: "http", Target: "example.com:443", Timeout: Duration(2 * time.Second),
+		},
+	}
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	start := time.Now()
+	if !checkHTTPProtocol(conn, up, 2*time.Second) {
+		t.Fatal("expected deep probe to pass")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("deep probe blocked for %v on an open tunnel", elapsed)
 	}
 }

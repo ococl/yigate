@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"hash/fnv"
+	"math/rand/v2"
 	"net"
 	"net/url"
 	"sort"
@@ -15,12 +16,23 @@ import (
 )
 
 const (
-	// deadFailureThreshold 是将上游标记为 dead 前所需的连续失败次数。
+	// deadFailureThreshold 是主动探测连续失败多少次后摘除上游。
 	deadFailureThreshold = 3
+	// passiveFailureThreshold 是业务拨号连续失败多少次后摘除上游。
+	// 业务失败与探测失败分开计数：真实业务流量里的失败可能只反映上游自身
+	// 的下游链路问题（例如目标站点不可达），所以阈值远高于探测阈值，
+	// 并且只统计"连不上 / 认证不上"这类节点级硬失败（见 IsNodeFailure）。
+	passiveFailureThreshold = 10
+	// probeFailureRetryInterval 是主动探测失败后的快速重试间隔上限。
+	// 不等到下一个完整检查周期，才能在几十秒内完成阈值判定。
+	probeFailureRetryInterval = 5 * time.Second
 	// deadProbeBaseInterval 是 dead 上游恢复探测的初始间隔。
 	deadProbeBaseInterval = 2 * time.Second
 	// deadProbeMaxInterval 是 dead 上游恢复探测的最大间隔。
 	deadProbeMaxInterval = 30 * time.Second
+	// livenessProbeTarget 是浅探测使用的固定目标：本机 1 端口必然被拒绝，
+	// 既能快速拿到上游的协议应答，又不会让上游访问自身形成自环。
+	livenessProbeTarget = "127.0.0.1:1"
 )
 
 const (
@@ -60,8 +72,14 @@ func ValidateUpstreamStrategy(value string) error {
 // HealthCheckConfig 单个上游的健康检查配置。
 // 未显式配置的字段继承全局默认值。
 type HealthCheckConfig struct {
-	Type             string   `yaml:"type"`
-	Path             string   `yaml:"path"`
+	Type string `yaml:"type"`
+	// Target 是深度探测目标（host:port）。为空时只做协议层存活探测：
+	// 上游能按协议正确应答即视为可用，不依赖外网、也不访问上游自身。
+	// 配置后按代理真实能力探测一次 CONNECT（http/https/socks5 通用）。
+	Target string `yaml:"target,omitempty"`
+	// Path 仅用于深度探测：非空时对 http/https 上游发起 absolute-URI GET，
+	// 为空时发起 CONNECT。浅探测忽略该字段。
+	Path             string   `yaml:"path,omitempty"`
 	ExpectedCodes    []int    `yaml:"expected_codes"`
 	Interval         Duration `yaml:"interval"`
 	Timeout          Duration `yaml:"timeout"`
@@ -118,6 +136,12 @@ func ValidateHealthCheckConfig(hc HealthCheckConfig) error {
 	if t == "http" || t == "https" {
 		if hc.Path != "" && !strings.HasPrefix(hc.Path, "/") {
 			return fmt.Errorf("health_check.path must start with /")
+		}
+	}
+	if hc.Target != "" {
+		host, port, err := net.SplitHostPort(strings.TrimSpace(hc.Target))
+		if err != nil || host == "" || port == "" {
+			return fmt.Errorf("health_check.target must be host:port")
 		}
 	}
 	for _, code := range hc.ExpectedCodes {
@@ -278,7 +302,8 @@ type Upstream struct {
 	dead    bool
 
 	// 失败计数与恢复探测相关字段，由 UpstreamManager.mu 保护。
-	failures        int       // 连续失败次数
+	failures        int       // 主动探测连续失败次数（达到 health_check.failure_threshold 摘除）
+	passiveFailures int       // 业务拨号连续硬失败次数（达到 passiveFailureThreshold 摘除）
 	deadSince       time.Time // 最近一次被标记 dead 的时间
 	nextProbeAt     time.Time // 下次允许主动探测恢复的时间（指数退避）
 	nextCheckAt     time.Time // 下次健康检查时间（用于 per-upstream interval）
@@ -468,28 +493,7 @@ func (m *UpstreamManager) Select() *Upstream {
 func (m *UpstreamManager) selectFrom(allowed map[string]struct{}, target, sourceIP string) *Upstream {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	for _, p := range m.order {
-		group := m.groups[p]
-		alive := make([]*Upstream, 0, len(group))
-		for _, u := range group {
-			if !m.isSelectable(u) {
-				continue
-			}
-			if allowed != nil {
-				if _, ok := allowed[u.Name]; !ok {
-					continue
-				}
-			}
-			alive = append(alive, u)
-		}
-		if len(alive) == 0 {
-			continue
-		}
-		strategy := groupStrategy(alive)
-		return pick(alive, selectKey(strategy, target, sourceIP))
-	}
-	return nil
+	return m.selectLocked(allowed, nil, target, sourceIP)
 }
 
 // selectFromExcluding 类似 selectFrom，但跳过 exclude 集合中的上游，
@@ -497,12 +501,31 @@ func (m *UpstreamManager) selectFrom(allowed map[string]struct{}, target, source
 func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclude map[*Upstream]struct{}, target, sourceIP string) *Upstream {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.selectLocked(allowed, exclude, target, sourceIP)
+}
 
+// selectLocked 是上游选择的核心实现，调用方需持有 m.mu。
+//
+// 优先在存活节点中按优先级与策略选择；没有任何存活节点时退化为
+// half-open 兜底，仍按优先级尝试被摘除的节点。理由：熔断状态只是
+// 推断结果，宁可让请求失败在真实的连接错误上，也不要因为状态推断
+// 导致 100% 失败；且兜底尝试成功后可以立即通过 markAlive 恢复节点，
+// 这样即便关闭了主动健康检查也不会出现"永久摘除"。
+func (m *UpstreamManager) selectLocked(allowed map[string]struct{}, exclude map[*Upstream]struct{}, target, sourceIP string) *Upstream {
+	if up := m.pickLocked(allowed, exclude, target, sourceIP, false); up != nil {
+		return up
+	}
+	return m.pickLocked(allowed, exclude, target, sourceIP, true)
+}
+
+// pickLocked 在候选集中按优先级分组选择上游；includeDead 为 true 时
+// 允许选中已摘除节点（half-open 兜底）。
+func (m *UpstreamManager) pickLocked(allowed map[string]struct{}, exclude map[*Upstream]struct{}, target, sourceIP string, includeDead bool) *Upstream {
 	for _, p := range m.order {
 		group := m.groups[p]
-		alive := make([]*Upstream, 0, len(group))
+		candidates := make([]*Upstream, 0, len(group))
 		for _, u := range group {
-			if !m.isSelectable(u) {
+			if !includeDead && !m.isSelectable(u) {
 				continue
 			}
 			if exclude != nil {
@@ -515,13 +538,13 @@ func (m *UpstreamManager) selectFromExcluding(allowed map[string]struct{}, exclu
 					continue
 				}
 			}
-			alive = append(alive, u)
+			candidates = append(candidates, u)
 		}
-		if len(alive) == 0 {
+		if len(candidates) == 0 {
 			continue
 		}
-		strategy := groupStrategy(alive)
-		return pick(alive, selectKey(strategy, target, sourceIP))
+		strategy := groupStrategy(candidates)
+		return pick(candidates, selectKey(strategy, target, sourceIP))
 	}
 	return nil
 }
@@ -572,11 +595,23 @@ func (m *UpstreamManager) selectSocks5Internal(names []string, sourceIP string, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// 与 selectLocked 一致：没有存活节点时退化为 half-open 兜底，
+	// 避免全部摘除后出现 100% 失败且无法自愈。
+	if up := m.pickSocks5Locked(allowed, sourceIP, requireBind, requireUDP, false); up != nil {
+		return up
+	}
+	return m.pickSocks5Locked(allowed, sourceIP, requireBind, requireUDP, true)
+}
+
+func (m *UpstreamManager) pickSocks5Locked(allowed map[string]struct{}, sourceIP string, requireBind, requireUDP, includeDead bool) *Upstream {
 	for _, p := range m.order {
 		group := m.groups[p]
-		alive := make([]*Upstream, 0, len(group))
+		candidates := make([]*Upstream, 0, len(group))
 		for _, u := range group {
-			if !m.isSelectable(u) || !u.supportsProxyType(ProxyTypeSocks5) {
+			if !u.supportsProxyType(ProxyTypeSocks5) {
+				continue
+			}
+			if !includeDead && !m.isSelectable(u) {
 				continue
 			}
 			if requireBind && u.bindUnsupported {
@@ -590,13 +625,13 @@ func (m *UpstreamManager) selectSocks5Internal(names []string, sourceIP string, 
 					continue
 				}
 			}
-			alive = append(alive, u)
+			candidates = append(candidates, u)
 		}
-		if len(alive) == 0 {
+		if len(candidates) == 0 {
 			continue
 		}
-		strategy := groupStrategy(alive)
-		return pick(alive, selectKey(strategy, "", sourceIP))
+		strategy := groupStrategy(candidates)
+		return pick(candidates, selectKey(strategy, "", sourceIP))
 	}
 	return nil
 }
@@ -678,6 +713,7 @@ func (m *UpstreamManager) MergeRuntimeState(oldMgr *UpstreamManager) {
 		}
 		nu.dead = ou.dead
 		nu.failures = ou.failures
+		nu.passiveFailures = ou.passiveFailures
 		nu.deadSince = ou.deadSince
 		nu.nextProbeAt = ou.nextProbeAt
 		nu.nextCheckAt = now // 立即触发一次检查
@@ -710,6 +746,7 @@ func (m *UpstreamManager) UpstreamStatuses() []UpstreamStatus {
 			Dead:            u.dead,
 			DeadSince:       u.deadSince,
 			Failures:        u.failures,
+			PassiveFailures: u.passiveFailures,
 			Successes:       u.successes,
 			ConsecutiveDead: u.consecutiveDead,
 			NextProbeAt:     u.nextProbeAt,
@@ -887,42 +924,45 @@ func pickWeighted(us []*Upstream) *Upstream {
 }
 
 // isSelectable 判断上游是否可被选中用于业务拨号。
-// open 上游只能通过受控健康探测恢复，不能以真实业务请求充当恢复探针。
+// dead 上游不再参与常规调度，只在没有任何存活节点时作为 half-open 兜底被尝试。
 func (m *UpstreamManager) isSelectable(up *Upstream) bool {
 	return up != nil && !up.dead
 }
 
 // probeBackoff 返回 capped exponential backoff，避免大位移和 Duration 溢出。
+// 结果附带 ±20% 抖动，避免多个 dead 节点在同一时刻同步探测。
 func probeBackoff(consecutiveDead int) time.Duration {
 	if consecutiveDead <= 1 {
-		return deadProbeBaseInterval
+		return withProbeJitter(deadProbeBaseInterval)
 	}
 	backoff := deadProbeBaseInterval
 	for i := 1; i < consecutiveDead; i++ {
 		if backoff >= deadProbeMaxInterval/2 {
-			return deadProbeMaxInterval
+			return withProbeJitter(deadProbeMaxInterval)
 		}
 		backoff *= 2
 	}
 	if backoff > deadProbeMaxInterval {
-		return deadProbeMaxInterval
+		backoff = deadProbeMaxInterval
 	}
-	return backoff
+	return withProbeJitter(backoff)
 }
 
-func (m *UpstreamManager) markDeadLocked(up *Upstream, immediate bool, now time.Time) {
+func withProbeJitter(d time.Duration) time.Duration {
+	delta := d / 5
+	if delta <= 0 {
+		return d
+	}
+	return d - delta + time.Duration(rand.Int64N(int64(2*delta)+1))
+}
+
+// markDeadLocked 将上游置为 dead 并安排恢复探测；调用方需持有 m.mu。
+func (m *UpstreamManager) markDeadLocked(up *Upstream, now time.Time) {
 	if up == nil {
 		return
 	}
 	up.successes = 0
-	if immediate {
-		up.failures = up.HealthCheckFailureThreshold()
-	} else {
-		up.failures++
-		if up.failures < up.HealthCheckFailureThreshold() {
-			return
-		}
-	}
+	up.passiveFailures = 0
 	if !up.dead {
 		up.dead = true
 		up.deadSince = now
@@ -935,18 +975,39 @@ func (m *UpstreamManager) markDeadLocked(up *Upstream, immediate bool, now time.
 	up.nextProbeAt = now.Add(probeBackoff(up.consecutiveDead))
 }
 
-// markDead 记录一次失败。连续失败达到阈值才进入 open 状态。
-func (m *UpstreamManager) markDead(up *Upstream) {
+// markProbeFailure 记录一次主动探测失败。连续失败达到阈值才摘除节点。
+func (m *UpstreamManager) markProbeFailure(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.markDeadLocked(up, false, time.Now())
+	if up == nil {
+		return
+	}
+	up.successes = 0
+	if up.dead {
+		// 已摘除的节点由恢复探测器统一推进计数与退避。
+		return
+	}
+	up.failures++
+	if up.failures < up.HealthCheckFailureThreshold() {
+		return
+	}
+	m.markDeadLocked(up, time.Now())
 }
 
-// markDeadImmediate 立即将上游置为 open。
-func (m *UpstreamManager) markDeadImmediate(up *Upstream) {
+// markPassiveFailure 记录一次业务拨号失败。只有节点级硬失败才会计入
+// （调用方用 IsNodeFailure 过滤），且阈值远高于主动探测，避免把零星
+// 的目标不可达误判为上游故障。
+func (m *UpstreamManager) markPassiveFailure(up *Upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.markDeadLocked(up, true, time.Now())
+	if up == nil || up.dead {
+		return
+	}
+	up.passiveFailures++
+	if up.passiveFailures < passiveFailureThreshold {
+		return
+	}
+	m.markDeadLocked(up, time.Now())
 }
 
 func (m *UpstreamManager) markAliveLocked(up *Upstream) bool {
@@ -954,12 +1015,14 @@ func (m *UpstreamManager) markAliveLocked(up *Upstream) bool {
 		return false
 	}
 	up.failures = 0
+	up.passiveFailures = 0
 	up.successes++
 	if up.successes < up.HealthCheckSuccessThreshold() {
 		return false
 	}
 	wasDead := up.dead
 	up.dead = false
+	up.deadSince = time.Time{}
 	up.successes = 0
 	up.consecutiveDead = 0
 	up.nextProbeAt = time.Time{}
@@ -1023,18 +1086,29 @@ func (u *Upstream) HealthCheckTimeout() time.Duration {
 	return time.Duration(u.HealthCheck.Timeout)
 }
 
-// HealthCheckPath 返回 HTTP 健康检查路径。
-func (u *Upstream) HealthCheckPath() string {
-	if u == nil || u.HealthCheck.Path == "" {
-		return "/"
+// HealthCheckTarget 返回深度探测目标（host:port）。
+// 为空表示只做协议层存活探测，不访问任何外部目标。
+func (u *Upstream) HealthCheckTarget() string {
+	if u == nil {
+		return ""
 	}
-	return u.HealthCheck.Path
+	return strings.TrimSpace(u.HealthCheck.Target)
 }
 
-// HealthCheckExpectedCodes 返回 HTTP 健康检查预期响应码。
+// HealthCheckPath 返回深度探测的 HTTP 路径。
+// 为空表示使用 CONNECT 探测；非空表示对 target 发起 absolute-URI GET。
+func (u *Upstream) HealthCheckPath() string {
+	if u == nil {
+		return ""
+	}
+	return strings.TrimSpace(u.HealthCheck.Path)
+}
+
+// HealthCheckExpectedCodes 返回显式配置的预期响应码；未配置时返回 nil，
+// 由探测逻辑按"存活探测"或"深度探测"各自的默认语义判定。
 func (u *Upstream) HealthCheckExpectedCodes() []int {
 	if u == nil || len(u.HealthCheck.ExpectedCodes) == 0 {
-		return []int{200}
+		return nil
 	}
 	return u.HealthCheck.ExpectedCodes
 }

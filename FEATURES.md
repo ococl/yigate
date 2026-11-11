@@ -49,7 +49,10 @@
   - `consistent_hash`：一致性哈希
   - `source_ip_hash`：源 IP 哈希
 - **优先级与权重**：支持优先级分组、权重、dead 节点标记。
-- **健康检查**：TCP / HTTP / HTTPS / TLS 四种探测，异常节点自动摘除与恢复。
+- **健康检查**：TCP / HTTP / HTTPS / TLS / SOCKS5 协议探测。默认只做协议层
+  存活探测（不依赖外网、不访问上游自身），配置 `health_check.target` 后升级为
+  真实 CONNECT 的深度探测；探测失败与业务硬失败分开计数，摘除的节点在没有
+  存活节点时仍作 half-open 兜底，成功即恢复。
 - **指定上游白名单**：可按规则限定可用上游集合。
 
 ## 4. DNS

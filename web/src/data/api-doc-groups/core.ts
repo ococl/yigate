@@ -256,7 +256,7 @@ yigate_connections_total 12345
       "priority": 1,
       "weight": 1,
       "strategy": "weighted_round_robin",
-      "health_check": { "type": "http", "path": "/", "expected_codes": [200], "interval_seconds": 10, "timeout_seconds": 5, "failure_threshold": 3, "success_threshold": 2 }
+      "health_check": { "type": "http", "target": "", "path": "", "expected_codes": [], "interval_seconds": 10, "timeout_seconds": 5, "failure_threshold": 3, "success_threshold": 2 }
     }
   ]
 }`,
@@ -274,7 +274,7 @@ yigate_connections_total 12345
       "priority": 1,
       "weight": 1,
       "strategy": "weighted_round_robin",
-      "health_check": { "type": "http", "path": "/", "expected_codes": [200], "interval_seconds": 10, "timeout_seconds": 5, "failure_threshold": 3, "success_threshold": 2 }
+      "health_check": { "type": "http", "target": "", "path": "", "expected_codes": [], "interval_seconds": 10, "timeout_seconds": 5, "failure_threshold": 3, "success_threshold": 2 }
     }
   ]
 }`,

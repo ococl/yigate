@@ -64,6 +64,7 @@ const submitting = ref(false)
 function emptyHealthCheck(): HealthCheckConfig {
   return {
     type: '',
+    target: '',
     path: '',
     expected_codes: [],
     interval_seconds: 0,
@@ -97,6 +98,7 @@ const urlError = ref('')
 const usernameError = ref('')
 const passwordError = ref('')
 const typesError = ref('')
+const targetError = ref('')
 const pathError = ref('')
 
 function resetFieldErrors() {
@@ -105,6 +107,7 @@ function resetFieldErrors() {
   usernameError.value = ''
   passwordError.value = ''
   typesError.value = ''
+  targetError.value = ''
   pathError.value = ''
 }
 
@@ -227,6 +230,7 @@ function showEditModal(record: UpstreamInfo) {
     strategy: record.strategy || 'weighted_round_robin',
     health_check: {
       type: hc.type || '',
+      target: hc.target || '',
       path: hc.path || '',
       expected_codes: [...(hc.expected_codes || [])],
       interval_seconds: hc.interval_seconds || 0,
@@ -248,9 +252,10 @@ function validateForm(): {
   username?: string
   password?: string
   types?: string
+  target?: string
   path?: string
 } {
-  const errors: { name?: string; url?: string; username?: string; password?: string; types?: string; path?: string } = {}
+  const errors: { name?: string; url?: string; username?: string; password?: string; types?: string; target?: string; path?: string } = {}
   if (!form.value.name.trim()) errors.name = t('pages.upstreams.messages.nameRequired')
   if (!form.value.url.trim()) errors.url = t('pages.upstreams.messages.urlRequired')
   else if (!urlUnchanged() && !/^(https?|socks5h?):\/\/.+/i.test(form.value.url.trim())) {
@@ -267,10 +272,14 @@ function validateForm(): {
     }
   }
   if (form.value.types.length === 0) errors.types = t('pages.upstreams.messages.typesRequired')
-  if (form.value.health_check.type === 'http' || form.value.health_check.type === 'https') {
-    if (!form.value.health_check.path.trim()) {
-      errors.path = t('pages.upstreams.messages.pathRequired')
-    }
+  const target = (form.value.health_check.target || '').trim()
+  if (target && !/^[^\s:]+:\d+$/.test(target)) {
+    errors.target = t('pages.upstreams.messages.targetInvalid')
+  }
+  // 深度探测路径可选；填写时必须是以 / 开头的路径。
+  const path = form.value.health_check.path.trim()
+  if (path && !path.startsWith('/')) {
+    errors.path = t('pages.upstreams.messages.pathInvalid')
   }
   return errors
 }
@@ -283,11 +292,13 @@ async function handleSubmit() {
   usernameError.value = errors.username || ''
   passwordError.value = errors.password || ''
   typesError.value = errors.types || ''
+  targetError.value = errors.target || ''
   pathError.value = errors.path || ''
-  if (errors.name || errors.url || errors.username || errors.password || errors.types || errors.path) return
+  if (errors.name || errors.url || errors.username || errors.password || errors.types || errors.target || errors.path) return
 
   const healthCheck: HealthCheckConfig = {
     type: form.value.health_check.type,
+    target: form.value.health_check.target.trim(),
     path: form.value.health_check.path.trim(),
     expected_codes: (form.value.health_check.expected_codes || [])
       .map((v) => Number(v))
@@ -916,6 +927,24 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             <a-select id="up-type" v-model:value="form.health_check.type" :options="healthCheckTypeOptions" />
           </a-form-item>
         </a-col>
+        <a-col :xs="24" :sm="12">
+          <a-form-item
+            html-for="up-target"
+            :label="t('pages.upstreams.form.probeTarget')"
+            :tooltip="t('pages.upstreams.form.probeTargetTooltip')"
+            :validate-status="targetError ? 'error' : undefined"
+            :help="targetError || undefined"
+          >
+            <a-input
+              id="up-target"
+              v-model:value="form.health_check.target"
+              placeholder="www.example.com:443"
+            />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+      <a-row :gutter="16">
         <a-col :xs="24" :sm="12">
           <a-form-item
             html-for="up-path"

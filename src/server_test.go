@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -1079,4 +1080,51 @@ log:
 			t.Fatalf("listener %s has no users", addr)
 		}
 	}
+}
+
+// TestServerRejectOverLimitIsProtocolAware 验证超限时按协议回明确的忙时
+// 响应，而不是静默关闭：对端的健康探测据此能识别"节点在服务、只是繁忙"。
+func TestServerRejectOverLimitIsProtocolAware(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Listen = "127.0.0.1:0"
+	s, err := NewServer("", cfg)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	t.Run("socks5", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer client.Close()
+		go s.rejectOverLimit(server)
+		if _, err := client.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+			t.Fatalf("write greeting: %v", err)
+		}
+		resp := make([]byte, 2)
+		if _, err := io.ReadFull(client, resp); err != nil {
+			t.Fatalf("read method selection: %v", err)
+		}
+		// 必须回 05 00（无需认证），而不是 05 FF，否则对端会判为不可用。
+		if resp[0] != 0x05 || resp[1] != 0x00 {
+			t.Fatalf("expected method selection 05 00, got %x", resp)
+		}
+	})
+
+	t.Run("http", func(t *testing.T) {
+		client, server := net.Pipe()
+		defer client.Close()
+		go s.rejectOverLimit(server)
+		if _, err := client.Write([]byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")); err != nil {
+			t.Fatalf("write request: %v", err)
+		}
+		_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+		br := bufio.NewReader(client)
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("read response: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", resp.StatusCode)
+		}
+	})
 }

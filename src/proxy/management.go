@@ -30,6 +30,7 @@ type UpstreamStatus struct {
 	Dead            bool      `json:"dead"`
 	DeadSince       time.Time `json:"dead_since,omitempty"`
 	Failures        int       `json:"failures"`
+	PassiveFailures int       `json:"passive_failures"`
 	Successes       int       `json:"successes"`
 	ConsecutiveDead int       `json:"consecutive_dead"`
 	NextProbeAt     time.Time `json:"next_probe_at,omitempty"`

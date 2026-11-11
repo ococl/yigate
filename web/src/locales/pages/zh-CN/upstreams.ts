@@ -22,8 +22,8 @@ export default {
   healthTypes: {
     inherit: '继承默认（按上游类型推断）',
     tcp: 'tcp（TCP 连接）',
-    http: 'http（HTTP GET）',
-    https: 'https（HTTPS GET）',
+    http: 'http（HTTP 代理）',
+    https: 'https（HTTPS 代理）',
     tls: 'tls（TLS 握手）',
     socks5: 'socks5（SOCKS5 握手）',
     socks5h: 'socks5h（SOCKS5 远端 DNS 握手）',
@@ -37,7 +37,7 @@ export default {
     strategy:
       '同一优先级组内的选择算法。weighted_round_robin 按权重轮询；least_connections 选活动连接最少；consistent_hash 按目标地址哈希；source_ip_hash 按源地址哈希。',
     healthCheck:
-      '留空的数值表示继承全局默认值。健康检查失败达到阈值后上游会被标记为不可用，恢复成功达到阈值后重新启用。',
+      '留空的数值表示继承全局默认值。探测失败达到阈值后上游会被标记为不可用，恢复成功达到阈值后重新启用；业务流量里只有连不上/认证失败这类节点级硬失败才计入，避免把目标站点不可达误判为上游故障。',
   },
   status: {
     disabled: '已禁用',
@@ -89,8 +89,10 @@ export default {
     strategy: '策略',
     healthCheckSection: '健康检查',
     probeType: '探测方式',
-    probePath: '探测路径',
-    probePathTooltip: '仅 http/https 探测方式需要，如 /health。',
+    probeTarget: '深度探测目标',
+    probeTargetTooltip: 'host:port。留空只验证上游协议层可用（不依赖外网）；填写后真实发起一次 CONNECT 验证出口。',
+    probePath: '深度探测路径',
+    probePathTooltip: '仅 http/https 且填写了深度探测目标时使用，如 /health；留空使用 CONNECT。',
     interval: '间隔（秒）',
     intervalTooltip: '0 表示使用全局默认间隔',
     timeout: '超时（秒）',
@@ -100,7 +102,7 @@ export default {
     successThreshold: '恢复阈值',
     successThresholdTooltip: '连续成功多少次后恢复可用，0 表示使用全局默认值',
     expectedCodes: '期望状态码',
-    expectedCodesTooltip: '仅 http/https 探测方式使用，留空表示使用默认 200-299',
+    expectedCodesTooltip: '深度探测时生效，留空表示使用默认 200-299',
     expectedCodesPlaceholder: '例如 200,204',
   },
   messages: {
@@ -110,7 +112,8 @@ export default {
     usernameRequired: '填写密码时必须同时填写用户名',
     passwordRequired: '填写用户名时必须同时填写密码',
     typesRequired: '请选择至少一种类型',
-    pathRequired: 'HTTP 健康检查需要填写探测路径',
+    targetInvalid: '深度探测目标需为 host:port 格式',
+    pathInvalid: '探测路径需以 / 开头',
     updated: '更新成功',
     added: '添加成功',
     deleted: '删除成功',

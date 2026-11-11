@@ -72,7 +72,9 @@ func handleHTTPRequest(client net.Conn, req *http.Request, mgr *UpstreamManager,
 			recordHTTPTraffic(user, req, resp, int64(len(bodyBytes)))
 			return !req.Close
 		}
-		Logger().Warnw("socks5h request failed, fallback to routing", "error", err)
+		if !errors.Is(err, ErrSocks5HNoUpstream) {
+			Logger().Warnw("socks5h request failed, fallback to routing", "error", err)
+		}
 	}
 	decision := router.Decide(targetHost(req))
 	switch decision.Action {
@@ -178,7 +180,9 @@ func handleStreamedRequest(client net.Conn, req *http.Request, mgr *UpstreamMana
 			recordHTTPTraffic(user, req, resp, req.ContentLength)
 			return !req.Close
 		}
-		Logger().Warnw("socks5h streamed request failed, fallback to routing", "error", err)
+		if !errors.Is(err, ErrSocks5HNoUpstream) {
+			Logger().Warnw("socks5h streamed request failed, fallback to routing", "error", err)
+		}
 	}
 
 	decision := router.Decide(targetHost(req))
@@ -296,8 +300,8 @@ func requestViaProxy(req *http.Request, mgr *UpstreamManager, router *Router, na
 		}
 		lastErr = err
 		Logger().Warnw("forward via upstream failed", "upstream", up.Name, "target", targetHost(req), "error", err)
-		if IsUpstreamError(err) {
-			mgr.markDead(up)
+		if IsNodeFailure(err) {
+			mgr.markPassiveFailure(up)
 		}
 	}
 	if lastErr == nil {
