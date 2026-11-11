@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -615,5 +617,73 @@ func TestCheckHTTPProtocolDeepTargetDoesNotBlockOnTunnel(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Fatalf("deep probe blocked for %v on an open tunnel", elapsed)
+	}
+}
+
+// TestProbeDeadUpstreamsRespectsConcurrencyLimit 验证周期恢复探测与手动巡检
+// 共用同一并发上限：6 个上游同时到期、上限为 2 时，服务端看到的并发峰值不得超过 2。
+func TestProbeDeadUpstreamsRespectsConcurrencyLimit(t *testing.T) {
+	var cur, peak atomic.Int64
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				now := cur.Add(1)
+				for {
+					old := peak.Load()
+					if now <= old || peak.CompareAndSwap(old, now) {
+						break
+					}
+				}
+				defer cur.Add(-1)
+				br := bufio.NewReader(c)
+				if _, err := http.ReadRequest(br); err != nil {
+					return
+				}
+				// 让每次探测持续一段时间，才能真实暴露并发度。
+				time.Sleep(250 * time.Millisecond)
+				_, _ = c.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
+			}(c)
+		}
+	}()
+
+	const upstreamCount = 6
+	configs := make([]UpstreamConfig, 0, upstreamCount)
+	for i := 0; i < upstreamCount; i++ {
+		configs = append(configs, UpstreamConfig{
+			Name: fmt.Sprintf("u%d", i),
+			URL:  "http://" + ln.Addr().String(),
+			HealthCheck: HealthCheckConfig{
+				Type: "http", Timeout: Duration(2 * time.Second),
+			},
+		})
+	}
+	m, err := NewUpstreamManager(configs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.probeSem = make(chan struct{}, 2)
+	m.mu.Lock()
+	for _, up := range m.upstreams {
+		up.dead = true
+		up.nextProbeAt = time.Now().Add(-time.Second)
+	}
+	m.mu.Unlock()
+
+	m.probeDeadUpstreams()
+	if got := peak.Load(); got > 2 {
+		t.Fatalf("probe concurrency peak %d exceeds limit 2", got)
+	}
+	if peak.Load() == 0 {
+		t.Fatal("no probe reached the upstream, test is not exercising anything")
 	}
 }

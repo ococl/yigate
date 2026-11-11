@@ -237,6 +237,23 @@ func (m *UpstreamManager) checkUpstreamOnce(name string) (UpstreamCheckResult, e
 	return res, nil
 }
 
+// maxConcurrentProbes 是主动探测的全局并发上限。
+const maxConcurrentProbes = 8
+
+// acquireProbeSlot / releaseProbeSlot 获取与释放一个探测名额。
+// 信号量未初始化（例如测试里直接构造 manager）时不限流，保持原有行为。
+func (m *UpstreamManager) acquireProbeSlot() {
+	if m.probeSem != nil {
+		m.probeSem <- struct{}{}
+	}
+}
+
+func (m *UpstreamManager) releaseProbeSlot() {
+	if m.probeSem != nil {
+		<-m.probeSem
+	}
+}
+
 // CheckAllUpstreams 立即对所有上游执行一次并发健康检查，并同步更新各自状态。
 // 返回结果按上游名称排序，便于前端展示巡检报告。
 func (m *UpstreamManager) CheckAllUpstreams() []UpstreamCheckResult {
@@ -246,14 +263,12 @@ func (m *UpstreamManager) CheckAllUpstreams() []UpstreamCheckResult {
 
 	results := make([]UpstreamCheckResult, len(ups))
 	var wg sync.WaitGroup
-	// 限制并发探测数量，避免上游很多时瞬间耗尽文件描述符。
-	limit := make(chan struct{}, 8)
 	for i, u := range ups {
 		wg.Add(1)
 		go func(idx int, up *Upstream) {
 			defer wg.Done()
-			limit <- struct{}{}
-			defer func() { <-limit }()
+			m.acquireProbeSlot()
+			defer m.releaseProbeSlot()
 			res, _ := m.CheckUpstream(up.Name)
 			results[idx] = res
 		}(i, u)
@@ -288,6 +303,10 @@ func (m *UpstreamManager) probeDeadUpstreams() {
 		wg.Add(1)
 		go func(lease probeLease) {
 			defer wg.Done()
+			// 周期恢复探测与手动巡检共用同一并发上限，避免上游同时到期时
+			// 一轮探测瞬间打出大量连接。
+			m.acquireProbeSlot()
+			defer m.releaseProbeSlot()
 			alive := m.check(lease.up)
 			recovered := m.applyProbeResult(lease.up, lease.generation, alive, time.Now())
 			if recovered {

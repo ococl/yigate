@@ -369,6 +369,9 @@ type UpstreamManager struct {
 	done          chan struct{}
 	wg            sync.WaitGroup
 	checkInterval int
+	// probeSem 统一限制主动探测的并发度：周期恢复探测与手动全量巡检共用，
+	// 避免上游较多时一轮探测瞬间打出大量连接、与业务流量争抢 fd。
+	probeSem chan struct{}
 }
 
 // redactURLString 返回去除用户凭证（userinfo）的 URL 字符串，用于日志与错误信息，
@@ -384,8 +387,9 @@ func redactURLString(raw string) string {
 // NewUpstreamManager 根据配置创建上游管理器
 func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 	m := &UpstreamManager{
-		byName: make(map[string]*Upstream),
-		groups: make(map[int][]*Upstream),
+		byName:   make(map[string]*Upstream),
+		groups:   make(map[int][]*Upstream),
+		probeSem: make(chan struct{}, maxConcurrentProbes),
 	}
 	for i, c := range configs {
 		if c.URL == "" {
