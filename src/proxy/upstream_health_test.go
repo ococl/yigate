@@ -644,13 +644,17 @@ func TestProbeDeadUpstreamsRespectsConcurrencyLimit(t *testing.T) {
 						break
 					}
 				}
-				defer cur.Add(-1)
 				br := bufio.NewReader(c)
 				if _, err := http.ReadRequest(br); err != nil {
+					cur.Add(-1)
 					return
 				}
 				// 让每次探测持续一段时间，才能真实暴露并发度。
 				time.Sleep(250 * time.Millisecond)
+				// 先减计数再写响应：客户端的信号量要等读到响应才释放，
+				// 计数窗口严格落在信号量持有窗口内。若把减计数留到 handler 退出，
+				// "已写响应但 goroutine 尚未调度退出"的重叠会让峰值虚高 1。
+				cur.Add(-1)
 				_, _ = c.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
 			}(c)
 		}
