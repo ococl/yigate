@@ -32,7 +32,7 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 - `main` 分支：`registry/...:main`（Beta 构建，覆盖式）
 - `v*` 标签：`registry/...:latest` 与 `registry/...:X.Y.Z`
 
-镜像基于 `golang:1.27.3` 多阶段构建，运行阶段为 `alpine:3.24.4`，使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
+镜像基于 `golang:1.27.4` 多阶段构建，运行阶段为 `alpine:3.24.4`，使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
 
 ## 发布流程
 

@@ -53,6 +53,13 @@
 
 ### Changed
 
+- 构建链与 CI 统一升级到 Go 1.27.4，修掉标准库漏洞 GO-2026-6859
+  （`net/http.MaxBytesReader` 头部竞态）。镜像、`go.mod`、发布流水线同步调整。
+- CI 编排改为并行：26 平台交叉编译与打包并行化，单测 / 构建 / 浏览器 E2E 三路
+  同时跑，镜像构建直接复用已产出的二进制（不再在镜像里重跑 `npm ci` 与
+  `go build`），Go 构建缓存、lint 工具与 npm 缓存跨构建复用。
+  每日构建从约 11 分钟降到 2 分钟量级；lint / race / 漏洞扫描改由 PR 门禁负责，
+  正式发布仍保留全部门禁，只是并行执行。
 - `yigate_traffic_bytes_total` 指标去掉高基数 `target` 标签，只保留
   `direction/user/upstream`；目标级明细仍由流量 history 与审计接口提供。
   原先 `target` 随访问目标数增长，打满注册表上限后新组合被静默丢弃。

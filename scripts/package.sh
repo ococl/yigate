@@ -33,10 +33,8 @@ if [[ ! -f "${BINARY_PATH}" ]]; then
     exit 1
 fi
 
-# 清理残留的 staging 目录（上次失败可能遗留）
-rm -rf "${RELEASE_DIR}"/.pkg-*
-
-# 组装临时目录
+# 只清理自己的 staging 目录：ci-build.sh 会并行打包多个平台，
+# 通配删除 .pkg-* 会把同批其它平台的临时目录一起删掉。
 rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}"
 

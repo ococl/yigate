@@ -6,7 +6,9 @@
 # 本地运行状态与规划文档
 data
 .local
-build
+# build/ 里只有 CI 产出的 linux/amd64 二进制需要进入镜像（prebuilt 目标），其余排除。
+build/*
+!build/yigate-linux-amd64
 release
 test
 docs/superpowers

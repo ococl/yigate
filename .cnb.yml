@@ -2,9 +2,18 @@
 # YiGate CNB CI/CD 配置
 #
 # 流水线概览:
-#   main 分支 push   → 完整 CI → Beta 构件 + Docker 镜像 :main（覆盖式）
-#   v* tag push      → 完整 CI → 正式版（release, latest）+ Docker 镜像
-#   PR to main|dev   → lint / test / race / 前端校验 / 静态检查 / 配置与平台清单校验（不发布）
+#   main 分支 push   → 每日构建：单测 / 26 平台构建 / 浏览器 E2E 三路并行
+#                      → Beta 构件 + Docker 镜像 :main（覆盖式）
+#   v* tag push      → 正式版：全量门禁（lint / vuln / race 与构建并行）
+#                      → release, latest + Docker 镜像
+#   PR to main|dev   → lint / test / race / 前端校验 / 静态检查（并行，不发布）
+#
+# 编排原则:
+#   * CNB 的 stages 串行、stage 内 jobs 写成对象即并行，并行 job 共享
+#     /workspace 与 docker.volumes，因此"先产前端，再并行构建/测试"是安全的。
+#   * 关键路径只留"必须串行"的部分：前端 → (构建 | E2E | 单测) → 发布。
+#   * 16 核是实测得出的经济点：26 平台交叉编译是纯 CPU 负载，8 核下这一段
+#     就要 4 分钟，16 核约 1 分钟；核时反而更省。
 #
 # 二进制产物（跨平台归档）与 Docker 镜像同时发布，互为补充。
 # 版本方案详见 VERSIONING.md
@@ -14,10 +23,19 @@
 main:
   push:
     - name: beta
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 16
       docker:
-        image: golang:1.27.3
+        image: golang:1.27.4
         volumes:
           - /go/pkg/mod
+          # Go 构建缓存：每个 job 都是全新容器，不挂这个卷等于每次全量重编译。
+          - /root/.cache/go-build
+          # go install 出来的工具（golangci-lint / govulncheck）跨构建复用。
+          - /go/bin
+          # npm 缓存：前端与 E2E 各要装一次依赖，缓存命中能省十几秒。
+          - /root/.npm
       services:
         - docker
       env:
@@ -29,21 +47,7 @@ main:
       label:
         type: BETA
       stages:
-        - name: lint
-          script: cd src && go vet ./...
-        - name: test
-          script: cd src && go test -timeout 120s -coverprofile=coverage.out ./...
-        - name: coverage-gate
-          script: bash scripts/check-coverage.sh 70 src/coverage.out
-        - name: race
-          # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
-          script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
-        - name: webui-test
-          image: node:26.13.0-alpine
-          script: |
-            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
-        - name: check-release-configs
-          script: bash scripts/check-release-configs.sh
+        # ---- 元数据与门禁：毫秒级，先跑完再谈构建，脏提交不必浪费 2 分钟 ----
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -51,90 +55,120 @@ main:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
-        # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
-        - name: release-gates
-          script: bash scripts/check-release-gates.sh "$BUILD_VERSION"
-        - name: check-platforms-sync
-          script: bash scripts/check-platforms-sync.sh
-        - name: webui-build
+        - name: gates
+          script: |
+            bash scripts/check-release-configs.sh
+            bash scripts/check-platforms-sync.sh
+            # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
+            bash scripts/check-release-gates.sh "$BUILD_VERSION"
+        # ---- 共同输入：前端产物与 E2E 二进制，后面三路并行都依赖它们 ----
+        - name: webui
           image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
-        - name: build
+            cd web && npm ci \
+              && npm audit --audit-level=high --registry=https://registry.npmjs.org \
+              && npm run type-check && npm run check && npm test \
+              && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+        - name: e2e-binary
           script: |
             mkdir -p build
             (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
-            bash scripts/ci-build.sh "$BUILD_VERSION"
-        - name: webui-e2e
-          image: mcr.microsoft.com/playwright:v1.65.0-noble
-          script: |
-            # Chromium 默认不带中文字体，缺失时截图与断言文案会渲染成方框。
-            bash scripts/install-e2e-fonts.sh
-            cd web && npm ci
-            YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
-        # main 是分支事件，没有对应的 Release，附件只能挂到 commit 上：
-        # 不填 tag 时插件自动使用 $CNB_COMMIT（分支没有 Release，指定 tag 会 404）。
-        - name: upload-artifacts
-          image: cnbcool/attachments
-          settings:
-            attachments:
-              - "./release/*.tar.gz"
-              - "./release/*.zip"
-              - "./release/*.spdx.json"
-              - "./release/SHA256SUMS"
-          allowFailure: false
-        # ---- 每日构建镜像：每次 main 提交均触发，:main 标签覆盖式推送 ----
-        # 正式 Docker 镜像 (:latest / :X.Y.Z) 仅由 v* tag 流水线发布。
-        - name: docker-build
-          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main -f deploy/docker/Dockerfile .
-        - name: docker-push
-          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main
-        # ---- GitHub 镜像：仅同步代码（分支构建不产出 Release，附件无处可挂）----
-        # 镜像滞后不影响本仓构建，故允许失败；正式版同步见 v* 流水线。
-        - name: sync-github-code
-          # 密钥就近：token 只在同步阶段注入，不扩散到整条流水线。
-          imports:
-            - https://cnb.cool/o_c/yiteam/screct/-/blob/main/signing/envs.yml
-          script: bash scripts/sync-github.sh code
-          allowFailure: true
+        # ---- 三路并行：单测 / 26 平台构建 / 浏览器 E2E ----
+        # lint、race、漏洞扫描是 PR 门禁的职责，main 上不重复跑。
+        - name: verify
+          jobs:
+            unit-test:
+              script: |
+                cd src && go vet ./...
+                go test -timeout 120s -coverprofile=coverage.out ./...
+                cd .. && bash scripts/check-coverage.sh 70 src/coverage.out
+            cross-build:
+              script: bash scripts/ci-build.sh "$BUILD_VERSION"
+            e2e:
+              image: mcr.microsoft.com/playwright:v1.65.0-noble
+              script: |
+                # 装依赖与装中文字体互不依赖，并行走；字体缺失只告警，不阻塞测试。
+                (cd web && npm ci) & ci_pid=$!
+                bash scripts/install-e2e-fonts.sh & font_pid=$!
+                wait "$ci_pid" || exit 1
+                wait "$font_pid" || true
+                cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
+        # ---- 发布态产物：镜像、附件、GitHub 代码镜像并行 ----
+        - name: publish
+          jobs:
+            docker:
+              # 复用 cross-build 产出的 linux/amd64 二进制（含嵌入前端），镜像内不再重编。
+              script: |
+                docker build --target prebuilt \
+                  -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main \
+                  -f deploy/docker/Dockerfile .
+                docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:main
+            # main 是分支事件，没有对应的 Release，附件只能挂到 commit 上：
+            # 不填 tag 时插件自动使用 $CNB_COMMIT（分支没有 Release，指定 tag 会 404）。
+            upload-artifacts:
+              image: cnbcool/attachments
+              settings:
+                attachments:
+                  - "./release/*.tar.gz"
+                  - "./release/*.zip"
+                  - "./release/*.spdx.json"
+                  - "./release/SHA256SUMS"
+              allowFailure: false
+            # ---- GitHub 镜像：仅同步代码（分支构建不产出 Release，附件无处可挂）----
+            # 镜像滞后不影响本仓构建，故允许失败；正式版同步见 v* 流水线。
+            sync-github-code:
+              # 密钥就近：token 只在同步任务注入，不扩散到其它任务。
+              imports:
+                - https://cnb.cool/o_c/yiteam/screct/-/blob/main/signing/envs.yml
+              script: bash scripts/sync-github.sh code
+              allowFailure: true
 
 # ==================== PR 检查: 代码质量守护 ====================
 "(main|dev)":
   pull_request:
     - name: pr-check
       docker:
-        image: golang:1.27.3
+        image: golang:1.27.4
         volumes:
           - /go/pkg/mod
+          - /root/.cache/go-build
+          - /go/bin
+          - /root/.npm
       env:
         GOPROXY: https://goproxy.cn,direct
       stages:
-        - name: lint
-          script: cd src && go vet ./...
-        - name: test
-          script: cd src && go test -timeout 120s -coverprofile=coverage.out ./...
-        - name: coverage-gate
-          script: bash scripts/check-coverage.sh 70 src/coverage.out
-        - name: race
-          # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
-          script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
-        - name: webui-test
-          image: node:26.13.0-alpine
-          script: |
-            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
-        - name: check-release-configs
-          script: bash scripts/check-release-configs.sh
-        - name: check-platforms-sync
-          script: bash scripts/check-platforms-sync.sh
-        - name: golangci-lint
-          # 官方镜像内的 lint 由较低 Go 版本编译，无法分析 go 1.27 项目
-          # （can't load config: the Go language version used to build
-          # golangci-lint is lower than the targeted Go version），
-          # 改用流水线 Go 1.27.3 现场安装，保证与 go.mod 目标版本一致。
-          script: |
-            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-            export PATH="$(go env GOPATH)/bin:$PATH"
-            cd src && golangci-lint run
+        # PR 上互不依赖的检查全部并行，失败结果一次看全。
+        - name: checks
+          jobs:
+            lint:
+              script: cd src && go vet ./...
+            unit-test:
+              script: |
+                cd src && go test -timeout 120s -coverprofile=coverage.out ./...
+                cd .. && bash scripts/check-coverage.sh 70 src/coverage.out
+            race:
+              # 流水线级未设 CGO_ENABLED=0，但 -race 依赖 cgo，这里仍显式声明。
+              script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
+            webui-test:
+              image: node:26.13.0-alpine
+              script: |
+                cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
+            configs:
+              script: |
+                bash scripts/check-release-configs.sh
+                bash scripts/check-platforms-sync.sh
+            golangci-lint:
+              # 官方镜像内的 lint 由较低 Go 版本编译，无法分析 go 1.27 项目
+              # （can't load config: the Go language version used to build
+              # golangci-lint is lower than the targeted Go version），
+              # 改用流水线 Go 1.27.4 现场安装，保证与 go.mod 目标版本一致。
+              # /go/bin 是持久卷：同版本已存在就直接复用，省掉一次完整编译。
+              script: |
+                BIN="$(go env GOPATH)/bin/golangci-lint"
+                if ! "$BIN" --version 2>/dev/null | grep -q '2\.15\.0'; then
+                  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+                fi
+                cd src && "$BIN" run
       failStages:
         - name: pr-check-failed
           script: echo "PR 检查未通过，请修复后重新提交"
@@ -143,10 +177,17 @@ main:
 "v*":
   tag_push:
     - name: formal-release
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 16
       docker:
-        image: golang:1.27.3
+        image: golang:1.27.4
         volumes:
           - /go/pkg/mod
+          # 同 beta：复用 Go 构建缓存、已编译好的工具与 npm 缓存。
+          - /root/.cache/go-build
+          - /go/bin
+          - /root/.npm
       services:
         - docker
       env:
@@ -158,34 +199,6 @@ main:
       label:
         type: RELEASE
       stages:
-        - name: lint
-          script: cd src && go vet ./...
-        - name: golangci-lint
-          # 同 PR 流水线：镜像内 lint 的 Go 版本低于 go.mod 目标版本会直接报错，
-          # 正式发布链路不能依赖镜像自带的二进制，统一用 Go 1.27.3 现场安装。
-          script: |
-            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-            export PATH="$(go env GOPATH)/bin:$PATH"
-            cd src && golangci-lint config verify && golangci-lint run
-        - name: test
-          script: cd src && go test -timeout 120s -coverprofile=coverage.out ./...
-        - name: coverage-gate
-          script: bash scripts/check-coverage.sh 70 src/coverage.out
-        - name: race
-          # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须在此显式覆盖。
-          script: cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
-        - name: vulnerability-scan
-          script: |
-            cd src
-            go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-            export PATH="$(go env GOPATH)/bin:$PATH"
-            govulncheck ./...
-        - name: webui-test
-          image: node:26.13.0-alpine
-          script: |
-            cd web && npm ci && npm audit --audit-level=high --registry=https://registry.npmjs.org && npm run type-check && npm run check && npm test
-        - name: check-release-configs
-          script: bash scripts/check-release-configs.sh
         - name: determine-version
           script: |
             VERSION=$(bash scripts/version.sh)
@@ -193,87 +206,122 @@ main:
             echo "##[set-output version=$VERSION]"
           exports:
             version: BUILD_VERSION
-        # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
-        - name: release-gates
-          script: bash scripts/check-release-gates.sh "$BUILD_VERSION"
-        - name: check-platforms-sync
-          script: bash scripts/check-platforms-sync.sh
-        - name: webui-build
+        - name: gates
+          script: |
+            bash scripts/check-release-configs.sh
+            bash scripts/check-platforms-sync.sh
+            bash scripts/check-release-gates.sh "$BUILD_VERSION"
+        - name: webui
           image: node:26.13.0-alpine
           script: |
-            cd web && npm ci && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
-        - name: build
+            cd web && npm ci \
+              && npm audit --audit-level=high --registry=https://registry.npmjs.org \
+              && npm run type-check && npm run check && npm test \
+              && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+        - name: e2e-binary
           script: |
             mkdir -p build
             (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
-            bash scripts/ci-build.sh "$BUILD_VERSION"
-        - name: webui-e2e
-          image: mcr.microsoft.com/playwright:v1.65.0-noble
-          script: |
-            # Chromium 默认不带中文字体，缺失时截图与断言文案会渲染成方框。
-            bash scripts/install-e2e-fonts.sh
-            cd web && npm ci
-            YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
-        - name: verify-release
-          script: bash scripts/check-release-files.sh "$BUILD_VERSION"
-        # 首个正式版本没有“上一个 tag”，cnbcool/changelog 会因
-        # git describe --tags v0.2.0^ 失败而退出；先写一份兜底变更日志，
-        # 插件成功时覆盖，失败也不阻塞发布（Release 说明退化为提交列表）。
-        - name: prepare-changelog
-          script: |
-            PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
-            if [ -n "$PREV" ]; then RANGE="${PREV}..HEAD"; else RANGE="HEAD"; fi
-            {
-              echo "## YiGate ${BUILD_VERSION}"
-              echo
-              echo "完整变更列表（最近 60 条）："
-              echo
-              git log --no-merges --max-count=60 --pretty='- %s (%h)' "$RANGE"
-            } > LATEST_CHANGELOG.md
-            echo "changelog fallback range: ${RANGE}"
-        - name: generate-changelog
-          image: cnbcool/changelog
-          settings:
-            latestChangeLogTarget: LATEST_CHANGELOG.md
-          allowFailure: true
-        # ---- 先产出全部产物与镜像，再创建 Release，最后把产物挂到该 Release 上 ----
-        # 注意：cnbcool/attachments 依赖已存在的 Release，顺序颠倒会 404。
-        - name: docker-build
-          script: |
-            docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION} -f deploy/docker/Dockerfile .
-        - name: docker-push
-          script: |
-            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
-            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION}
-        - name: create-release
-          type: git:release
-          options:
-            title: YiGate
-            descriptionFromFile: LATEST_CHANGELOG.md
-            latest: true
-        - name: upload-artifacts
-          image: cnbcool/attachments
-          settings:
-            attachments:
-              - "./release/*.tar.gz"
-              - "./release/*.zip"
-              - "./release/*.spdx.json"
-              - "./release/SHA256SUMS"
-          allowFailure: false
-        # ---- 同步到 GitHub 镜像仓：代码 + 标签 + Release + 全部附件 ----
-        # GitHub 侧不跑任何 CI（.github/workflows 仅保留手动入口），
-        # 由本阶段一次性完成镜像：git push 代码与标签 → 创建/复用 Release
-        # → 逐个上传归档、SBOM 与 SHA256SUMS（同名附件先删后传，可重复执行）。
-        #
-        # GITHUB_TOKEN 由密钥仓库 o_c/yiteam/screct 的 signing/envs.yml 注入，
-        # 复用前需确认该文件里包含 GITHUB_TOKEN 一项（变量名按本脚本读取的拼写）。
-        # token 为 fine-grained PAT，权限 Contents: Read and write；
-        # 另需 Administration: Read and write 才能同步仓库简介与 topics（缺失只告警）。
-        # 推送含 .github/workflows 变更的提交还需要 Workflows: Read and write。
-        # 本地手动补同步：GITHUB_TOKEN=xxx bash scripts/sync-github.sh all
-        - name: sync-github
-          # 密钥就近：只在当前 Stage 注入，其它 Stage 拿不到该 token。
-          imports:
-            - https://cnb.cool/o_c/yiteam/screct/-/blob/main/signing/envs.yml
-          script: bash scripts/sync-github.sh all
-          allowFailure: false
+        # ---- 四路并行：静态检查 / 单测+竞态 / 26 平台构建 / 浏览器 E2E ----
+        # 正式版保留全部门禁，但把它们拆成互不依赖的任务同时跑；
+        # 关键路径由最长的那条（约 70s）决定，而不是四条相加。
+        - name: verify
+          jobs:
+            lint:
+              # go vet 已包含在 golangci-lint 的 govet 里，不再单独跑。
+              script: |
+                BIN="$(go env GOPATH)/bin/golangci-lint"
+                if ! "$BIN" --version 2>/dev/null | grep -q '2\.15\.0'; then
+                  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+                fi
+                cd src && "$BIN" config verify && "$BIN" run
+            vulnerability-scan:
+              script: |
+                BIN="$(go env GOPATH)/bin/govulncheck"
+                if ! "$BIN" -version 2>/dev/null | grep -q '1\.9\.0'; then
+                  go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+                fi
+                cd src && "$BIN" ./...
+            unit-test:
+              script: |
+                cd src
+                go test -timeout 120s -coverprofile=coverage.out ./...
+                cd .. && bash scripts/check-coverage.sh 70 src/coverage.out
+                # 流水线级 env 设置了 CGO_ENABLED=0，而 -race 依赖 cgo，必须显式覆盖。
+                cd src && CGO_ENABLED=1 go test -race -timeout 180s ./...
+            cross-build:
+              # 构建与产物白名单校验放同一个任务：校验紧跟产物，零额外等待。
+              script: |
+                bash scripts/ci-build.sh "$BUILD_VERSION"
+                bash scripts/check-release-files.sh "$BUILD_VERSION"
+            e2e:
+              image: mcr.microsoft.com/playwright:v1.65.0-noble
+              script: |
+                # 装依赖与装中文字体互不依赖，并行走；字体缺失只告警，不阻塞测试。
+                (cd web && npm ci) & ci_pid=$!
+                bash scripts/install-e2e-fonts.sh & font_pid=$!
+                wait "$ci_pid" || exit 1
+                wait "$font_pid" || true
+                cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
+            changelog:
+              # 首个正式版本没有“上一个 tag”，cnbcool/changelog 会因
+              # git describe --tags v0.2.0^ 失败而退出；先写一份兜底变更日志，
+              # 插件成功时覆盖，失败也不阻塞发布（Release 说明退化为提交列表）。
+              script: |
+                PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+                if [ -n "$PREV" ]; then RANGE="${PREV}..HEAD"; else RANGE="HEAD"; fi
+                {
+                  echo "## YiGate ${BUILD_VERSION}"
+                  echo
+                  echo "完整变更列表（最近 60 条）："
+                  echo
+                  git log --no-merges --max-count=60 --pretty='- %s (%h)' "$RANGE"
+                } > LATEST_CHANGELOG.md
+                echo "changelog fallback range: ${RANGE}"
+        # ---- 镜像先推完再建 Release：Create Release 一旦发布就该有可拉取的镜像 ----
+        - name: ship
+          jobs:
+            - name: docker
+              # 复用 cross-build 产出的 linux/amd64 二进制，镜像内不再跑 npm ci + go build。
+              script: |
+                docker build --target prebuilt \
+                  -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest \
+                  -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION} \
+                  -f deploy/docker/Dockerfile .
+                docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+                docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION}
+            - name: create-release
+              type: git:release
+              options:
+                title: YiGate
+                descriptionFromFile: LATEST_CHANGELOG.md
+                latest: true
+        # ---- 附件与 GitHub 镜像并行；cnbcool/attachments 依赖已存在的 Release ----
+        - name: finalize
+          jobs:
+            upload-artifacts:
+              image: cnbcool/attachments
+              settings:
+                attachments:
+                  - "./release/*.tar.gz"
+                  - "./release/*.zip"
+                  - "./release/*.spdx.json"
+                  - "./release/SHA256SUMS"
+              allowFailure: false
+            # ---- 同步到 GitHub 镜像仓：代码 + 标签 + Release + 全部附件 ----
+            # GitHub 侧不跑任何 CI（.github/workflows 仅保留手动入口），
+            # 由本任务一次性完成镜像：git push 代码与标签 → 创建/复用 Release
+            # → 逐个上传归档、SBOM 与 SHA256SUMS（同名附件先删后传，可重复执行）。
+            #
+            # GITHUB_TOKEN 由密钥仓库 o_c/yiteam/screct 的 signing/envs.yml 注入，
+            # 复用前需确认该文件里包含 GITHUB_TOKEN 一项（变量名按本脚本读取的拼写）。
+            # token 为 fine-grained PAT，权限 Contents: Read and write；
+            # 另需 Administration: Read and write 才能同步仓库简介与 topics（缺失只告警）。
+            # 推送含 .github/workflows 变更的提交还需要 Workflows: Read and write。
+            # 本地手动补同步：GITHUB_TOKEN=xxx bash scripts/sync-github.sh all
+            sync-github:
+              # 密钥就近：只在当前任务注入，其它任务拿不到该 token。
+              imports:
+                - https://cnb.cool/o_c/yiteam/screct/-/blob/main/signing/envs.yml
+              script: bash scripts/sync-github.sh all
+              allowFailure: false

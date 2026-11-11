@@ -70,8 +70,32 @@ echo "--- Verifying dependencies ---"
 )
 
 # 跨平台编译
-echo "--- Cross-compiling $(all_platforms | wc -l) platforms ---"
-for platform in $(all_platforms); do
+# 26 个平台串行编译是整条流水线最慢的一段（每个平台都要重编全部依赖），
+# 这里按 CPU 数并发；单个平台仍是完整的 go build，产物与串行完全一致。
+PLATFORMS=($(all_platforms))
+JOBS="${YIGATE_BUILD_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+echo "--- Cross-compiling ${#PLATFORMS[@]} platforms (jobs=${JOBS}) ---"
+
+# 并行执行 fn <item>，任一失败即返回非零（其余任务仍会跑完，便于一次看到全部错误）。
+run_parallel() {
+    local fn="$1"
+    shift
+    local failed=0 running=0 item
+    for item in "$@"; do
+        "${fn}" "${item}" &
+        running=$((running + 1))
+        if (( running >= JOBS )); then
+            wait -n || { echo "error: 并行任务失败: ${item}" >&2; failed=1; }
+            running=$((running - 1))
+        fi
+    done
+    wait || failed=1
+    return "${failed}"
+}
+
+build_platform() {
+    local platform="$1"
+    local name env_str
     name="$(output_name "${VERSION}" "${platform}")"
     env_str="$(build_env "${platform}")"
     echo "  Building ${name}..."
@@ -80,19 +104,31 @@ for platform in $(all_platforms); do
         env ${env_str} CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct \
             go build -trimpath -buildvcs=false -mod=readonly -ldflags "${LDFLAGS}" \
             -o "${RELEASE_DIR}/${name}" .
-    )
-done
+    ) || { echo "error: 编译失败: ${platform}" >&2; return 1; }
+}
+
+run_parallel build_platform "${PLATFORMS[@]}" || exit 1
 
 # 全平台打包
-echo "--- Packaging $(all_platforms | wc -l) archives ---"
-for platform in $(all_platforms); do
-    "${SCRIPTS_DIR}/package.sh" "${VERSION}" "${platform}"
-done
+# gzip -9 压缩同样吃 CPU，串行打包会白白多花一分钟，这里一并并行。
+package_platform() {
+    "${SCRIPTS_DIR}/package.sh" "${VERSION}" "$1"
+}
 
-# 删除裸二进制，仅保留压缩归档
+echo "--- Packaging ${#PLATFORMS[@]} archives (jobs=${JOBS}) ---"
+run_parallel package_platform "${PLATFORMS[@]}" || exit 1
+
+# 删除裸二进制，仅保留压缩归档。
+# linux/amd64 留一份到 build/，供镜像构建直接复用（二进制已内嵌前端与版本信息），
+# 省掉 Dockerfile 里重复的 npm ci 与 go build。
 echo "--- Removing raw binaries ---"
+mkdir -p "${REPO_ROOT}/build"
 for platform in $(all_platforms); do
     name="$(output_name "${VERSION}" "${platform}")"
+    if [[ "${platform}" == "linux/amd64" ]]; then
+        mv -f "${RELEASE_DIR}/${name}" "${REPO_ROOT}/build/yigate-linux-amd64"
+        continue
+    fi
     rm -f "${RELEASE_DIR}/${name}"
 done
 

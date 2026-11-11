@@ -14,7 +14,7 @@ YiGate 是一个 Go 语言实现的轻量级统一代理网关。核心能力是
 
 ## 技术栈
 
-- Go 1.27.3+（`src/go.mod` 要求 go 1.27.0 / toolchain go1.27.3，CI 与构建镜像固定 1.27.3）
+- Go 1.27.4+（`src/go.mod` 要求 go 1.27.0 / toolchain go1.27.4，CI 与构建镜像固定 1.27.4）
 - `fsnotify`：配置文件热加载。
 - `kardianos/service`：系统服务管理。
 - `zap`：结构化日志。
