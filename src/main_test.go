@@ -193,8 +193,10 @@ func TestReleaseSecurityContracts(t *testing.T) {
 	formal := cnb[formalStart:]
 	// cnbcool/attachments 只能把附件挂到“已存在”的 Release 上，
 	// 必须先 create-release 再 upload-artifacts，否则上传阶段 404。
-	create := bytes.Index(formal, []byte("name: create-release"))
-	upload := bytes.Index(formal, []byte("name: upload-artifacts"))
+	// 并行 job 用 YAML 键声明（upload-artifacts:），只有串行 job 才写 name:，
+	// 因此这里匹配任务名本身，靠文本先后判断编排顺序。
+	create := bytes.Index(formal, []byte("create-release"))
+	upload := bytes.Index(formal, []byte("upload-artifacts"))
 	if create < 0 || upload < 0 || create > upload {
 		t.Fatal("formal release must create the release before uploading attachments")
 	}
