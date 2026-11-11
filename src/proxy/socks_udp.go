@@ -31,7 +31,14 @@ type udpRelay struct {
 }
 
 func (r *udpRelay) signalStop() {
-	r.stopOnce.Do(func() { close(r.quit) })
+	r.stopOnce.Do(func() {
+		close(r.quit)
+		// 立刻唤醒阻塞在 ReadFromUDP 上的主循环。只关 quit 的话，中继退出
+		// 最坏要等满一个 30s 读超时，会拖累连接的结束与进程优雅关闭。
+		if r.ln != nil {
+			_ = r.ln.Close()
+		}
+	})
 }
 
 func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {

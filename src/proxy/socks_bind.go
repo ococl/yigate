@@ -127,6 +127,12 @@ func localSOCKS5Bind(client net.Conn, target string, policy *DestinationPolicy, 
 // handleSOCKS5UDPAssociate 实现 SOCKS5 UDP ASSOCIATE 命令。
 // 优先尝试通过 SOCKS5 上游级联；失败时自动回退到本地 UDP 中继。
 func handleSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, target string, mgr *UpstreamManager, router *Router, user string) {
+	// UDP 关联的寿命不应由 TCP 控制连接的握手 deadline 决定：控制连接只用于
+	// 探测客户端是否离开。入口在握手前对整条连接设了 deadline，若不清除，
+	// 握手超时一到，仍在正常转发数据的 UDP 中继会被误判为客户端断开。
+	if err := setConnDeadline(client, 0); err != nil {
+		Logger().Warnw("clear socks5 udp control deadline failed", "error", err)
+	}
 	policy := router.Policy()
 	if mgr != nil && mgr.Socks5AttemptCount(nil) > 0 {
 		upConn, upUDPAddr, _, err := mgr.DialSOCKS5UDP(target, nil)
