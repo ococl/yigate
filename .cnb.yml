@@ -328,6 +328,12 @@ main:
                   git log --no-merges --max-count=60 --pretty='- %s (%h)' "$RANGE"
                 } > LATEST_CHANGELOG.md
                 echo "changelog fallback range: ${RANGE}"
+        # 插件生成的变更日志覆盖上面的兜底内容；插件失败就保留兜底，不阻塞发布。
+        - name: generate-changelog
+          image: cnbcool/changelog
+          settings:
+            latestChangeLogTarget: LATEST_CHANGELOG.md
+          allowFailure: true
         # ---- 镜像先推完再建 Release：Create Release 一旦发布就该有可拉取的镜像 ----
         - name: ship
           jobs:
