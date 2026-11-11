@@ -62,13 +62,22 @@ main:
             # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
             bash scripts/check-release-gates.sh "$BUILD_VERSION"
         # ---- 共同输入：前端产物与 E2E 二进制，后面三路并行都依赖它们 ----
-        - name: webui
+        - name: webui-deps
           image: node:26.13.0-alpine
-          script: |
-            cd web && npm ci \
-              && npm audit --audit-level=high --registry=https://registry.npmjs.org \
-              && npm run type-check && npm run check && npm test \
-              && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+          # 依赖只装一次，后面的构建与检查并行读同一份 node_modules。
+          script: cd web && npm ci
+        - name: webui
+          jobs:
+            build:
+              image: node:26.13.0-alpine
+              # npm run build 内含 type-check；出包后立即嵌入 Go 源码目录。
+              script: |
+                cd web && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+            check:
+              image: node:26.13.0-alpine
+              script: |
+                cd web && npm audit --audit-level=high --registry=https://registry.npmjs.org \
+                  && npm run check && npm test
         - name: e2e-binary
           script: |
             mkdir -p build
@@ -211,13 +220,22 @@ main:
             bash scripts/check-release-configs.sh
             bash scripts/check-platforms-sync.sh
             bash scripts/check-release-gates.sh "$BUILD_VERSION"
-        - name: webui
+        - name: webui-deps
           image: node:26.13.0-alpine
-          script: |
-            cd web && npm ci \
-              && npm audit --audit-level=high --registry=https://registry.npmjs.org \
-              && npm run type-check && npm run check && npm test \
-              && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+          # 依赖只装一次，后面的构建与检查并行读同一份 node_modules。
+          script: cd web && npm ci
+        - name: webui
+          jobs:
+            build:
+              image: node:26.13.0-alpine
+              # npm run build 内含 type-check；出包后立即嵌入 Go 源码目录。
+              script: |
+                cd web && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
+            check:
+              image: node:26.13.0-alpine
+              script: |
+                cd web && npm audit --audit-level=high --registry=https://registry.npmjs.org \
+                  && npm run check && npm test
         - name: e2e-binary
           script: |
             mkdir -p build
