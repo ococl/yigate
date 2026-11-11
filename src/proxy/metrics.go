@@ -107,9 +107,9 @@ func init() {
 	})
 	RegisterMetric(MetricDesc{
 		Name:   "yigate_traffic_bytes_total",
-		Help:   "Total bytes transferred by user, upstream and target.",
+		Help:   "Total bytes transferred by user and upstream.",
 		Type:   MetricCounter,
-		Labels: []string{"direction", "user", "upstream", "target"},
+		Labels: []string{"direction", "user", "upstream"},
 	})
 }
 

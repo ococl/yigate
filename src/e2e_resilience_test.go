@@ -16,6 +16,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -363,5 +364,68 @@ func TestE2EBindUpstreamFailureDoesNotDuplicateReply(t *testing.T) {
 	}
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("expected EOF after relay failure, got %v", err)
+	}
+}
+
+// startTCPEchoServer 启动一个 TCP echo 服务，把收到的数据原样写回。
+func startTCPEchoServer(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp echo: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_, _ = io.Copy(c, c)
+			}(conn)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// TestE2EMetricsDoNotCarryTargetLabel 验收：真实流量产生的指标不含高基数 target 维度。
+func TestE2EMetricsDoNotCarryTargetLabel(t *testing.T) {
+	echoAddr := startTCPEchoServer(t)
+	proxyAddr, _ := startE2EServer(t, func(cfg *Config) {
+		cfg.TrafficAudit.Enabled = true
+	})
+
+	conn, br, _ := socks5Connect(t, proxyAddr, 0x01, echoAddr)
+	rep, _, err := readSocks5Reply(br)
+	if err != nil || rep != 0x00 {
+		t.Fatalf("connect via proxy failed: rep=0x%02x err=%v", rep, err)
+	}
+	if _, err := conn.Write([]byte("metrics-probe")); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	buf := make([]byte, 64)
+	if _, err := io.ReadFull(br, buf[:len("metrics-probe")]); err != nil {
+		t.Fatalf("read echo: %v", err)
+	}
+	_ = conn.Close()
+
+	// 流量统计在连接收尾时落账，稍等再导出。
+	time.Sleep(200 * time.Millisecond)
+	var out bytes.Buffer
+	proxy.ExposeMetrics(&out)
+	found := false
+	for _, line := range strings.Split(out.String(), "\n") {
+		if !strings.HasPrefix(line, "yigate_traffic_bytes_total") {
+			continue
+		}
+		found = true
+		if strings.Contains(line, "target=") {
+			t.Fatalf("traffic metric still carries high-cardinality target label: %s", line)
+		}
+	}
+	if !found {
+		t.Fatal("no yigate_traffic_bytes_total samples exported, test is not exercising anything")
 	}
 }

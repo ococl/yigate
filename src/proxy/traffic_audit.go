@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -379,10 +378,12 @@ func (a *TrafficAccounter) recordAggregates(k TrafficKey, bytesIn, bytesOut, tot
 		}
 	}
 
-	// 更新 Prometheus 指标（target 标签做归一化以限制基数）
-	normalizedTarget := normalizeTargetLabel(k.Target)
-	MetricAdd("yigate_traffic_bytes_total", float64(bytesIn), "direction=client_to_target", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
-	MetricAdd("yigate_traffic_bytes_total", float64(bytesOut), "direction=target_to_client", "user="+k.User, "upstream="+k.Upstream, "target="+normalizedTarget)
+	// 更新 Prometheus 指标。指标只保留 direction/user/upstream 维度：
+	// target 的基数随访问目标数增长，会把注册表（上限 10000 条）打满，
+	// 之后新标签组合被静默丢弃，指标开始失真。目标级明细由流量 history
+	// 与审计接口提供，不放在指标里。
+	MetricAdd("yigate_traffic_bytes_total", float64(bytesIn), "direction=client_to_target", "user="+k.User, "upstream="+k.Upstream)
+	MetricAdd("yigate_traffic_bytes_total", float64(bytesOut), "direction=target_to_client", "user="+k.User, "upstream="+k.Upstream)
 
 	return nil
 }
@@ -578,29 +579,4 @@ func targetHostFromAddr(addr string) string {
 		return addr
 	}
 	return host
-}
-
-// normalizeTargetLabel 归一化目标域名用于 Prometheus 标签，防止高基数。
-// 截断超长域名，IP 地址保持原样。
-const maxTargetLabelLen = 63
-
-func normalizeTargetLabel(target string) string {
-	if target == "" {
-		return ""
-	}
-	// IP 地址直接返回（基数可控）
-	if net.ParseIP(target) != nil {
-		return target
-	}
-	if len(target) <= maxTargetLabelLen {
-		return target
-	}
-	// 保留域名后缀（TLD 部分），截断中间
-	dotIdx := strings.LastIndex(target, ".")
-	if dotIdx > 0 && len(target)-dotIdx <= maxTargetLabelLen/2 {
-		suffix := target[dotIdx:]
-		prefix := target[:maxTargetLabelLen-len(suffix)-3]
-		return prefix + "..." + suffix
-	}
-	return target[:maxTargetLabelLen-3] + "..."
 }

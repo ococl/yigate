@@ -317,35 +317,6 @@ func TestTargetHostFromAddr(t *testing.T) {
 	}
 }
 
-func TestNormalizeTargetLabel(t *testing.T) {
-	tests := []struct {
-		name   string
-		target string
-		want   string
-	}{
-		{"empty", "", ""},
-		{"short domain", "example.com", "example.com"},
-		{"ipv4", "1.2.3.4", "1.2.3.4"},
-		{"ipv6", "::1", "::1"},
-		{"exactly 63 chars", strings.Repeat("a", 63), strings.Repeat("a", 63)},
-		{"64 chars truncated", strings.Repeat("a", 64), strings.Repeat("a", 60) + "..."},
-		{"long domain with tld preserved", strings.Repeat("a", 60) + ".com", strings.Repeat("a", 57) + "..." + ".com"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeTargetLabel(tt.target)
-			if len(got) > maxTargetLabelLen {
-				t.Errorf("normalizeTargetLabel(%q) = %q (len=%d), exceeds max %d", tt.target, got, len(got), maxTargetLabelLen)
-			}
-			if tt.name != "64 chars truncated" && tt.name != "long domain with tld preserved" {
-				if got != tt.want {
-					t.Errorf("normalizeTargetLabel(%q) = %q, want %q", tt.target, got, tt.want)
-				}
-			}
-		})
-	}
-}
-
 func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 	// Reset registry for clean test
 	registry.mu.Lock()
@@ -362,12 +333,12 @@ func TestTrafficAccounterPrometheusMetrics(t *testing.T) {
 	key := TrafficKey{User: "alice", Upstream: "up1", Target: "example.com"}
 	_ = a.Record(key, 100, 200)
 
-	// Check that Prometheus metrics were recorded
-	inVal := MetricValue("yigate_traffic_bytes_total", "direction=client_to_target", "user=alice", "upstream=up1", "target=example.com")
+	// Check that Prometheus metrics were recorded（不含高基数 target 维度）
+	inVal := MetricValue("yigate_traffic_bytes_total", "direction=client_to_target", "user=alice", "upstream=up1")
 	if inVal != 100 {
 		t.Errorf("expected in=100, got %f", inVal)
 	}
-	outVal := MetricValue("yigate_traffic_bytes_total", "direction=target_to_client", "user=alice", "upstream=up1", "target=example.com")
+	outVal := MetricValue("yigate_traffic_bytes_total", "direction=target_to_client", "user=alice", "upstream=up1")
 	if outVal != 200 {
 		t.Errorf("expected out=200, got %f", outVal)
 	}
