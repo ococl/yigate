@@ -27,13 +27,16 @@ func handleSOCKS5Bind(client net.Conn, target string, mgr *UpstreamManager, rout
 		upConn, listenAddr, _, err := mgr.DialSOCKS5Bind(target, nil)
 		if err == nil {
 			defer upConn.Close()
-			if err := relaySOCKS5Bind(client, upConn, listenAddr, user); err == nil {
-				return
+			// 级联中继一旦开始就可能已经向客户端回过第一次响应，此时再回退
+			// 本地 BIND 会重复回复，让客户端拿到两个不同的监听地址。
+			// 所以中继失败直接结束本次请求，由客户端重新发起。
+			if err := relaySOCKS5Bind(client, upConn, listenAddr, user); err != nil {
+				Logger().Warnw("socks5 bind upstream relay failed", "error", err)
 			}
-			Logger().Warnw("socks5 bind upstream relay failed", "error", err)
-		} else {
-			Logger().Warnw("socks5 bind upstream failed", "target", target, "error", err)
+			return
 		}
+		// 还没回复过客户端，拨号/握手失败可以安全回退到本地实现。
+		Logger().Warnw("socks5 bind upstream failed", "target", target, "error", err)
 	}
 	// 回退：本地 BIND
 	localSOCKS5Bind(client, target, router.Policy(), user)
@@ -148,14 +151,15 @@ func handleSOCKS5UDPAssociate(client net.Conn, clientReader *bufio.Reader, targe
 	if mgr != nil && mgr.Socks5AttemptCount(nil) > 0 {
 		upConn, upUDPAddr, _, err := mgr.DialSOCKS5UDP(target, nil)
 		if err == nil {
-			if err := relaySOCKS5UDPAssociate(client, clientReader, upConn, upUDPAddr, policy); err == nil {
-				return
+			// 控制连接随中继结束一并关闭，成功路径也不能漏。
+			defer upConn.Close()
+			// 同 BIND：已回复过客户端就不再回退，避免重复响应。
+			if err := relaySOCKS5UDPAssociate(client, clientReader, upConn, upUDPAddr, policy); err != nil {
+				Logger().Warnw("socks5 udp associate upstream relay failed", "error", err)
 			}
-			Logger().Warnw("socks5 udp associate upstream relay failed", "error", err)
-			upConn.Close()
-		} else {
-			Logger().Warnw("socks5 udp associate upstream failed", "target", target, "error", err)
+			return
 		}
+		Logger().Warnw("socks5 udp associate upstream failed", "target", target, "error", err)
 	}
 	// 回退：本地 UDP 中继
 	localSOCKS5UDPAssociate(client, clientReader, target, policy)

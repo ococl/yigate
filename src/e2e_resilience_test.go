@@ -295,3 +295,73 @@ func TestE2EUDPSessionCapKeepsFDUsageBounded(t *testing.T) {
 		t.Fatalf("fd usage grew by %d after 192 distinct udp targets, session cap not effective", grew)
 	}
 }
+
+// startSocks5BindThenCloseUpstream 模拟一个支持 BIND 的 SOCKS5 上游：
+// 正常完成握手并回复第一次 BIND 响应，随后直接关闭连接，永不给第二次响应。
+func startSocks5BindThenCloseUpstream(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen fake upstream: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				br := bufio.NewReader(c)
+				head := make([]byte, 2)
+				if _, err := io.ReadFull(br, head); err != nil {
+					return
+				}
+				methods := make([]byte, int(head[1]))
+				if _, err := io.ReadFull(br, methods); err != nil {
+					return
+				}
+				if _, err := c.Write([]byte{0x05, 0x00}); err != nil {
+					return
+				}
+				cmd, _, err := readSocks5Reply(br)
+				if err != nil || cmd != 0x02 {
+					return
+				}
+				// 第一次响应：绑定地址 127.0.0.1:8080，随后断开。
+				_, _ = c.Write([]byte{0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x1f, 0x90})
+			}(conn)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// TestE2EBindUpstreamFailureDoesNotDuplicateReply 验收：级联 BIND 已经开始
+// （客户端已收到第一次响应）后失败，不能再回退本地实现重复回复。
+func TestE2EBindUpstreamFailureDoesNotDuplicateReply(t *testing.T) {
+	upAddr := startSocks5BindThenCloseUpstream(t)
+	proxyAddr, _ := startE2EServer(t, func(cfg *Config) {
+		cfg.Upstreams = []proxy.UpstreamConfig{{Name: "u", URL: "socks5://" + upAddr}}
+	})
+
+	conn, br, _ := socks5Connect(t, proxyAddr, 0x02, "198.51.100.7:8080")
+	defer conn.Close()
+	rep, _, err := readSocks5Reply(br)
+	if err != nil {
+		t.Fatalf("read first bind reply: %v", err)
+	}
+	if rep != 0x00 {
+		t.Fatalf("expected success first reply, got rep=0x%02x", rep)
+	}
+	// 中继失败后应直接结束：读到 EOF，而不是第二次 BIND 响应。
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 32)
+	n, err := br.Read(buf)
+	if err == nil {
+		t.Fatalf("unexpected %d extra bytes after first bind reply (duplicate reply?): %x", n, buf[:n])
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF after relay failure, got %v", err)
+	}
+}
