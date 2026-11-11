@@ -1,18 +1,22 @@
 package proxy
 
 import (
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
 	"strings"
+
+	"github.com/emmansun/gmsm/sm3"
 )
 
 // secureTokenEqual 先计算定长摘要再做常量时间比较。
 // 直接对原文使用 ConstantTimeCompare 会因长度不同提前返回，泄露令牌长度。
+//
+// 摘要算法使用国密 SM3：这里只用于定长化与常量时间比较，不承担存储或完整性职责，
+// 换成 SM3 属于合规口径统一，不构成本身的安全增强。
 func secureTokenEqual(provided, expected string) bool {
-	a := sha256.Sum256([]byte(provided))
-	b := sha256.Sum256([]byte(expected))
+	a := sm3.Sum([]byte(provided))
+	b := sm3.Sum([]byte(expected))
 	return subtle.ConstantTimeCompare(a[:], b[:]) == 1
 }
 

@@ -85,6 +85,18 @@ export const layout = {
   logoutConfirm: 'Sign out of the console?',
   logoutOk: 'Sign out',
   language: 'Language',
+  certExpiryTitle: 'A certificate expires soon',
+  certExpiryExpiredTitle: 'A certificate has expired',
+  certExpiryDaysLeft: '{days} days left',
+  certExpiryExpiredAt: 'expired on {date}',
+  certExpiryMore: '{count} more certificate(s) need attention',
+  certKinds: {
+    listener: 'listener certificate',
+    gmSign: 'TLCP signing certificate',
+    gmEnc: 'TLCP encryption certificate',
+    clientCa: 'client CA',
+    upstreamCa: 'upstream CA',
+  },
 }
 
 export const login = {

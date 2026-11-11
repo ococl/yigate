@@ -141,7 +141,7 @@ func viaSOCKS5Upstream(req *http.Request, up *Upstream) (*http.Response, error) 
 }
 
 func dialRaw(up *Upstream) (net.Conn, error) {
-	return dialProxyConn(up.urlForType(up.primaryProxyType()), ProxyDialTimeout())
+	return dialProxyConnWith(up, up.urlForType(up.primaryProxyType()), ProxyDialTimeout())
 }
 
 func writeHTTPRequest(w io.Writer, req *http.Request, viaUpstream bool, up *Upstream) error {

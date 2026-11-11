@@ -19,6 +19,11 @@ export default {
     lastCheck: 'Last check',
     operations: 'Actions',
   },
+  tlsProtocols: {
+    auto: 'auto (GM first, fall back to standard TLS)',
+    gm: 'gm (force TLCP)',
+    tls: 'tls (standard TLS)',
+  },
   healthTypes: {
     inherit: 'Inherit default (inferred from type)',
     tcp: 'tcp (TCP connect)',
@@ -38,6 +43,11 @@ export default {
       'Selection algorithm inside a priority group. weighted_round_robin rotates by weight; least_connections picks the fewest active connections; consistent_hash hashes the target; source_ip_hash hashes the client address.',
     healthCheck:
       'Empty numbers inherit the global defaults. An upstream is marked down once probe failures reach the threshold and comes back after enough successes; only node-level hard failures (connect/TLS/auth) from business traffic are counted, so unreachable targets are not mistaken for a broken upstream.',
+    tlsProtocol:
+      'Only applies to https upstreams. auto tries TLCP first, falls back to standard TLS and remembers the result so later connections skip the probe; gm forces TLCP and fails when the handshake is refused; tls keeps standard TLS.',
+    tlsCaFile:
+      'CA bundle used to verify the upstream chain (relative to the config directory). ${ENV} placeholders are expanded; leave empty to use the system roots.',
+    tlsServerName: 'Overrides SNI and the certificate hostname check when it differs from the connect address.',
   },
   status: {
     disabled: 'Disabled',
@@ -89,6 +99,11 @@ export default {
     priority: 'Priority',
     weight: 'Weight',
     strategy: 'Strategy',
+    tlsProtocol: 'Transport protocol',
+    tlsCaFile: 'CA certificate',
+    tlsCaFilePlaceholder: 'e.g. certs/gm-ca.crt, empty uses system roots',
+    tlsServerName: 'Hostname check',
+    tlsServerNamePlaceholder: 'e.g. gw.example.com',
     basicTab: 'Basic info',
     healthCheckSection: 'Health check',
     probeType: 'Probe type',
@@ -117,6 +132,7 @@ export default {
     typesRequired: 'Select at least one type',
     targetInvalid: 'Deep probe target must be host:port',
     pathInvalid: 'Probe path must start with /',
+    tlsProtocolRequiresHttps: 'Forcing gm is only supported for https upstreams',
     updated: 'Upstream updated',
     added: 'Upstream added',
     deleted: 'Upstream deleted',

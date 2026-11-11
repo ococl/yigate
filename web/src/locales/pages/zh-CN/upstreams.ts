@@ -19,6 +19,11 @@ export default {
     lastCheck: '最后检查',
     operations: '操作',
   },
+  tlsProtocols: {
+    auto: 'auto（国密优先，失败回落标准 TLS）',
+    gm: 'gm（强制国密 TLCP）',
+    tls: 'tls（标准 TLS）',
+  },
   healthTypes: {
     inherit: '继承默认（按上游类型推断）',
     tcp: 'tcp（TCP 连接）',
@@ -38,6 +43,10 @@ export default {
       '同一优先级组内的选择算法。weighted_round_robin 按权重轮询；least_connections 选活动连接最少；consistent_hash 按目标地址哈希；source_ip_hash 按源地址哈希。',
     healthCheck:
       '留空的数值表示继承全局默认值。探测失败达到阈值后上游会被标记为不可用，恢复成功达到阈值后重新启用；业务流量里只有连不上/认证失败这类节点级硬失败才计入，避免把目标站点不可达误判为上游故障。',
+    tlsProtocol:
+      '仅 https 上游生效。auto 先尝试国密 TLCP，失败后回落标准 TLS 并记忆结果，后续连接不再重复试探；gm 强制国密，握手失败即视为不可用；tls 保持标准 TLS。',
+    tlsCaFile: '校验上游证书链的 CA 文件路径（相对路径基于配置文件目录），可写 ${ENV} 引用环境变量；留空使用系统根证书。',
+    tlsServerName: '覆盖 SNI 与证书校验主机名，上游证书主题与连接地址不一致时填写。',
   },
   status: {
     disabled: '已禁用',
@@ -87,6 +96,11 @@ export default {
     priority: '优先级',
     weight: '权重',
     strategy: '策略',
+    tlsProtocol: '传输协议',
+    tlsCaFile: 'CA 证书',
+    tlsCaFilePlaceholder: '如 certs/gm-ca.crt，留空使用系统根证书',
+    tlsServerName: '校验主机名',
+    tlsServerNamePlaceholder: '如 gw.example.com',
     basicTab: '基本信息',
     healthCheckSection: '健康检查',
     probeType: '探测方式',
@@ -115,6 +129,7 @@ export default {
     typesRequired: '请选择至少一种类型',
     targetInvalid: '深度探测目标需为 host:port 格式',
     pathInvalid: '探测路径需以 / 开头',
+    tlsProtocolRequiresHttps: '强制国密（gm）仅适用于 https 上游',
     updated: '更新成功',
     added: '添加成功',
     deleted: '删除成功',

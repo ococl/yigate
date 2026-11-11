@@ -17,6 +17,7 @@ import {
   checkAllUpstreams,
 } from '@/api/upstreams'
 import { getStatus } from '@/api/system'
+import { listCertificateFiles } from '@/api/settings'
 import { formatDateTime } from '@/utils/datetime'
 import type {
   UpstreamInfo,
@@ -88,6 +89,10 @@ const form = ref({
   weight: 1,
   strategy: 'weighted_round_robin',
   health_check: emptyHealthCheck(),
+  // https 上游的传输层协议：auto 表示国密优先、失败回落标准 TLS。
+  tls_protocol: 'auto',
+  tls_ca_file: '',
+  tls_server_name: '',
 })
 
 // 编辑态下用于判断凭据是否被改动：密码从不回显，留空即表示保持原密码
@@ -129,6 +134,11 @@ watch(
 const typeOptions = ['http', 'https', 'socks5', 'socks5h']
 const strategyOptions = ['weighted_round_robin', 'least_connections', 'consistent_hash', 'source_ip_hash']
 const strategySelectOptions = strategyOptions.map((s) => ({ label: s, value: s }))
+const tlsProtocolOptions = computed(() => [
+  { label: t('pages.upstreams.tlsProtocols.auto'), value: 'auto' },
+  { label: t('pages.upstreams.tlsProtocols.gm'), value: 'gm' },
+  { label: t('pages.upstreams.tlsProtocols.tls'), value: 'tls' },
+])
 const healthCheckTypeOptions = computed(() => [
   { label: t('pages.upstreams.healthTypes.inherit'), value: '' },
   { label: t('pages.upstreams.healthTypes.tcp'), value: 'tcp' },
@@ -143,6 +153,9 @@ const typeHelp = computed(() => t('pages.upstreams.helps.type'))
 const priorityHelp = computed(() => t('pages.upstreams.helps.priority'))
 const weightHelp = computed(() => t('pages.upstreams.helps.weight'))
 const strategyHelp = computed(() => t('pages.upstreams.helps.strategy'))
+const tlsProtocolHelp = computed(() => t('pages.upstreams.helps.tlsProtocol'))
+const tlsCaFileHelp = computed(() => t('pages.upstreams.helps.tlsCaFile'))
+const tlsServerNameHelp = computed(() => t('pages.upstreams.helps.tlsServerName'))
 const healthCheckHelp = computed(() => t('pages.upstreams.helps.healthCheck'))
 
 const columns = computed(() => [
@@ -189,7 +202,31 @@ async function fetchData() {
   }
 }
 
+// 证书文件列表只在第一次打开弹窗时拉取：路径补全属于体验增强，
+// 失败时静默降级为手动输入，不打断表单填写。
+const certFileOptions = ref<{ value: string }[]>([])
+let certFilesLoaded = false
+
+async function loadCertFileOptions() {
+  if (certFilesLoaded) return
+  try {
+    const files = await listCertificateFiles({ silent: true })
+    certFileOptions.value = files.map((file) => ({ value: file }))
+    certFilesLoaded = true
+  } catch {
+    // 下次打开弹窗再试
+  }
+}
+
+// 路径匹配对大小写不敏感，输入 cur/CERTS 都能命中。
+function filterCertFileOption(input: string, option?: { value: string }) {
+  const keyword = input.trim().toLowerCase()
+  if (!keyword) return true
+  return (option?.value || '').toLowerCase().includes(keyword)
+}
+
 function showAddModal() {
+  void loadCertFileOptions()
   isEdit.value = false
   editingName.value = ''
   originalUrl.value = ''
@@ -208,11 +245,15 @@ function showAddModal() {
     weight: 1,
     strategy: 'weighted_round_robin',
     health_check: emptyHealthCheck(),
+    tls_protocol: 'auto',
+    tls_ca_file: '',
+    tls_server_name: '',
   }
   modalVisible.value = true
 }
 
 function showEditModal(record: UpstreamInfo) {
+  void loadCertFileOptions()
   isEdit.value = true
   editingName.value = record.name
   const hc = record.health_check || emptyHealthCheck()
@@ -242,6 +283,9 @@ function showEditModal(record: UpstreamInfo) {
       failure_threshold: hc.failure_threshold || 0,
       success_threshold: hc.success_threshold || 0,
     },
+    tls_protocol: record.tls_protocol || 'auto',
+    tls_ca_file: record.tls_ca_file || '',
+    tls_server_name: record.tls_server_name || '',
   }
   modalVisible.value = true
 }
@@ -264,6 +308,9 @@ function validateForm(): {
   if (!form.value.url.trim()) errors.url = t('pages.upstreams.messages.urlRequired')
   else if (!urlUnchanged() && !/^(https?|socks5h?):\/\/.+/i.test(form.value.url.trim())) {
     errors.url = t('pages.upstreams.messages.urlInvalid')
+  } else if (form.value.tls_protocol === 'gm' && !/^https:\/\//i.test(form.value.url.trim())) {
+    // TLCP 只承载于 https 上游；socks5 等协议没有可协商的传输层。
+    errors.url = t('pages.upstreams.messages.tlsProtocolRequiresHttps')
   }
 
   // 用户名与密码必须成对提供；编辑态留空密码表示沿用原密码，仅当原本也没有密码时要求填写
@@ -330,6 +377,9 @@ async function handleSubmit() {
         weight: form.value.weight,
         strategy: form.value.strategy,
         health_check: healthCheck,
+        tls_protocol: form.value.tls_protocol,
+        tls_ca_file: form.value.tls_ca_file.trim(),
+        tls_server_name: form.value.tls_server_name.trim(),
       }
       const username = form.value.username.trim()
       const password = form.value.password
@@ -359,6 +409,9 @@ async function handleSubmit() {
         weight: form.value.weight,
         strategy: form.value.strategy,
         health_check: healthCheck,
+        tls_protocol: form.value.tls_protocol,
+        tls_ca_file: form.value.tls_ca_file.trim() || undefined,
+        tls_server_name: form.value.tls_server_name.trim() || undefined,
       }
       await addUpstream(data)
       message.success(t('pages.upstreams.messages.added'))
@@ -926,6 +979,54 @@ useVisiblePolling(fetchRuntimeStatus, 15000)
             <a-col :span="8">
               <a-form-item html-for="up-strategy" :label="t('pages.upstreams.form.strategy')" :tooltip="strategyHelp">
                 <a-select id="up-strategy" v-model:value="form.strategy" :options="strategySelectOptions" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+
+          <a-row :gutter="16">
+            <a-col :xs="24" :sm="8">
+              <a-form-item
+                html-for="up-tls-protocol"
+                :label="t('pages.upstreams.form.tlsProtocol')"
+                :tooltip="tlsProtocolHelp"
+              >
+                <a-select
+                  id="up-tls-protocol"
+                  v-model:value="form.tls_protocol"
+                  data-testid="up-tls-protocol"
+                  :options="tlsProtocolOptions"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="8">
+              <a-form-item
+                html-for="up-tls-ca"
+                :label="t('pages.upstreams.form.tlsCaFile')"
+                :tooltip="tlsCaFileHelp"
+              >
+                <a-auto-complete
+                  id="up-tls-ca"
+                  v-model:value="form.tls_ca_file"
+                  data-testid="up-tls-ca"
+                  :options="certFileOptions"
+                  :placeholder="t('pages.upstreams.form.tlsCaFilePlaceholder')"
+                  :filter-option="filterCertFileOption"
+                  @focus="loadCertFileOptions"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :xs="24" :sm="8">
+              <a-form-item
+                html-for="up-tls-sni"
+                :label="t('pages.upstreams.form.tlsServerName')"
+                :tooltip="tlsServerNameHelp"
+              >
+                <a-input
+                  id="up-tls-sni"
+                  v-model:value="form.tls_server_name"
+                  data-testid="up-tls-sni"
+                  :placeholder="t('pages.upstreams.form.tlsServerNamePlaceholder')"
+                />
               </a-form-item>
             </a-col>
           </a-row>

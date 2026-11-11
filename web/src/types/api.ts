@@ -26,6 +26,17 @@ export interface ProxyEndpoint {
   tls?: boolean
 }
 
+/** 配置中引用的证书及其有效期，用于顶部到期横幅。 */
+export interface CertificateStatus {
+  file: string
+  kind: string
+  subject: string
+  is_ca: boolean
+  not_after: string
+  days_left: number
+  expired: boolean
+}
+
 export interface StatusSnapshot {
   status: string
   listen: string
@@ -38,6 +49,7 @@ export interface StatusSnapshot {
   ready?: boolean
   upstreams?: UpstreamStatus[]
   proxy_endpoints?: ProxyEndpoint[]
+  certificates?: CertificateStatus[]
   version: string
   commit: string
   build_time: string
@@ -95,6 +107,11 @@ export interface UpstreamInfo {
   weight: number
   strategy: string
   health_check: HealthCheckConfig
+  /** https 上游的传输层协议：auto（默认，国密优先）/ gm（强制国密 TLCP）/ tls */
+  tls_protocol?: string
+  tls_ca_file?: string
+  tls_server_name?: string
+  tls_insecure_skip_verify?: boolean
 }
 
 export interface UpstreamListResponse {
@@ -112,6 +129,9 @@ export interface AddUpstreamRequest {
   weight: number
   strategy: string
   health_check?: HealthCheckConfig
+  tls_protocol?: string
+  tls_ca_file?: string
+  tls_server_name?: string
 }
 
 export interface UpdateUpstreamRequest {
@@ -125,6 +145,9 @@ export interface UpdateUpstreamRequest {
   weight?: number
   strategy?: string
   health_check?: HealthCheckConfig
+  tls_protocol?: string // 不传表示保持原值
+  tls_ca_file?: string
+  tls_server_name?: string
 }
 
 export interface UpstreamCheckResult {

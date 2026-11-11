@@ -609,4 +609,42 @@ Count Profile
       },
     ],
   },
+  {
+    key: 'certificates',
+    title: '证书',
+    description:
+      '列出配置文件所在目录内可用于 tls_ca_file 的证书文件，供 WebUI 的路径输入补全。只返回文件名，不读取内容；不跟随符号链接目录。',
+    endpoints: [
+      {
+        id: 'certificates-list',
+        method: 'GET',
+        path: '/api/v1/config/certificates',
+        summary: '列出配置目录内的证书文件',
+        description:
+          '扫描配置文件所在目录（最多 4 层、最多 500 个文件），返回 .crt/.cer/.pem 文件的相对路径，按字典序排列。目录由配置文件位置决定，不接受调用方指定。',
+        auth: true,
+        authNote: '当 management_auth_token 非空时需要认证',
+        params: [],
+        responseBody: `{
+  "files": [
+    "certs/gm/ca.crt",
+    "certs/gm/enc.crt",
+    "certs/gm/sign.crt"
+  ]
+}`,
+        example: {
+          request: 'curl http://127.0.0.1:8890/api/v1/config/certificates',
+          response: `{
+  "files": ["certs/gm/ca.crt", "certs/gm/enc.crt", "certs/gm/sign.crt"]
+}`,
+        },
+        statusCodes: [
+          { code: 200, description: '返回证书文件列表' },
+          { code: 401, description: '未认证' },
+          { code: 405, description: '非 GET 方法' },
+          { code: 501, description: '配置编辑器未启用' },
+        ],
+      },
+    ],
+  },
 ]

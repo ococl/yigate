@@ -22,5 +22,10 @@ fi
 # 复制到临时目录后再启动，避免污染仓库内被跟踪的测试配置。
 WORK_DIR="$(mktemp -d)"
 cp "${CONFIG}" "${WORK_DIR}/config.yml"
+
+# 上游国密字段用例需要一份真实存在的 CA 文件（管理 API 会 stat 校验）。
+# 放在配置目录下，用例里填相对路径即可，同时顺带覆盖 gencert 子命令。
+"${BIN}" gencert -o "${WORK_DIR}/certs/gm" -d localhost >/dev/null
+
 echo "webui e2e config: ${WORK_DIR}/config.yml"
 exec "${BIN}" -config "${WORK_DIR}/config.yml" run

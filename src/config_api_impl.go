@@ -136,6 +136,17 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 	// 若直接作用在原配置上，每次保存都会把用户的单监听配置改写成数组形态。
 	probe := *cfg
 	probe.Listeners = append([]ListenerConfig(nil), cfg.Listeners...)
+	probe.Upstreams = append([]proxy.UpstreamConfig(nil), cfg.Upstreams...)
+	// 路径按配置文件目录解析后再校验：WebUI 可能以相对路径提交证书文件，
+	// 而进程工作目录与配置目录不一定相同。这里只改副本，落盘仍保留用户写法。
+	baseDir := filepath.Dir(e.cfgPath)
+	resolveTLSPaths(&probe.TLS, baseDir)
+	for i := range probe.Listeners {
+		resolveTLSPaths(&probe.Listeners[i].TLS, baseDir)
+	}
+	for i := range probe.Upstreams {
+		resolvePath(&probe.Upstreams[i].TLSRootCAFile, baseDir)
+	}
 	if err := validateConfig(&probe); err != nil {
 		return err
 	}
@@ -200,6 +211,13 @@ func (e *configEditor) saveAndApply(cfg *Config) error {
 // 避免通过管理 API 写入的配置与手写 YAML 采用不同标准。
 func validateUpstream(up proxy.UpstreamConfig) error {
 	return validateUpstreamConfig(up)
+}
+
+// withResolvedPaths 返回按配置文件目录解析过路径的副本，仅用于校验。
+// 落盘仍保留用户输入的相对路径，避免 WebUI 改动把配置变成依赖本机绝对路径。
+func withResolvedPaths(up proxy.UpstreamConfig, baseDir string) proxy.UpstreamConfig {
+	resolvePath(&up.TLSRootCAFile, baseDir)
+	return up
 }
 
 // allowedRuleTypes 与 proxy.CompileRouter 支持的规则类型保持一致。
@@ -300,7 +318,7 @@ func (e *configEditor) ListUpstreams() []proxy.UpstreamConfig {
 
 func (e *configEditor) AddUpstream(up proxy.UpstreamConfig) error {
 	up.Name = strings.TrimSpace(up.Name)
-	if err := validateUpstream(up); err != nil {
+	if err := validateUpstream(withResolvedPaths(up, filepath.Dir(e.cfgPath))); err != nil {
 		return err
 	}
 	cfg, err := e.loadRawConfig()
@@ -336,7 +354,7 @@ func nextUpstreamName(ups []proxy.UpstreamConfig) string {
 }
 
 func (e *configEditor) UpdateUpstream(name string, up proxy.UpstreamConfig) error {
-	if err := validateUpstream(up); err != nil {
+	if err := validateUpstream(withResolvedPaths(up, filepath.Dir(e.cfgPath))); err != nil {
 		return err
 	}
 	cfg, err := e.loadRawConfig()
@@ -980,6 +998,12 @@ func orEmptyInts(in []int) []int {
 		return []int{}
 	}
 	return in
+}
+
+// ListCertificateFiles 返回配置文件所在目录内的证书文件，供 WebUI 选择 CA。
+// 目录由配置文件位置决定，调用方无法指定，因此不存在路径穿越问题。
+func (e *configEditor) ListCertificateFiles() ([]string, error) {
+	return listCertificateFiles(filepath.Dir(e.cfgPath))
 }
 
 // UpdateSettings 应用全局设置的部分更新。

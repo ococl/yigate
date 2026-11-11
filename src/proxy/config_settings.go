@@ -154,3 +154,24 @@ func (m *ManagementServer) handleSettingsAPI(w http.ResponseWriter, r *http.Requ
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
+
+// handleCertificatesAPI 处理 GET /api/v1/config/certificates。
+// 只列出配置目录内的证书文件名，供 WebUI 的 CA 路径输入做补全；
+// 目录由编辑器固定，不接受调用方指定，避免变成任意目录探测接口。
+func (m *ManagementServer) handleCertificatesAPI(w http.ResponseWriter, r *http.Request, editor ConfigEditor) {
+	MetricInc("yigate_management_requests_total", "path=/api/v1/config/certificates")
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	files, err := editor.ListCertificateFiles()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if files == nil {
+		files = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"files": files})
+}

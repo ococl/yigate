@@ -23,8 +23,14 @@ listeners:
     max_connections: 1024
     # TLS 服务端终止：配置后该端口升级为 HTTPS/SOCKS5 over TLS，并可选 mTLS 客户端认证。
     # tls:
+    #   # protocol: auto  # auto（默认，国密优先回落）/ gm（强制国密 TLCP）/ tls（标准 TLS）
     #   cert_file: "certs/server.crt"
     #   key_file: "certs/server.key"
+    #   # 国密 TLCP 需要独立的 SM2 双证书，不能与标准 TLS 证书复用：
+    #   # gm_sign_cert_file: "certs/sign.crt"
+    #   # gm_sign_key_file: "certs/sign.key"
+    #   # gm_enc_cert_file: "certs/enc.crt"
+    #   # gm_enc_key_file: "certs/enc.key"
     #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
   - listen: "127.0.0.1:4480"
     # users:
@@ -75,8 +81,19 @@ webui:
 #   确认风险后带 ?force=true 重试，服务端会写入 allow_anonymous_proxy: true 回落匿名。
 # TLS 服务端终止：配置后代理端口升级为 HTTPS/SOCKS5 over TLS，并可选 mTLS 客户端认证。
 # tls:
+#   # 传输层协议：auto（默认，TLCP 优先并回落标准 TLS）/ gm（强制国密）/ tls（标准 TLS）
+#   # protocol: auto
 #   cert_file: "certs/server.crt"
 #   key_file: "certs/server.key"
+#   # 国密 TLCP（GB/T 38636-2020）使用 SM2 双证书，与标准 TLS 证书不能复用；
+#   # auto 模式同时配置两套证书才会在同一个端口上自适应两种协议。
+#   # gm_sign_cert_file: "certs/sign.crt"
+#   # gm_sign_key_file: "certs/sign.key"
+#   # gm_sign_key_password: "${YIGATE_GM_SIGN_KEY_PASSWORD}"  # 加密 PKCS#8 私钥口令
+#   # gm_enc_cert_file: "certs/enc.crt"
+#   # gm_enc_key_file: "certs/enc.key"
+#   # gm_enc_key_password: "${YIGATE_GM_ENC_KEY_PASSWORD}"
+#   # cipher_suites: ["ECDHE_SM4_GCM_SM3", "ECC_SM4_GCM_SM3"]  # 留空使用内置优先级
 #   client_ca_file: "certs/ca.crt"  # 非空时强制要求客户端证书
 users:
   # username: "your-password"  # 留空表示允许匿名代理；需认证时在此或 WebUI 添加
@@ -100,6 +117,11 @@ upstreams:
     weight: 5
     # strategy 可选：weighted_round_robin（默认）、least_connections、consistent_hash、source_ip_hash
     strategy: "weighted_round_robin"
+    # https 上游的传输层协议：auto（默认，TLCP 优先并记忆协商结果）/ gm（强制国密）/ tls
+    # tls_protocol: "auto"
+    # tls_ca_file: "certs/upstream-ca.crt"   # 校验证书链，留空使用系统根证书
+    # tls_server_name: "upstream.example.com" # 覆盖 SNI 与证书校验主机名
+    # tls_insecure_skip_verify: false        # 仅用于本地调试
     # health_check 可选：未配置时按全局 check_interval 与默认探测。
     # socks5/socks5h 上游默认执行真实 SOCKS5 协议握手探测（含认证），而非裸 TCP。
     # 未配置 target 时为"存活探测"：只验证上游能按协议正确应答，

@@ -3,13 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -125,7 +122,35 @@ func (s *Server) statusSnapshot() proxy.StatusSnapshot {
 		Ready:          ready,
 		Upstreams:      mgr.UpstreamStatuses(),
 		ProxyEndpoints: buildProxyEndpoints(cur.Listeners),
+		Certificates:   s.certificateStatuses(cur),
 	}
+}
+
+// certificateStatuses 把配置中引用的证书映射为状态 API 的表示。
+// 每次轮询都会读一遍证书文件：数量是个位数到几十个，开销远小于一次配置解析，
+// 换来的是"运维刚换完证书，刷新页面就能看到新有效期"。
+func (s *Server) certificateStatuses(cfg *Config) []proxy.CertificateStatus {
+	if cfg == nil {
+		return nil
+	}
+	now := time.Now()
+	findings := collectCertificates(cfg, filepath.Dir(s.cfgPath), now)
+	if len(findings) == 0 {
+		return nil
+	}
+	out := make([]proxy.CertificateStatus, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, proxy.CertificateStatus{
+			File:     f.Path,
+			Kind:     f.Kind,
+			Subject:  f.Subject,
+			IsCA:     f.IsCA,
+			NotAfter: f.NotAfter,
+			DaysLeft: int(f.NotAfter.Sub(now).Hours() / 24),
+			Expired:  f.Expired,
+		})
+	}
+	return out
 }
 
 // reloadConfig 从磁盘重新加载并应用配置，供管理 API 使用。
@@ -181,6 +206,9 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 	if err := normalizeListeners(cfg, baseDir); err != nil {
 		return err
 	}
+	// 证书临近到期不阻断启动，但要能提前看到；热加载后重新检查，
+	// 便于 WebUI 换上短周期证书时立刻得到提醒。
+	warnExpiringCertificates(cfg, baseDir)
 
 	mgr, err := proxy.NewUpstreamManager(cfg.Upstreams)
 	if err != nil {
@@ -296,7 +324,7 @@ func (s *Server) applyConfig(cfg *Config, initialLoad bool) error {
 		for _, lc := range cfg.Listeners {
 			oldLn := s.currentListener(lc.Listen)
 			oldLc := oldListenerConfig(oldState, lc.Listen)
-			if oldLn != nil && oldLc != nil && oldLc.Listen == lc.Listen && oldLc.TLS == lc.TLS && oldLc.TProxy == lc.TProxy {
+			if oldLn != nil && oldLc != nil && oldLc.Listen == lc.Listen && tlsConfigEqual(oldLc.TLS, lc.TLS) && oldLc.TProxy == lc.TProxy {
 				newListeners[lc.Listen] = oldLn
 				reusedAddrs[lc.Listen] = true
 				continue
@@ -507,7 +535,14 @@ func (s *Server) Start() error {
 			return err
 		}
 		listeners[lc.Listen] = ln
-		proxy.Logger().Infow("yigate listening", "address", lc.Listen, "tls", lc.TLS.CertFile != "", "tproxy", lc.TProxy.Enabled)
+		// 只检查 cert_file 会让纯国密监听显示为未加密，容易被误读成配置没生效。
+		tlsEnabled := lc.TLS.CertFile != "" || lc.TLS.hasGMCertificate()
+		tlsProtocol := "-"
+		if tlsEnabled {
+			tlsProtocol = lc.TLS.NormalizedProtocol()
+		}
+		proxy.Logger().Infow("yigate listening", "address", lc.Listen, "tls", tlsEnabled,
+			"protocol", tlsProtocol, "tproxy", lc.TProxy.Enabled)
 	}
 
 	s.listenersMu.Lock()
@@ -870,35 +905,8 @@ func (s *Server) watchLoop(w *fsnotify.Watcher) {
 	}
 }
 
-// buildTLSConfig 根据 TLS 配置构造 *tls.Config，支持 mTLS。
-func buildTLSConfig(tlsCfg TLSConfig) (*tls.Config, error) {
-	if strings.TrimSpace(tlsCfg.CertFile) == "" || strings.TrimSpace(tlsCfg.KeyFile) == "" {
-		return nil, nil
-	}
-	cert, err := tls.LoadX509KeyPair(tlsCfg.CertFile, tlsCfg.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load TLS key pair: %w", err)
-	}
-	config := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-	}
-	if strings.TrimSpace(tlsCfg.ClientCAFile) != "" {
-		caPEM, err := os.ReadFile(tlsCfg.ClientCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("read client CA file: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("failed to parse client CA certificate")
-		}
-		config.ClientCAs = pool
-		config.ClientAuth = tls.RequireAndVerifyClientCert
-	}
-	return config, nil
-}
-
 // createListener 根据 TLS 和 TPROXY 配置创建监听。
+// TLS 构造（标准 TLS / 国密 TLCP / 自适应）统一由 proxy.NewServerListener 负责。
 func createListener(addr string, tlsCfg TLSConfig, tproxyCfg proxy.TProxyConfig) (net.Listener, error) {
 	// TPROXY 模式需要 IP_TRANSPARENT socket option
 	if tproxyCfg.Enabled && tproxyCfg.NormalizedMode() == "tproxy" {
@@ -908,15 +916,12 @@ func createListener(addr string, tlsCfg TLSConfig, tproxyCfg proxy.TProxyConfig)
 	if err != nil {
 		return nil, err
 	}
-	config, err := buildTLSConfig(tlsCfg)
+	ln, err := proxy.NewServerListener(baseLn, tlsCfg.serverTLSOptions())
 	if err != nil {
 		_ = baseLn.Close()
 		return nil, err
 	}
-	if config == nil {
-		return baseLn, nil
-	}
-	return tls.NewListener(baseLn, config), nil
+	return ln, nil
 }
 
 // reuseAddrListen 在各平台有独立实现：见 server_unix.go 与 server_windows.go。

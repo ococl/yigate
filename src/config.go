@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -29,10 +30,59 @@ func generateManagementToken() (string, error) {
 // TLSConfig 配置代理端口的 TLS 服务端终止。
 // 若 CertFile/KeyFile 均非空，则代理端口会升级为 TLS 监听；
 // 若 ClientCAFile 非空，则强制要求客户端提供 mTLS 证书。
+//
+// Protocol 控制传输层协议：
+//   - tls（或留空后由 NormalizeTLSProtocol 归一）保持标准 TLS；
+//   - gm 强制国密 TLCP，使用 gm_sign_* 与 gm_enc_* 两套 SM2 证书；
+//   - auto 同时配置两套证书时启用 TLCP/TLS 自适应。
+//
+// 标准 TLS 与 TLCP 的密钥材料不能复用：TLCP 要求 SM2 双证书，
+// 而 Go 标准库不支持 SM2 曲线，所以 cert_file 始终表示标准 TLS 证书。
 type TLSConfig struct {
-	CertFile     string `yaml:"cert_file"`
-	KeyFile      string `yaml:"key_file"`
-	ClientCAFile string `yaml:"client_ca_file"`
+	Protocol string `yaml:"protocol,omitempty"`
+
+	// 标准 TLS 证书。
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+
+	// TLCP 双证书（SM2）。
+	GMSignCertFile    string `yaml:"gm_sign_cert_file,omitempty"`
+	GMSignKeyFile     string `yaml:"gm_sign_key_file,omitempty"`
+	GMSignKeyPassword string `yaml:"gm_sign_key_password,omitempty"`
+	GMEncCertFile     string `yaml:"gm_enc_cert_file,omitempty"`
+	GMEncKeyFile      string `yaml:"gm_enc_key_file,omitempty"`
+	GMEncKeyPassword  string `yaml:"gm_enc_key_password,omitempty"`
+
+	ClientCAFile string   `yaml:"client_ca_file"`
+	CipherSuites []string `yaml:"cipher_suites,omitempty"`
+}
+
+// NormalizedProtocol 返回归一化后的传输层协议。
+func (t TLSConfig) NormalizedProtocol() string {
+	return proxy.NormalizeTLSProtocol(t.Protocol)
+}
+
+// hasGMCertificate 返回是否配置了完整的 TLCP 双证书。
+func (t TLSConfig) hasGMCertificate() bool {
+	return strings.TrimSpace(t.GMSignCertFile) != "" && strings.TrimSpace(t.GMSignKeyFile) != "" &&
+		strings.TrimSpace(t.GMEncCertFile) != "" && strings.TrimSpace(t.GMEncKeyFile) != ""
+}
+
+// serverTLSOptions 转换为 proxy 包使用的入站 TLS 材料。
+func (t TLSConfig) serverTLSOptions() proxy.ServerTLSOptions {
+	return proxy.ServerTLSOptions{
+		Protocol:          t.Protocol,
+		CertFile:          t.CertFile,
+		KeyFile:           t.KeyFile,
+		GMSignCertFile:    t.GMSignCertFile,
+		GMSignKeyFile:     t.GMSignKeyFile,
+		GMSignKeyPassword: t.GMSignKeyPassword,
+		GMEncCertFile:     t.GMEncCertFile,
+		GMEncKeyFile:      t.GMEncKeyFile,
+		GMEncKeyPassword:  t.GMEncKeyPassword,
+		ClientCAFile:      t.ClientCAFile,
+		CipherSuites:      t.CipherSuites,
+	}
 }
 
 // UserConfig 单个代理用户配置。
@@ -241,6 +291,9 @@ func loadConfig(path string, previous *Config) (*Config, error) {
 	proxy.ResolveRoutingPaths(&cfg.Routing, baseDir)
 	proxy.ResolveGeoSiteDataPath(&cfg.Routing.GeoSite, baseDir)
 	resolveTLSPaths(&cfg.TLS, baseDir)
+	for i := range cfg.Upstreams {
+		resolvePath(&cfg.Upstreams[i].TLSRootCAFile, baseDir)
+	}
 	proxy.NormalizeGeoSiteConfig(&cfg.Routing.GeoSite)
 	proxy.NormalizeLogConfig(&cfg.Log)
 	if err := normalizeListeners(cfg, baseDir); err != nil {
@@ -250,6 +303,12 @@ func loadConfig(path string, previous *Config) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// tlsConfigEqual 比较两份 TLS 配置。TLSConfig 含切片字段（CipherSuites），
+// 不能用 == 直接比较；热加载复用 listener 时依赖该判断。
+func tlsConfigEqual(a, b TLSConfig) bool {
+	return reflect.DeepEqual(a, b)
 }
 
 // normalizeListeners 将旧版单 listen 配置转换为多 listener 模型。
@@ -529,12 +588,24 @@ func expandTLSConfigEnv(tlsCfg *TLSConfig, previous *TLSConfig) error {
 	refs := []fieldRef{
 		{"tls.cert_file", &tlsCfg.CertFile, ""},
 		{"tls.key_file", &tlsCfg.KeyFile, ""},
+		{"tls.gm_sign_cert_file", &tlsCfg.GMSignCertFile, ""},
+		{"tls.gm_sign_key_file", &tlsCfg.GMSignKeyFile, ""},
+		{"tls.gm_enc_cert_file", &tlsCfg.GMEncCertFile, ""},
+		{"tls.gm_enc_key_file", &tlsCfg.GMEncKeyFile, ""},
 		{"tls.client_ca_file", &tlsCfg.ClientCAFile, ""},
+		{"tls.gm_sign_key_password", &tlsCfg.GMSignKeyPassword, ""},
+		{"tls.gm_enc_key_password", &tlsCfg.GMEncKeyPassword, ""},
 	}
 	if previous != nil {
 		refs[0].prev = previous.CertFile
 		refs[1].prev = previous.KeyFile
-		refs[2].prev = previous.ClientCAFile
+		refs[2].prev = previous.GMSignCertFile
+		refs[3].prev = previous.GMSignKeyFile
+		refs[4].prev = previous.GMEncCertFile
+		refs[5].prev = previous.GMEncKeyFile
+		refs[6].prev = previous.ClientCAFile
+		refs[7].prev = previous.GMSignKeyPassword
+		refs[8].prev = previous.GMEncKeyPassword
 	}
 	for _, ref := range refs {
 		if *ref.value == "" {
@@ -545,7 +616,8 @@ func expandTLSConfigEnv(tlsCfg *TLSConfig, previous *TLSConfig) error {
 			return err
 		}
 		*ref.value = expanded
-		if *ref.value == "" {
+		// 私钥口令允许为空（表示明文私钥），其余字段为空则视为配置错误。
+		if *ref.value == "" && !strings.HasSuffix(ref.name, "_password") {
 			return fmt.Errorf("%s must not be empty", ref.name)
 		}
 	}
@@ -569,15 +641,22 @@ func expandEnvStrict(field, value string) (string, error) {
 }
 
 func resolveTLSPaths(tlsCfg *TLSConfig, baseDir string) {
-	if !filepath.IsAbs(tlsCfg.CertFile) && tlsCfg.CertFile != "" {
-		tlsCfg.CertFile = filepath.Join(baseDir, tlsCfg.CertFile)
+	resolvePath(&tlsCfg.CertFile, baseDir)
+	resolvePath(&tlsCfg.KeyFile, baseDir)
+	resolvePath(&tlsCfg.GMSignCertFile, baseDir)
+	resolvePath(&tlsCfg.GMSignKeyFile, baseDir)
+	resolvePath(&tlsCfg.GMEncCertFile, baseDir)
+	resolvePath(&tlsCfg.GMEncKeyFile, baseDir)
+	resolvePath(&tlsCfg.ClientCAFile, baseDir)
+	// 私钥口令不是路径，保持原值。
+}
+
+// resolvePath 把相对路径解析为相对配置文件目录的绝对路径。
+func resolvePath(target *string, baseDir string) {
+	if *target == "" || filepath.IsAbs(*target) || containsEnvPlaceholder(*target) {
+		return
 	}
-	if !filepath.IsAbs(tlsCfg.KeyFile) && tlsCfg.KeyFile != "" {
-		tlsCfg.KeyFile = filepath.Join(baseDir, tlsCfg.KeyFile)
-	}
-	if !filepath.IsAbs(tlsCfg.ClientCAFile) && tlsCfg.ClientCAFile != "" {
-		tlsCfg.ClientCAFile = filepath.Join(baseDir, tlsCfg.ClientCAFile)
-	}
+	*target = filepath.Join(baseDir, *target)
 }
 
 func isLoopbackListen(addr string) bool {
@@ -630,31 +709,61 @@ func validateCredentialStrength(field, value string) error {
 }
 
 func validateTLSConfig(tlsCfg *TLSConfig) error {
+	if err := proxy.ValidateTLSProtocol(tlsCfg.Protocol); err != nil {
+		return err
+	}
 	hasCert := strings.TrimSpace(tlsCfg.CertFile) != ""
 	hasKey := strings.TrimSpace(tlsCfg.KeyFile) != ""
 	hasClientCA := strings.TrimSpace(tlsCfg.ClientCAFile) != ""
+	hasSignCert := strings.TrimSpace(tlsCfg.GMSignCertFile) != ""
+	hasSignKey := strings.TrimSpace(tlsCfg.GMSignKeyFile) != ""
+	hasEncCert := strings.TrimSpace(tlsCfg.GMEncCertFile) != ""
+	hasEncKey := strings.TrimSpace(tlsCfg.GMEncKeyFile) != ""
 
 	if hasCert != hasKey {
 		return fmt.Errorf("tls.cert_file and tls.key_file must be both provided or both empty")
 	}
-	if hasClientCA && !hasCert {
-		return fmt.Errorf("tls.client_ca_file requires tls.cert_file and tls.key_file")
+	if hasSignCert != hasSignKey {
+		return fmt.Errorf("tls.gm_sign_cert_file and tls.gm_sign_key_file must be both provided or both empty")
 	}
-	if hasCert {
-		if !containsEnvPlaceholder(tlsCfg.CertFile) {
-			if _, err := os.Stat(tlsCfg.CertFile); err != nil {
-				return fmt.Errorf("cert_file %q: %w", tlsCfg.CertFile, err)
-			}
-		}
-		if !containsEnvPlaceholder(tlsCfg.KeyFile) {
-			if _, err := os.Stat(tlsCfg.KeyFile); err != nil {
-				return fmt.Errorf("key_file %q: %w", tlsCfg.KeyFile, err)
-			}
+	if hasEncCert != hasEncKey {
+		return fmt.Errorf("tls.gm_enc_cert_file and tls.gm_enc_key_file must be both provided or both empty")
+	}
+	hasGM := hasSignCert && hasEncCert
+	if (hasSignCert || hasEncCert) && !hasGM {
+		return fmt.Errorf("TLCP requires both tls.gm_sign_cert_file/gm_sign_key_file and tls.gm_enc_cert_file/gm_enc_key_file")
+	}
+	if hasClientCA && !hasCert && !hasGM {
+		return fmt.Errorf("tls.client_ca_file requires a TLS or TLCP certificate")
+	}
+	if tlsCfg.NormalizedProtocol() == proxy.TLSProtocolGM && !hasGM {
+		return fmt.Errorf("tls.protocol gm requires tls.gm_sign_cert_file/gm_sign_key_file and tls.gm_enc_cert_file/gm_enc_key_file")
+	}
+	if tlsCfg.NormalizedProtocol() == proxy.TLSProtocolTLS && !hasCert {
+		return fmt.Errorf("tls.protocol tls requires tls.cert_file and tls.key_file")
+	}
+	if len(tlsCfg.CipherSuites) > 0 {
+		if _, err := proxy.ResolveGMCipherSuites(tlsCfg.CipherSuites); err != nil {
+			return err
 		}
 	}
-	if hasClientCA && !containsEnvPlaceholder(tlsCfg.ClientCAFile) {
-		if _, err := os.Stat(tlsCfg.ClientCAFile); err != nil {
-			return fmt.Errorf("client_ca_file %q: %w", tlsCfg.ClientCAFile, err)
+	for _, item := range []struct {
+		field string
+		value string
+	}{
+		{"cert_file", tlsCfg.CertFile},
+		{"key_file", tlsCfg.KeyFile},
+		{"gm_sign_cert_file", tlsCfg.GMSignCertFile},
+		{"gm_sign_key_file", tlsCfg.GMSignKeyFile},
+		{"gm_enc_cert_file", tlsCfg.GMEncCertFile},
+		{"gm_enc_key_file", tlsCfg.GMEncKeyFile},
+		{"client_ca_file", tlsCfg.ClientCAFile},
+	} {
+		if strings.TrimSpace(item.value) == "" || containsEnvPlaceholder(item.value) {
+			continue
+		}
+		if _, err := os.Stat(item.value); err != nil {
+			return fmt.Errorf("tls.%s %q: %w", item.field, item.value, err)
 		}
 	}
 	return nil
@@ -1030,6 +1139,21 @@ func validateUpstreamConfig(up proxy.UpstreamConfig) error {
 	}
 	if err := proxy.ValidateHealthCheckConfig(up.HealthCheck); err != nil {
 		return fmt.Errorf("health_check: %w", err)
+	}
+	if err := proxy.ValidateTLSProtocol(up.TLSProtocol); err != nil {
+		return fmt.Errorf("tls_protocol: %w", err)
+	}
+	if protocol := proxy.NormalizeTLSProtocol(up.TLSProtocol); protocol != proxy.TLSProtocolTLS && protocol != proxy.TLSProtocolAuto {
+		if !containsEnvPlaceholder(rawURL) {
+			if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != proxy.ProxyTypeHTTPS {
+				return fmt.Errorf("tls_protocol %q requires an https upstream url, got scheme %q", up.TLSProtocol, parsed.Scheme)
+			}
+		}
+	}
+	if up.TLSRootCAFile != "" && !containsEnvPlaceholder(up.TLSRootCAFile) {
+		if _, err := os.Stat(up.TLSRootCAFile); err != nil {
+			return fmt.Errorf("tls_ca_file %q: %w", up.TLSRootCAFile, err)
+		}
 	}
 	return nil
 }

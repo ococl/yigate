@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bufio"
-	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -185,15 +184,12 @@ func TestUpstreamDialHTTP(t *testing.T) {
 
 func TestUpstreamDialHTTPS(t *testing.T) {
 	proxyAddr := startMockHTTPSProxy(t)
-	oldTLSConfig := tlsConfigForHost
-	tlsConfigForHost = func(addr string) *tls.Config {
-		cfg := defaultTLSConfigForHost(addr)
-		cfg.InsecureSkipVerify = true
-		return cfg
-	}
-	t.Cleanup(func() { tlsConfigForHost = oldTLSConfig })
-
-	mgr, err := NewUpstreamManager([]UpstreamConfig{{Name: "https", URL: "https://" + proxyAddr}})
+	mgr, err := NewUpstreamManager([]UpstreamConfig{{
+		Name:                  "https",
+		URL:                   "https://" + proxyAddr,
+		TLSProtocol:           TLSProtocolTLS,
+		TLSInsecureSkipVerify: true,
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

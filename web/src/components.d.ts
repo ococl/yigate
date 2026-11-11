@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AAlert: typeof import('antdv-next')['Alert']
+    AAutoComplete: typeof import('antdv-next')['AutoComplete']
     ABadge: typeof import('antdv-next')['Badge']
     AButton: typeof import('antdv-next')['Button']
     ACard: typeof import('antdv-next')['Card']
@@ -58,6 +59,7 @@ declare module 'vue' {
     ATypographyParagraph: typeof import('antdv-next')['TypographyParagraph']
     ATypographyText: typeof import('antdv-next')['TypographyText']
     ATypographyTitle: typeof import('antdv-next')['TypographyTitle']
+    CertExpiryBanner: typeof import('./components/CertExpiryBanner.vue')['default']
     CodeBlock: typeof import('./components/CodeBlock.vue')['default']
     LoadError: typeof import('./components/LoadError.vue')['default']
     MobileCard: typeof import('./components/MobileCard.vue')['default']

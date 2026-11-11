@@ -275,6 +275,14 @@ type UpstreamConfig struct {
 	Weight      int               `yaml:"weight"`
 	Strategy    string            `yaml:"strategy"`
 	HealthCheck HealthCheckConfig `yaml:"health_check"`
+	// TLSProtocol 控制到该上游的传输层协议：auto（默认，GM 优先回落）/ gm / tls。
+	TLSProtocol string `yaml:"tls_protocol,omitempty"`
+	// TLSRootCAFile 是校验上游证书使用的 CA 文件；留空使用系统根证书。
+	TLSRootCAFile string `yaml:"tls_ca_file,omitempty"`
+	// TLSServerName 覆盖 SNI 与证书校验主机名。
+	TLSServerName string `yaml:"tls_server_name,omitempty"`
+	// TLSInsecureSkipVerify 跳过证书校验，仅供本地调试。
+	TLSInsecureSkipVerify bool `yaml:"tls_insecure_skip_verify,omitempty"`
 }
 
 // HasCredentials 返回是否配置了独立的上游认证凭据。
@@ -296,6 +304,13 @@ type Upstream struct {
 	Weight      int
 	Strategy    string
 	HealthCheck HealthCheckConfig
+
+	// TLS 相关配置在创建时固化，热加载重建上游时自动失效重学。
+	TLSProtocol           string
+	TLSRootCAFile         string
+	TLSServerName         string
+	TLSInsecureSkipVerify bool
+	tlsNeg                *tlsNegotiator
 
 	typesMu sync.RWMutex
 	current int
@@ -455,13 +470,18 @@ func NewUpstreamManager(configs []UpstreamConfig) (*UpstreamManager, error) {
 			hc.FailureThreshold = deadFailureThreshold
 		}
 		up := &Upstream{
-			Name:        name,
-			URL:         u,
-			Types:       types,
-			Priority:    c.Priority,
-			Weight:      c.Weight,
-			Strategy:    normalizeStrategy(c.Strategy),
-			HealthCheck: hc,
+			Name:                  name,
+			URL:                   u,
+			Types:                 types,
+			Priority:              c.Priority,
+			Weight:                c.Weight,
+			Strategy:              normalizeStrategy(c.Strategy),
+			HealthCheck:           hc,
+			TLSProtocol:           NormalizeTLSProtocol(c.TLSProtocol),
+			TLSRootCAFile:         c.TLSRootCAFile,
+			TLSServerName:         c.TLSServerName,
+			TLSInsecureSkipVerify: c.TLSInsecureSkipVerify,
+			tlsNeg:                &tlsNegotiator{},
 		}
 		if up.Weight <= 0 {
 			up.Weight = 1

@@ -146,8 +146,9 @@ sudo systemctl start yigate
 | `webui.enabled` | 默认 true；热加载生效，关闭后管理端口仅提供 API |
 | `enable_pprof` | 默认 false；开启后管理端口暴露 `/debug/pprof/*`（需认证），可热加载 |
 | `users` | 为空则允许匿名代理 |
-| `tls` | TLS 服务端终止（`cert_file` / `key_file` / `client_ca_file`） |
-| `upstreams` | 上游代理，类型 `http`/`https`/`socks5`/`socks5h`，策略与健康检查 |
+| `tls` | 服务端终止：`protocol`（`auto`/`gm`/`tls`）、标准 TLS 证书、国密 SM2 双证书、`client_ca_file` |
+| `tls.protocol` | 默认 `auto`：国密 TLCP 优先、回落标准 TLS；`gm` 强制国密；`tls` 保持标准 TLS |
+| `upstreams` | 上游代理，类型 `http`/`https`/`socks5`/`socks5h`，策略与健康检查；https 上游支持 `tls_protocol`/`tls_ca_file`/`tls_server_name` |
 | `routing.rules` / `routing.final` | 规则列表（首个命中生效）与兜底动作 `direct`/`proxy`/`direct_first`/`proxy_first`/`auto`/`deny` |
 | `routing.auto.mode` | `direct_first`（默认）或 `proxy_first`；规则上的 `direct_first`/`proxy_first` 会覆盖该全局设置 |
 | `routing.socks5h_redirect` | 目标域名交由上游解析（远端 DNS），可用 `upstreams` 限定范围 |
@@ -262,6 +263,140 @@ make web-e2e
 
 `release.sh` 只负责发布门禁与 WebUI 构建，跨平台编译、打包、SBOM 和校验和统一由
 `scripts/ci-build.sh` 生成，避免 CI 与正式发布出现两套制品流程。
+
+---
+
+## 国密（TLCP）适配
+
+传输层国密基于 GB/T 38636-2020 实现，纯 Go、`CGO_ENABLED=0` 可用，覆盖 26 个发布平台。
+
+**能力范围**
+
+| 位置 | 能力 |
+|------|------|
+| 入站监听 | `protocol: gm` 强制 TLCP（SM2 双证书）；`auto` 在同一端口自适应 TLCP / 标准 TLS；`tls` 行为不变 |
+| 出站 https 上游 | `tls_protocol: gm` 强制国密，`auto` 国密优先并记忆协商结果，`tls` 标准 TLS |
+| 健康检查 | `https`/`tls` 探测跟随上游协议，避免国密上游被误判为不可用 |
+| 摘要 | 令牌比较摘要使用 SM3（合规口径，不改变安全强度） |
+
+**性能基线**
+
+完整握手与单连接吞吐（`./scripts/bench-tls.sh` 复现）：
+
+| 场景 | 完整握手 | 吞吐（32 KB 回环 echo） |
+|------|---------|----------------------|
+| 标准 TLS / RSA-2048 | 2.90 ms | 417 MB/s |
+| 标准 TLS / ECDSA P-256 | 1.30 ms | — |
+| TLCP / SM2 双证书 | 0.89 ms | 89 MB/s |
+| `auto` 端口（TLCP 客户端） | 0.93 ms | — |
+
+参考环境：2 vCPU Skylake（无 SM4 硬件指令）、Go 1.27、`CGO_ENABLED=0`、回环网络。
+
+读法：
+
+- TLCP 握手更快是因为它基于 TLS 1.1 风格协议、握手消息更少，**不能据此得出"国密更快/更安全"的结论**；与 ECDSA P-256 对照才反映 SM2 自身的签名开销。
+- 数据面差距来自 SM4 软件实现；CPU 带 SM4 指令集（ARMv8.4-SM4 等）时差距会明显收窄。
+- `auto` 端口相比专用端口约有 5% 的握手开销（需要探测 ClientHello），稳态连接不受影响。
+- 数字随 CPU、内核与编译选项变化，密评现场必须在同一台机器上复测。
+
+**生成样板证书**
+
+```bash
+# 生成 SM2 根 CA + 签名证书 + 加密证书（-p 输出 PBES2-SM4 加密私钥）
+./yigate gencert -o certs/gm -d proxy.example.com
+
+# 复用已有 CA 签发（轮换证书时不必重建信任链，不会覆盖原 ca.crt/ca.key）
+./yigate gencert -o certs/gm-gw -d gw.example.com \
+  -ca certs/gm/ca.crt -ca-key certs/gm/ca.key \
+  -ca-key-password '${YIGATE_GM_CA_KEY_PASSWORD}'
+```
+
+`-ca` / `-ca-key` 必须成对提供；CA 私钥支持 PBES2-SM4 加密，口令写 `${VAR}` 时按环境变量展开，
+其余情况按字面值处理。签发前会校验证书与私钥是否配对，不匹配或口令错误直接报错。
+
+**有效期与口令**
+
+- 叶子证书默认 365 天，用 `-days` 调整；自带 CA 固定 10 年（仅作样板）。
+- 请求的有效期超过签发 CA 的剩余有效期时，自动收敛到 CA 的到期时间并打印提示。
+  签出比 CA 活得久的证书没有意义——CA 一到期，整条链就不可信。
+- CA 已过期时直接报错，不会签出当场失效的证书。
+- 私钥口令无法原地更换。轮换叶子证书口令：用相同 `-ca` 重新签发一套（`-p` 填新口令），
+  同步更新 `${YIGATE_GM_SIGN_KEY_PASSWORD}` / `${YIGATE_GM_ENC_KEY_PASSWORD}` 后滚动重启。
+  CA 私钥口令目前不支持重封装，更换需重建 CA，并同步替换所有下游的信任锚。
+
+```bash
+# 指定叶子证书有效期（示例：半年一换）
+./yigate gencert -o certs/gm-gw -d gw.example.com -days 180 \
+  -ca certs/gm/ca.crt -ca-key certs/gm/ca.key
+```
+
+**到期提醒**
+
+进程启动时和每次配置热加载后都会扫描配置中引用的证书（监听证书、国密双证书、`client_ca_file`、
+上游 `tls_ca_file`）：剩余不足 30 天打 `certificate expires soon` 警告，已过期打
+`certificate has expired` 错误。日志里带文件路径、证书类型、CN 与剩余天数。
+
+检查失败不阻断启动——真正不可用的证书会在建监听或握手时以更明确的错误暴露。
+同一个文件被多个监听共用时只报一次。
+
+WebUI 顶部会据此显示到期横幅；`GET /api/v1/status` 的 `certificates` 字段给出同样的数据，
+可直接接监控告警。上游表单里的 `tls_ca_file` 支持从配置目录列出的证书文件中选择，
+不用手抄路径。
+
+不想启动服务也能体检：`-check` 扫描文件或目录（不递归），打印 CN、有效期与剩余天数，
+有证书过期或落在 30 天窗口内时退出码为 1，可直接用在发布脚本里拦截。
+
+```bash
+./yigate gencert -check certs/gm
+# FILE               KIND  SUBJECT         NOT BEFORE  NOT AFTER   REMAINING  STATUS
+# certs/gm/ca.crt    ca    yigate GM CA    2026-11-11  2036-11-08  3649 days  ok
+# certs/gm/enc.crt   leaf  gw.example.com  2026-11-11  2026-12-01  19 days    expiring
+```
+
+**入站配置**
+
+```yaml
+listeners:
+  - listen: "0.0.0.0:8443"
+    tls:
+      protocol: gm
+      gm_sign_cert_file: "certs/gm/sign.crt"
+      gm_sign_key_file: "certs/gm/sign.key"
+      gm_enc_cert_file: "certs/gm/enc.crt"
+      gm_enc_key_file: "certs/gm/enc.key"
+      # gm_sign_key_password: "${YIGATE_GM_SIGN_KEY_PASSWORD}"
+      # gm_enc_key_password: "${YIGATE_GM_ENC_KEY_PASSWORD}"
+      cipher_suites: ["ECDHE_SM4_GCM_SM3", "ECC_SM4_GCM_SM3"]
+```
+
+**出站配置**
+
+```yaml
+upstreams:
+  - name: "gm-gateway"
+    url: "https://gw.example.com:8443"
+    tls_protocol: "gm"            # auto 时国密优先、失败回落标准 TLS
+    tls_ca_file: "certs/gm/ca.crt"
+    tls_server_name: "gw.example.com"
+```
+
+**边界说明（二次开发请从这里接手）**
+
+- 标准 TLS 与 TLCP 的密钥材料不能复用：TLCP 要求 SM2 双证书，Go 标准库不支持 SM2 曲线，因此 `cert_file` 始终表示标准 TLS 证书。
+- 管理端口（WebUI/API）不提供国密 TLS，浏览器普遍不支持 TLCP；如确需国密管理面，应在前置国密网关卸载。
+- DNS over TLS / HTTPS 保持标准协议：公共 DNS 服务不使用国密套件，改造点在服务端而非本程序。
+- WebUI 上游编辑不会覆盖 `tls_protocol` 等字段（未提交即保留原值）；国密相关字段建议直接在配置文件中维护。
+
+**密评自查**
+
+按测评口径逐项核对（实现现状、配置项、取证命令、已知边界）见
+[docs/gm-compliance.md](docs/gm-compliance.md)。其中最容易踩的一条：要求"强制国密"时必须用
+`protocol: gm`，`auto` 允许回落标准 TLS。
+- `auto` 端口启用 mTLS 时，`client_ca_file` 需同时包含标准 TLS CA 与 SM2 CA（可把多个 PEM 块拼在一个文件里），
+  两侧各取所需；只放 SM2 CA 会导致标准 TLS 侧启动失败并给出明确提示。
+- 代理协议自身（HTTP Basic、SOCKS5 RFC1929）与 CONNECT 隧道内到目标站点的加密不由本程序决定，无法国密化。
+- 未内置密码机 / KMS / 密钥轮换，私钥保护仅提供 PBES2-SM4 口令加密；密评场景需补齐密码模块资质与密钥管理。
+- `auto` 出站首次连接会先尝试 TLCP，对不支持国密的上游多一次握手开销，协商结果按上游记忆并在 5 分钟后重试，不影响稳态延迟。
 
 ---
 

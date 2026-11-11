@@ -285,6 +285,13 @@ func (m *mockConfigEditor) UpdateSettings(patch SettingsPatch) error {
 	return m.applyErr
 }
 
+func (m *mockConfigEditor) ListCertificateFiles() ([]string, error) {
+	if m.applyErr != nil {
+		return nil, m.applyErr
+	}
+	return []string{"certs/gm/ca.crt", "certs/tls/ca.crt"}, nil
+}
+
 // startConfigAPITestServer 启动一个带 ConfigEditor 的管理服务器用于测试。
 func startConfigAPITestServer(t *testing.T, editor ConfigEditor, token string) (*ManagementServer, string) {
 	t.Helper()
@@ -1028,5 +1035,43 @@ func TestConfigAPIBatchDeleteRejectsEmptyList(t *testing.T) {
 			t.Fatalf("%s status = %d, want 400", path, resp.StatusCode)
 		}
 		resp.Body.Close()
+	}
+}
+
+// --- Certificates API Tests ---
+
+func TestConfigAPICertificates(t *testing.T) {
+	editor := newMockConfigEditor()
+	m, addr := startConfigAPITestServer(t, editor, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "GET", addr, "/api/v1/config/certificates", nil, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	result := decodeBody(t, resp)
+	files, ok := result["files"].([]any)
+	if !ok || len(files) != 2 {
+		t.Fatalf("expected 2 certificate files, got %v", result)
+	}
+	if files[0] != "certs/gm/ca.crt" {
+		t.Fatalf("unexpected first file: %v", files[0])
+	}
+
+	// 只读接口，写方法必须明确拒绝。
+	resp = doRequest(t, "POST", addr, "/api/v1/config/certificates", nil, "")
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want 405", resp.StatusCode)
+	}
+}
+
+// 没有配置编辑器时返回 501，与其它 config 端点保持一致。
+func TestConfigAPICertificatesWithoutEditor(t *testing.T) {
+	m, addr := startConfigAPITestServer(t, nil, "")
+	defer m.Stop()
+
+	resp := doRequest(t, "GET", addr, "/api/v1/config/certificates", nil, "")
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501", resp.StatusCode)
 	}
 }

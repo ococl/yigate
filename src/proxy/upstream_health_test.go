@@ -183,15 +183,15 @@ func TestCheckTLSProtocol(t *testing.T) {
 		}
 	}()
 
-	old := tlsConfigForHost
-	tlsConfigForHost = func(addr string) *tls.Config { return &tls.Config{InsecureSkipVerify: true} }
-	defer func() { tlsConfigForHost = old }()
-
-	up := &Upstream{URL: mustURL("https://" + ln.Addr().String())}
-	if !checkTLSUpstream(ln.Addr().String(), 5*time.Second) {
+	up := &Upstream{
+		URL:                   mustURL("https://" + ln.Addr().String()),
+		TLSProtocol:           TLSProtocolTLS,
+		TLSInsecureSkipVerify: true,
+		tlsNeg:                &tlsNegotiator{},
+	}
+	if !checkTLSUpstream(up, ln.Addr().String(), 5*time.Second) {
 		t.Fatal("expected TLS check to pass")
 	}
-	_ = up
 }
 
 func TestHealthCheckPerUpstreamFailureThreshold(t *testing.T) {

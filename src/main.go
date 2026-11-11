@@ -32,7 +32,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  start     start installed service\n")
 		fmt.Fprintf(os.Stderr, "  stop      stop installed service\n")
 		fmt.Fprintf(os.Stderr, "  restart   restart installed service\n")
-		fmt.Fprintf(os.Stderr, "  status    show installed service status\n\n")
+		fmt.Fprintf(os.Stderr, "  status    show installed service status\n")
+		fmt.Fprintf(os.Stderr, "  gencert   generate SM2 certificates for TLCP\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -63,6 +64,8 @@ func main() {
 		runService(cfgPath)
 	case "install", "uninstall", "start", "stop", "restart", "status":
 		controlService(cfgPath, cmd)
+	case "gencert":
+		runGenCert(flag.Args()[1:])
 	default:
 		flag.Usage()
 		os.Exit(1)

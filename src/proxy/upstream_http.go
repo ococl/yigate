@@ -13,7 +13,7 @@ import (
 
 // dialHTTP 通过 HTTP/HTTPS 代理的 CONNECT 建立隧道
 func (u *Upstream) dialHTTP(target string) (net.Conn, error) {
-	conn, err := dialProxyConn(u.urlForType(u.primaryProxyType()), ProxyDialTimeout())
+	conn, err := dialProxyConnWith(u, u.urlForType(u.primaryProxyType()), ProxyDialTimeout())
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +71,36 @@ func proxyCredentials(up *Upstream) string {
 	return base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 }
 
+// clientTLSOptions 返回该上游的出站 TLS 材料。
+func (u *Upstream) clientTLSOptions() ClientTLSOptions {
+	if u == nil {
+		return ClientTLSOptions{Protocol: TLSProtocolTLS}
+	}
+	return ClientTLSOptions{
+		Protocol:           u.TLSProtocol,
+		CAFile:             u.TLSRootCAFile,
+		ServerName:         u.TLSServerName,
+		InsecureSkipVerify: u.TLSInsecureSkipVerify,
+	}
+}
+
+// dialProxyConn 在不掌握上游上下文时按标准 TLS 拨号（兼容旧调用）。
 func dialProxyConn(u *url.URL, timeout time.Duration) (net.Conn, error) {
+	return dialProxyConnWith(nil, u, timeout)
+}
+
+// dialProxyConnWith 按上游配置的传输层协议拨号：https 上游走 TLS/TLCP 协商，
+// 其余 scheme 仍是明文 TCP。
+func dialProxyConnWith(up *Upstream, u *url.URL, timeout time.Duration) (net.Conn, error) {
 	addr := proxyAddress(u)
 	dialer := &net.Dialer{Timeout: timeout}
-	if u.Scheme == "https" {
+	if u.Scheme != "https" {
+		return dialer.Dial("tcp", addr)
+	}
+	if up == nil {
 		return tls.DialWithDialer(dialer, "tcp", addr, tlsConfigForHost(addr))
 	}
-	return dialer.Dial("tcp", addr)
+	return up.tlsNeg.dial(addr, up.clientTLSOptions(), dialer)
 }
 
 var tlsConfigForHost = defaultTLSConfigForHost

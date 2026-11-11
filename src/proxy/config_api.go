@@ -63,6 +63,10 @@ type ConfigEditor interface {
 	GetSettings() (SettingsView, error)
 	// UpdateSettings 部分更新全局设置并持久化。
 	UpdateSettings(patch SettingsPatch) error
+
+	// ListCertificateFiles 列出配置目录内可用的证书文件（相对路径）。
+	// 只用于 WebUI 的路径提示，不接受调用方指定目录，避免越权读取。
+	ListCertificateFiles() ([]string, error)
 }
 
 // BatchDeleteFailure 描述批量删除中失败的一项，target 是调用方给的原值。
@@ -153,6 +157,11 @@ type upstreamInfo struct {
 	Weight      int             `json:"weight"`
 	Strategy    string          `json:"strategy"`
 	HealthCheck healthCheckInfo `json:"health_check"`
+
+	TLSProtocol           string `json:"tls_protocol,omitempty"`
+	TLSRootCAFile         string `json:"tls_ca_file,omitempty"`
+	TLSServerName         string `json:"tls_server_name,omitempty"`
+	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify,omitempty"`
 }
 
 // addUpstreamRequest 是添加上游的请求体。
@@ -167,6 +176,11 @@ type addUpstreamRequest struct {
 	Weight      int                 `json:"weight,omitempty"`
 	Strategy    string              `json:"strategy,omitempty"`
 	HealthCheck *healthCheckRequest `json:"health_check,omitempty"`
+
+	TLSProtocol           string `json:"tls_protocol,omitempty"`
+	TLSRootCAFile         string `json:"tls_ca_file,omitempty"`
+	TLSServerName         string `json:"tls_server_name,omitempty"`
+	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify,omitempty"`
 }
 
 // updateUpstreamRequest 是更新上游的请求体。
@@ -182,6 +196,12 @@ type updateUpstreamRequest struct {
 	Weight      *int                `json:"weight,omitempty"`
 	Strategy    string              `json:"strategy,omitempty"`
 	HealthCheck *healthCheckRequest `json:"health_check,omitempty"`
+
+	// TLS 字段用指针区分"未提供"与"显式清空"，避免编辑弹窗抹掉国密配置。
+	TLSProtocol           *string `json:"tls_protocol,omitempty"`
+	TLSRootCAFile         *string `json:"tls_ca_file,omitempty"`
+	TLSServerName         *string `json:"tls_server_name,omitempty"`
+	TLSInsecureSkipVerify *bool   `json:"tls_insecure_skip_verify,omitempty"`
 }
 
 // moveRuleRequest 是规则排序请求体。
@@ -304,6 +324,12 @@ func (m *ManagementServer) handleConfigAPI(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		m.handleSettingsAPI(w, r, editor)
+	case "certificates":
+		if len(segments) > 1 {
+			writeJSONError(w, http.StatusNotFound, "unknown config API path")
+			return
+		}
+		m.handleCertificatesAPI(w, r, editor)
 	default:
 		writeJSONError(w, http.StatusNotFound, "unknown config API path")
 	}
@@ -331,6 +357,11 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 				Weight:      up.Weight,
 				Strategy:    normalizeStrategy(up.Strategy),
 				HealthCheck: newHealthCheckInfo(up.HealthCheck),
+
+				TLSProtocol:           up.TLSProtocol,
+				TLSRootCAFile:         up.TLSRootCAFile,
+				TLSServerName:         up.TLSServerName,
+				TLSInsecureSkipVerify: up.TLSInsecureSkipVerify,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"upstreams": result})
@@ -348,15 +379,19 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 				return
 			}
 			up := UpstreamConfig{
-				Name:     strings.TrimSpace(req.Name),
-				URL:      req.URL,
-				Username: strings.TrimSpace(req.Username),
-				Password: req.Password,
-				Enabled:  req.Enabled,
-				Types:    req.Types,
-				Priority: req.Priority,
-				Weight:   req.Weight,
-				Strategy: req.Strategy,
+				Name:                  strings.TrimSpace(req.Name),
+				URL:                   req.URL,
+				Username:              strings.TrimSpace(req.Username),
+				Password:              req.Password,
+				Enabled:               req.Enabled,
+				Types:                 req.Types,
+				Priority:              req.Priority,
+				Weight:                req.Weight,
+				Strategy:              req.Strategy,
+				TLSProtocol:           req.TLSProtocol,
+				TLSRootCAFile:         req.TLSRootCAFile,
+				TLSServerName:         req.TLSServerName,
+				TLSInsecureSkipVerify: req.TLSInsecureSkipVerify,
 			}
 			if req.HealthCheck != nil {
 				up.HealthCheck = req.HealthCheck.toConfig()
@@ -460,6 +495,10 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 			up.HealthCheck = existing.HealthCheck
 			up.Priority = existing.Priority
 			up.Weight = existing.Weight
+			up.TLSProtocol = existing.TLSProtocol
+			up.TLSRootCAFile = existing.TLSRootCAFile
+			up.TLSServerName = existing.TLSServerName
+			up.TLSInsecureSkipVerify = existing.TLSInsecureSkipVerify
 		}
 		if req.Username != nil {
 			up.Username = strings.TrimSpace(*req.Username)
@@ -480,6 +519,18 @@ func (m *ManagementServer) handleUpstreamsAPI(w http.ResponseWriter, r *http.Req
 		}
 		if req.Enabled != nil {
 			up.Enabled = req.Enabled
+		}
+		if req.TLSProtocol != nil {
+			up.TLSProtocol = *req.TLSProtocol
+		}
+		if req.TLSRootCAFile != nil {
+			up.TLSRootCAFile = *req.TLSRootCAFile
+		}
+		if req.TLSServerName != nil {
+			up.TLSServerName = *req.TLSServerName
+		}
+		if req.TLSInsecureSkipVerify != nil {
+			up.TLSInsecureSkipVerify = *req.TLSInsecureSkipVerify
 		}
 		if err := editor.UpdateUpstream(name, up); err != nil {
 			if errors.Is(err, errNotFound) {

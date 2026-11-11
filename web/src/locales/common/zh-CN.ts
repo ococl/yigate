@@ -85,6 +85,18 @@ export const layout = {
   logoutConfirm: '确定要退出登录吗？',
   logoutOk: '退出',
   language: '语言',
+  certExpiryTitle: '有证书即将到期',
+  certExpiryExpiredTitle: '有证书已过期',
+  certExpiryDaysLeft: '剩余 {days} 天',
+  certExpiryExpiredAt: '已于 {date} 过期',
+  certExpiryMore: '另有 {count} 张证书同样需要处理',
+  certKinds: {
+    listener: '监听证书',
+    gmSign: '国密签名证书',
+    gmEnc: '国密加密证书',
+    clientCa: '客户端 CA',
+    upstreamCa: '上游 CA',
+  },
 }
 
 export const login = {

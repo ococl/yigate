@@ -59,6 +59,46 @@ routing:
 	}
 }
 
+// TestConfigEditorUpstreamTLSPathsRelativeToConfig 覆盖 WebUI 用相对路径提交证书的场景：
+// 校验基准必须是配置文件目录而不是进程工作目录，且落盘保留相对路径。
+func TestConfigEditorUpstreamTLSPathsRelativeToConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yml")
+	writeConfigForTest(t, cfgPath, `listen: "127.0.0.1:0"
+upstreams: []
+routing:
+  final: auto
+`)
+	if err := os.MkdirAll(filepath.Join(dir, "certs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "certs", "ca.crt"), []byte("ca"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	editor := newConfigEditor(cfgPath, func() error { return nil })
+	// 测试进程的工作目录是包目录，certs/ca.crt 在其中并不存在，
+	// 若校验仍以工作目录为基准，这里会直接失败。
+	err := editor.AddUpstream(proxy.UpstreamConfig{
+		Name:          "gm",
+		URL:           "https://127.0.0.1:18443",
+		Types:         []string{"https"},
+		TLSProtocol:   "gm",
+		TLSRootCAFile: "certs/ca.crt",
+	})
+	if err != nil {
+		t.Fatalf("AddUpstream with relative tls_ca_file: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "tls_ca_file: certs/ca.crt") {
+		t.Fatalf("expected relative path to be persisted as-is, got:\n%s", data)
+	}
+}
+
 func TestConfigEditorAddUpstreamDuplicate(t *testing.T) {
 	editor, _ := newTestConfigEditor(t, `listen: "127.0.0.1:0"
 upstreams:

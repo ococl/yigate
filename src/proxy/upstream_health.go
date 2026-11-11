@@ -332,30 +332,30 @@ func (m *UpstreamManager) check(u *Upstream) bool {
 
 	switch u.HealthCheckType() {
 	case "tcp":
-		conn, err := dialProxyConn(u.URL, timeout)
+		conn, err := dialProxyConnWith(u, u.URL, timeout)
 		if err != nil {
 			return false
 		}
 		_ = conn.Close()
 		return true
 	case "tls":
-		return checkTLSUpstream(addr, timeout)
+		return checkTLSUpstream(u, addr, timeout)
 	case "http", "https":
-		conn, err := dialProxyConn(u.URL, timeout)
+		conn, err := dialProxyConnWith(u, u.URL, timeout)
 		if err != nil {
 			return false
 		}
 		defer conn.Close()
 		return checkHTTPProtocol(conn, u, timeout)
 	case ProxyTypeSocks5, ProxyTypeSocks5H:
-		conn, err := dialProxyConn(u.URL, timeout)
+		conn, err := dialProxyConnWith(u, u.URL, timeout)
 		if err != nil {
 			return false
 		}
 		defer conn.Close()
 		return checkSOCKS5Protocol(conn, u, timeout)
 	default:
-		conn, err := dialProxyConn(u.URL, timeout)
+		conn, err := dialProxyConnWith(u, u.URL, timeout)
 		if err != nil {
 			return false
 		}
@@ -364,9 +364,19 @@ func (m *UpstreamManager) check(u *Upstream) bool {
 	}
 }
 
-func checkTLSUpstream(addr string, timeout time.Duration) bool {
+// checkTLSUpstream 探测上游端口的 TLS 能力，协议必须与数据面一致，
+// 否则国密上游会被误判为不可用。
+func checkTLSUpstream(u *Upstream, addr string, timeout time.Duration) bool {
 	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfigForHost(addr))
+	if u == nil {
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfigForHost(addr))
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+		return true
+	}
+	conn, err := u.tlsNeg.dial(addr, u.clientTLSOptions(), dialer)
 	if err != nil {
 		return false
 	}

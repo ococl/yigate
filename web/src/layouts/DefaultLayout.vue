@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { LOCALE_OPTIONS } from '@/locales'
 import SidebarContent from './SidebarContent.vue'
+import CertExpiryBanner from '@/components/CertExpiryBanner.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -159,6 +160,7 @@ const localeMenu = computed(() => ({
       </a-layout-header>
 
       <a-layout-content class="content" :style="contentStyle">
+        <CertExpiryBanner />
         <RouterView />
       </a-layout-content>
     </a-layout>

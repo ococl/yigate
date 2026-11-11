@@ -3,6 +3,59 @@
 本项目遵循 [Semantic Versioning](https://semver.org/) 与 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 版本规则与发布流程见 [VERSIONING.md](VERSIONING.md)。
 
+## [Unreleased]
+
+### Added
+
+- 传输层国密适配（TLCP，GB/T 38636-2020）。listener 新增 `tls.protocol`：
+  `auto`（默认，TLCP 优先并回落标准 TLS）、`gm`（强制国密）、`tls`（与旧行为一致）。
+- 新增 `tls.gm_sign_cert_file` / `gm_sign_key_file` / `gm_enc_cert_file` / `gm_enc_key_file`
+  与对应 `*_key_password`（PBES2-SM4 加密 PKCS#8），以及 `tls.cipher_suites`。
+  标准 TLS 与 TLCP 密钥材料不能复用：TLCP 要求 SM2 双证书，标准库不支持 SM2 曲线，
+  因此 `cert_file` 始终表示标准 TLS 证书。
+- https 上游新增 `tls_protocol` / `tls_ca_file` / `tls_server_name` / `tls_insecure_skip_verify`。
+  `auto` 会记忆协商结果并带冷却重试，避免对不支持国密的上游每条连接都多一次失败握手；
+  曾经成功过的国密上游不会因单次失败被永久降级。
+- `https`/`tls` 健康检查改为跟随上游协议，修复强制国密的上游被探测误判为不可用。
+- 新增 `yigate gencert` 子命令：生成 SM2 根 CA、TLCP 签名证书与加密证书，
+  纯 Go 实现，不依赖 openssl。
+- `gencert` 新增 `-ca` / `-ca-key` / `-ca-key-password`：复用既有 SM2 CA 签发叶子证书，
+  证书轮换时不必重建信任链；不覆盖原 `ca.crt`/`ca.key`，签发前校验证书与私钥配对。
+- `gencert` 新增 `-days`（默认 365 天）并输出到期日期：叶子证书有效期超过签发 CA 的剩余
+  有效期时自动收敛，已过期的 CA 直接拒绝签发。
+- 新增 `scripts/bench-tls.sh` 与 `proxy` 包基准（完整握手、SM4 数据面吞吐），
+  README 记录参考数字与解读口径；`auto` 端口另有对照基准。
+- 启动与配置热加载后扫描配置中引用的证书：剩余不足 30 天输出 `certificate expires soon` 警告，
+  已过期输出 `certificate has expired` 错误，附带文件、类型、CN 与剩余天数；同一文件只报一次。
+- `gencert -check <file|dir>` 只读体检：打印证书 CN、有效期与剩余天数，过期或临期时退出码为 1，
+  便于在轮换脚本与发布流水线里拦截。
+- `GET /api/v1/status` 新增 `certificates` 字段（文件、类型、CN、到期时间、剩余天数、是否过期），
+  WebUI 顶部据此显示到期横幅；`GET /api/v1/config/certificates` 列出配置目录内的证书文件。
+- WebUI 上游表单的 `tls_ca_file` 改为可输入可选择的自动补全，候选来自配置目录内的证书文件。
+- 新增 `docs/gm-compliance.md`：按密评口径逐项列出传输层国密的实现现状、配置项、现场取证命令
+  与已知边界（含 `gm` 与 `auto` 的强制/降级差异）。
+- WebUI 上游编辑弹窗新增「传输协议」（auto/gm/tls）、「CA 证书」「校验主机名」字段，
+  与配置文件字段一一对应；未填写的字段保存后保持原值。
+- 令牌比较摘要由 SHA-256 改为 SM3（合规口径统一，不改变安全强度）。
+
+### Fixed
+
+- 修复 `auto` 端口启用 mTLS 时 `client_ca_file` 只含 SM2 CA 会导致端口启动失败的问题：
+  标准 TLS 侧改为逐块解析 PEM，忽略无法解析的 SM2 证书，并要求至少存在一张可用证书。
+- 补充国密 mTLS 覆盖：无客户端证书、客户端证书由未知 CA 签发均握手失败，
+  正确 CA 签发的 SM2 双证书可完成握手；`auto` 端口混合 CA 下标准 TLS 与 TLCP 两类 mTLS 客户端可同时工作。
+- 修复管理 API 校验证书路径时以进程工作目录为基准的问题：改为按配置文件目录解析，
+  避免 WebUI 以相对路径新增/编辑含证书的上游时误报文件不存在；落盘仍保留相对路径。
+- WebUI E2E 补充国密表单用例：新增/编辑上游时 `tls_protocol`、`tls_ca_file`、`tls_server_name`
+  正确落库并在局部保存后保留；非 https 上游强制 `gm` 时前端拦截。
+- 补充出站 `auto` 的并发与健康检查覆盖：国密与标准 TLS 上游并存时协商结果按实例隔离，
+  标准 TLS 上游的降级不会带偏国密上游；健康检查探测复用数据面的协商器，国密上游不会被误判不可用。
+
+### Notes
+
+- 管理端口不提供国密 TLS；HTTP Basic / SOCKS5 认证与 CONNECT 隧道内加密不在本程序控制范围内。
+- 未内置密码机 / KMS，密评场景仍须补齐密码模块资质与密钥管理。
+
 ## [0.7.0] - 2026-11-11
 
 本次为代理稳健性与界面易用性版本。修掉 9 处热路径故障（fd 耗尽忙循环、UDP 关联被握手超时误杀、级联 BIND 挂起与重复响应、半关闭截断、告警风暴等），`/health` 改为匿名探活，流量指标去掉高基数标签；WebUI 上游编辑弹窗改为「基本信息 / 健康检查」双 Tab。

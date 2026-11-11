@@ -58,7 +58,7 @@ yigate_connections_total 12345
         path: '/api/v1/status',
         summary: '运行状态摘要',
         description:
-          '返回进程运行状态摘要，包含监听地址、管理端口、上游数量、pprof 与内置 WebUI 开关，以及自动探测的可用代理地址等。',
+          '返回进程运行状态摘要，包含监听地址、管理端口、上游数量、pprof 与内置 WebUI 开关、自动探测的可用代理地址，以及配置中引用的证书及其剩余有效期（certificates）。',
         auth: true,
         authNote: '当 management_auth_token 非空时需要认证',
         params: [],
@@ -84,6 +84,17 @@ yigate_connections_total 12345
       "family": "ipv4",
       "interface_name": "lo",
       "loopback": true
+    }
+  ],
+  "certificates": [
+    {
+      "file": "/etc/yigate/certs/gm/sign.crt",
+      "kind": "TLCP signing certificate",
+      "subject": "gw.example.com",
+      "is_ca": false,
+      "not_after": "2026-12-01T00:00:00Z",
+      "days_left": 19,
+      "expired": false
     }
   ],
   "timestamp": "2025-01-01T00:00:00Z"
@@ -112,6 +123,17 @@ yigate_connections_total 12345
       "family": "ipv4",
       "interface_name": "lo",
       "loopback": true
+    }
+  ],
+  "certificates": [
+    {
+      "file": "/etc/yigate/certs/gm/sign.crt",
+      "kind": "TLCP signing certificate",
+      "subject": "gw.example.com",
+      "is_ca": false,
+      "not_after": "2026-12-01T00:00:00Z",
+      "days_left": 19,
+      "expired": false
     }
   ],
   "timestamp": "2025-01-01T00:00:00Z"

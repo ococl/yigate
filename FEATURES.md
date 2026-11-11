@@ -14,6 +14,11 @@
   - socks5h 远端域名解析（域名发往上由侧解析，降低本地 DNS 泄露）
   - 首包 SNI / HTTP Host 嗅探恢复域名（`socks_sniff.go`，含 IPv6 处理）
 - **TLS 终止**：listener 层统一包装 TLS，支持服务端证书与客户端 CA（mTLS），协议层无感知。
+- **国密 TLCP**：`tls.protocol` 支持 `auto`/`gm`/`tls`；`gm` 使用 SM2 双证书（签名 + 加密），
+  `auto` 在同一端口自适应 TLCP / 标准 TLS；https 上游与健康检查同样支持国密，
+  `gencert` 子命令可生成样板证书（详见 README「国密（TLCP）适配」）。
+- **证书到期提醒**：启动与热加载后扫描配置引用的证书，30 天内警告、已过期报错；
+  `gencert -check <file|dir>` 可离线体检并以退出码报告；状态 API 与 WebUI 顶部横幅同步展示。
 
 ## 2. 路由
 
