@@ -526,7 +526,34 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// acceptBackoff 是 Accept 失败后的指数退避。
+// fd 耗尽（EMFILE/ENFILE）等错误会让 Accept 立即、持续地返回错误，
+// 不退避就会形成忙循环：CPU 打满、日志刷爆，进程在故障期失去自愈能力。
+type acceptBackoff struct {
+	delay time.Duration
+}
+
+const (
+	acceptBackoffInitial = 5 * time.Millisecond
+	acceptBackoffMax     = time.Second
+)
+
+func (b *acceptBackoff) next() time.Duration {
+	if b.delay == 0 {
+		b.delay = acceptBackoffInitial
+	} else {
+		b.delay *= 2
+	}
+	if b.delay > acceptBackoffMax {
+		b.delay = acceptBackoffMax
+	}
+	return b.delay
+}
+
+func (b *acceptBackoff) reset() { b.delay = 0 }
+
 func (s *Server) serveListener(addr string, ln net.Listener) {
+	var backoff acceptBackoff
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -538,10 +565,17 @@ func (s *Server) serveListener(addr string, ln net.Listener) {
 					// listener 已被替换，退出旧循环
 					return
 				}
-				proxy.Logger().Warnw("accept error", "address", addr, "error", err)
+				delay := backoff.next()
+				proxy.Logger().Warnw("accept error, backing off", "address", addr, "error", err, "retry_in", delay.String())
+				select {
+				case <-s.quit:
+					return
+				case <-time.After(delay):
+				}
 				continue
 			}
 		}
+		backoff.reset()
 		// 并发上限按监听地址独立计算；全局计数只用于指标与优雅关闭，
 		// 避免一个端口的连接挤占另一个端口的配额。
 		releaseListenerSlot, ok := s.acquireListenerConnSlot(addr, s.maxConnsForListener(addr))

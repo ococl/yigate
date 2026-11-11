@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1127,4 +1129,64 @@ func TestServerRejectOverLimitIsProtocolAware(t *testing.T) {
 			t.Fatalf("expected 503, got %d", resp.StatusCode)
 		}
 	})
+}
+
+func TestAcceptBackoffProgression(t *testing.T) {
+	var b acceptBackoff
+	want := []time.Duration{5 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
+	for i, w := range want {
+		if got := b.next(); got != w {
+			t.Fatalf("step %d: got %v, want %v", i, got, w)
+		}
+	}
+	for i := 0; i < 20; i++ {
+		b.next()
+	}
+	if b.delay != acceptBackoffMax {
+		t.Fatalf("backoff should be capped at %v, got %v", acceptBackoffMax, b.delay)
+	}
+	b.reset()
+	if got := b.next(); got != acceptBackoffInitial {
+		t.Fatalf("after reset: got %v, want %v", got, acceptBackoffInitial)
+	}
+}
+
+// failingListener 模拟 fd 耗尽：Accept 立即、持续地返回错误。
+type failingListener struct {
+	calls atomic.Int64
+	quit  chan struct{}
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	l.calls.Add(1)
+	return nil, syscall.EMFILE
+}
+func (l *failingListener) Close() error   { return nil }
+func (l *failingListener) Addr() net.Addr { return &net.TCPAddr{} }
+
+// TestServeListenerAcceptErrorBackoff 验证 Accept 持续失败时不会忙循环：
+// 250ms 窗口内调用次数必须被指数退避限制住，而不是刷出成千上万次。
+func TestServeListenerAcceptErrorBackoff(t *testing.T) {
+	addr := "127.0.0.1:0"
+	ln := &failingListener{}
+	s := &Server{
+		quit:      make(chan struct{}),
+		listeners: map[string]net.Listener{addr: ln},
+	}
+	done := make(chan struct{})
+	go func() {
+		s.serveListener(addr, ln)
+		close(done)
+	}()
+	time.Sleep(250 * time.Millisecond)
+	close(s.quit)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveListener did not stop after quit")
+	}
+	// 退避序列 5+10+20+40+80+160...，250ms 内最多约 6 次。
+	if calls := ln.calls.Load(); calls > 10 {
+		t.Fatalf("accept busy-looped %d times in 250ms, backoff not effective", calls)
+	}
 }
