@@ -41,7 +41,7 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 1. 在 `main` 上完成功能与回归测试（`go test ./...`、`make web-e2e`）。
 2. 更新 `CHANGELOG.md`（CI 另通过 `cnbcool/changelog` 生成 `LATEST_CHANGELOG.md` 作为 Release 说明）。
 3. 打标签并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。
-4. CI 执行发布门禁（版本格式 / 工作区干净 / tag 指向 HEAD）→ lint → golangci-lint → test → race → govulncheck → 前端类型检查/单测/审计 → 配置安全检查 → 构建（含 WebUI 嵌入和 SBOM）→ 浏览器 E2E → 产物校验 → 构建并推送镜像 → 创建 Release（`latest: true`）→ 上传附件。
+4. CI 执行发布门禁（版本格式 / 工作区干净 / tag 指向 HEAD）→ lint → golangci-lint → test → race → govulncheck → 前端类型检查/单测/审计 → 配置安全检查 → 构建（含 WebUI 嵌入和 SBOM）→ 产物校验 → 构建并推送镜像 → 创建 Release（`latest: true`）→ 上传附件。浏览器 E2E 不在 CI 中执行，发版前请在本地跑 `make web-e2e`。
 
 正式流水线先创建 Release 再上传附件（`cnbcool/attachments` 依赖已存在的 Release）；附件上传失败会直接使流水线失败，不会产生空发布。
 

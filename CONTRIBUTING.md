@@ -97,7 +97,7 @@ CNB 的各条流水线通过 `scripts/check-release-gates.sh`、`scripts/check-r
 | `go vet` / `go test` / `-race` | 是 | 是 | 是 |
 | `golangci-lint` / `govulncheck` | lint | 否（漏洞扫描由正式流水线承担） | 是 |
 | 前端 `type-check` / `npm audit` / `vitest` | 是 | 是 | 是 |
-| Playwright E2E | 否（构建流水线承担） | 是 | 是 |
+| Playwright E2E | 否 | 否（仅本地 `make web-e2e`） | 否（仅本地 `make web-e2e`） |
 | 发布门禁（版本/工作区/tag） | 否 | 是 | 是 |
 | 配置安全 / 平台清单 / SBOM | 前两者 | 前两者 | 全量 |
 | 同步到 GitHub 镜像 | 否 | 仅代码 | 代码 + 标签 + Release + 附件 |

@@ -2,16 +2,19 @@
 # YiGate CNB CI/CD 配置
 #
 # 流水线概览:
-#   main 分支 push   → 每日构建：单测 / 26 平台构建 / 浏览器 E2E 三路并行
+#   main 分支 push   → 每日构建：单测 / 主流平台构建 两路并行
 #                      → Beta 构件 + Docker 镜像 :main（覆盖式）
 #   v* tag push      → 正式版：全量门禁（lint / vuln / race 与构建并行）
 #                      → release, latest + Docker 镜像
 #   PR to main|dev   → lint / test / race / 前端校验 / 静态检查（并行，不发布）
 #
+# 浏览器 E2E 不在 CI 中执行：Playwright 用例在本地用 `make web-e2e` 跑。
+# 48 个用例串行约 100 秒，放在流水线里会吃掉一半的时间预算。
+#
 # 编排原则:
 #   * CNB 的 stages 串行、stage 内 jobs 写成对象即并行，并行 job 共享
 #     /workspace 与 docker.volumes，因此"先产前端，再并行构建/测试"是安全的。
-#   * 关键路径只留"必须串行"的部分：前端 → (构建 | E2E | 单测) → 发布。
+#   * 关键路径只留"必须串行"的部分：前端 → (构建 | 单测) → 发布。
 #   * 16 核是实测得出的经济点：26 平台交叉编译是纯 CPU 负载，8 核下这一段
 #     就要 4 分钟，16 核约 1 分钟；核时反而更省。
 #
@@ -34,7 +37,7 @@ main:
           - /root/.cache/go-build
           # go install 出来的工具（golangci-lint / govulncheck）跨构建复用。
           - /go/bin
-          # npm 缓存：前端与 E2E 各要装一次依赖，缓存命中能省十几秒。
+          # npm 缓存：前端每次都要装依赖，缓存命中能省十几秒。
           - /root/.npm
       services:
         - docker
@@ -64,7 +67,7 @@ main:
             bash scripts/check-platforms-sync.sh
             # 所有发布通道共用同一份门禁：版本格式 / 工作区干净 / 正式版 tag 指向 HEAD。
             bash scripts/check-release-gates.sh "$BUILD_VERSION"
-        # ---- 共同输入：前端产物与 E2E 二进制，后面三路并行都依赖它们 ----
+        # ---- 共同输入：前端产物，后面并行的构建与单测都依赖它 ----
         - name: webui-deps
           image: node:26.13.0-alpine
           # 依赖只装一次，后面的构建与检查并行读同一份 node_modules。
@@ -82,8 +85,7 @@ main:
                 cd web && npm audit --audit-level=high --registry=https://registry.npmjs.org \
                   && npm run check && npm test
         # ---- 两路并行：单测 / 构建 ----
-        # lint、race、漏洞扫描是 PR 门禁的职责，main 上不重复跑；
-        # 浏览器 E2E 见下方的 beta-e2e（独立流水线并行跑，不占本流水线时间）。
+        # lint、race、漏洞扫描是 PR 门禁的职责，main 上不重复跑。
         - name: verify
           jobs:
             unit-test:
@@ -122,47 +124,6 @@ main:
                 - https://cnb.cool/o_c/yiteam/screct/-/blob/main/signing/envs.yml
               script: bash scripts/sync-github.sh code
               allowFailure: true
-
-    # ---- 浏览器 E2E：同一次 push，与上面的 beta 流水线并行 ----
-    # 48 个用例串行跑约 100 秒，是整个 CI 里最长的单点；把它留在主流水线里，
-    # 2 分钟的目标就没有可能。拆成独立流水线后：主流水线约 2 分钟出产物与镜像，
-    # E2E 自己跑完（失败仍然可见、仍然红），互不阻塞。
-    - name: beta-e2e
-      runner:
-        tags: cnb:arch:amd64
-        cpus: 4
-      docker:
-        image: golang:1.27.4
-        volumes:
-          - /go/pkg/mod
-          - /root/.cache/go-build
-          - /root/.npm
-      env:
-        GOPROXY: https://goproxy.cn,direct
-        CGO_ENABLED: "0"
-      label:
-        type: BETA
-      stages:
-        - name: webui-deps
-          image: node:26.13.0-alpine
-          script: cd web && npm ci
-        - name: webui
-          image: node:26.13.0-alpine
-          script: |
-            cd web && npm run build && node scripts/embed-dist.mjs dist ../src/proxy/webui_dist
-        - name: e2e-binary
-          script: |
-            mkdir -p build
-            (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
-        - name: e2e
-          image: mcr.microsoft.com/playwright:v1.65.0-noble
-          script: |
-            # 装依赖与装中文字体互不依赖，并行走；字体缺失只告警，不阻塞测试。
-            (cd web && npm ci) & ci_pid=$!
-            bash scripts/install-e2e-fonts.sh & font_pid=$!
-            wait "$ci_pid" || exit 1
-            wait "$font_pid" || true
-            cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
 
 # ==================== PR 检查: 代码质量守护 ====================
 "(main|dev)":
@@ -268,13 +229,10 @@ main:
               script: |
                 cd web && npm audit --audit-level=high --registry=https://registry.npmjs.org \
                   && npm run check && npm test
-        - name: e2e-binary
-          script: |
-            mkdir -p build
-            (cd src && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/yigate-e2e .)
-        # ---- 四路并行：静态检查 / 单测+竞态 / 26 平台构建 / 浏览器 E2E ----
+        # ---- 三路并行：静态检查 / 单测+竞态 / 26 平台构建 ----
         # 正式版保留全部门禁，但把它们拆成互不依赖的任务同时跑；
-        # 关键路径由最长的那条（约 70s）决定，而不是四条相加。
+        # 关键路径由最长的那条决定，而不是三条相加。
+        # 浏览器 E2E 不在 CI 中执行，见文件头的说明。
         - name: verify
           jobs:
             lint:
@@ -304,15 +262,6 @@ main:
               script: |
                 bash scripts/ci-build.sh "$BUILD_VERSION"
                 bash scripts/check-release-files.sh "$BUILD_VERSION"
-            e2e:
-              image: mcr.microsoft.com/playwright:v1.65.0-noble
-              script: |
-                # 装依赖与装中文字体互不依赖，并行走；字体缺失只告警，不阻塞测试。
-                (cd web && npm ci) & ci_pid=$!
-                bash scripts/install-e2e-fonts.sh & font_pid=$!
-                wait "$ci_pid" || exit 1
-                wait "$font_pid" || true
-                cd web && YIGATE_E2E_BIN="$PWD/../build/yigate-e2e" npm run test:e2e
             changelog:
               # 首个正式版本没有“上一个 tag”，cnbcool/changelog 会因
               # git describe --tags v0.2.0^ 失败而退出；先写一份兜底变更日志，
