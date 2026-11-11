@@ -207,6 +207,15 @@ main:
             VERSION=$(bash scripts/version.sh)
             echo "Version: $VERSION"
             echo "##[set-output version=$VERSION]"
+            # Release 参数按版本形态生成，交给 ship 的 optionsFrom 读取。
+            # 写成文件而不是两个互斥的 release job：同 stage 内 job 并行，
+            # 两个 release job 会与 docker job 抢跑，且依赖 job 级 if 求值时机。
+            if echo "$VERSION" | grep -q -- '-'; then
+              printf '{"title":"YiGate %s","descriptionFromFile":"LATEST_CHANGELOG.md","preRelease":true,"latest":false}\n' "$VERSION" > release-options.json
+            else
+              printf '{"title":"YiGate","descriptionFromFile":"LATEST_CHANGELOG.md","latest":true}\n' > release-options.json
+            fi
+            cat release-options.json
           exports:
             version: BUILD_VERSION
         - name: gates
@@ -306,25 +315,10 @@ main:
                   docker push "${IMAGE}:latest"
                   docker push "${IMAGE}:${BUILD_VERSION}"
                 fi
-            # 预发布与正式版互斥：preRelease 让页面明确标为预发布，
-            # 且不抢占「最新版本」指针。
-            - name: create-prerelease
-              type: git:release
-              if: |
-                echo "${BUILD_VERSION}" | grep -q -- '-'
-              options:
-                title: YiGate ${BUILD_VERSION}
-                descriptionFromFile: LATEST_CHANGELOG.md
-                preRelease: true
-                latest: false
+            # 参数由 determine-version 写入：预发布标 preRelease 且不抢占最新版本指针。
             - name: create-release
               type: git:release
-              if: |
-                ! echo "${BUILD_VERSION}" | grep -q -- '-'
-              options:
-                title: YiGate
-                descriptionFromFile: LATEST_CHANGELOG.md
-                latest: true
+              optionsFrom: ./release-options.json
         # ---- 附件与 GitHub 镜像并行；cnbcool/attachments 依赖已存在的 Release ----
         - name: finalize
           jobs:

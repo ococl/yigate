@@ -120,3 +120,8 @@ playwright-report/
 
 # 视觉巡检快照（本地生成，不入库）
 .impeccable/
+
+# CI 生成：Release 参数。由 v* 流水线的 determine-version 阶段写出，
+# 供 ship 阶段的 git:release 用 optionsFrom 读取；gates 紧随其后检查工作区，
+# 若不忽略会被判定为脏提交。
+release-options.json
