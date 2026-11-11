@@ -566,7 +566,7 @@ func (s *Server) serveListener(addr string, ln net.Listener) {
 					return
 				}
 				delay := backoff.next()
-				proxy.Logger().Warnw("accept error, backing off", "address", addr, "error", err, "retry_in", delay.String())
+				proxy.LogWarnSampled("accept:"+addr, "accept error, backing off", "address", addr, "error", err, "retry_in", delay.String())
 				select {
 				case <-s.quit:
 					return

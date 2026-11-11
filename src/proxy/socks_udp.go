@@ -157,7 +157,7 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				Logger().Warnw("udp relay read failed", "error", err)
+				LogWarnSampled("udp-relay-read", "udp relay read failed", "error", err)
 				r.closeSessions()
 				return
 			}
@@ -189,13 +189,13 @@ func (r *udpRelay) run(clientReader *bufio.Reader) {
 			}
 			packet := append(buf[:dataOff], data...)
 			if _, err := r.upPacketConn.Write(packet); err != nil {
-				Logger().Warnw("udp relay write to upstream failed", "error", err)
+				LogWarnSampled("udp-write-upstream", "udp relay write to upstream failed", "error", err)
 			}
 			continue
 		}
 
 		if err := r.forwardToTarget(target, data); err != nil {
-			Logger().Warnw("udp relay forward to target failed", "target", target, "error", err)
+			LogWarnSampled("udp-forward", "udp relay forward to target failed", "target", target, "error", err)
 		}
 	}
 }
@@ -261,7 +261,7 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 				if !r.sessionActive(sess) {
 					return
 				}
-				Logger().Warnw("udp session read failed", "error", err)
+				LogWarnSampled("udp-session-read", "udp session read failed", "error", err)
 				return
 			}
 		}
@@ -271,7 +271,7 @@ func (r *udpRelay) readFromTarget(sess *udpSession) {
 		}
 		packet := append(header, buf[:n]...)
 		if _, err := r.ln.WriteToUDP(packet, clientAddr); err != nil {
-			Logger().Warnw("udp relay write back to client failed", "error", err)
+			LogWarnSampled("udp-write-back", "udp relay write back to client failed", "error", err)
 			return
 		}
 		r.touchSession(sess)
@@ -294,7 +294,7 @@ func (r *udpRelay) readFromUpstream() {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
-				Logger().Warnw("udp upstream read failed", "error", err)
+				LogWarnSampled("udp-upstream-read", "udp upstream read failed", "error", err)
 				return
 			}
 		}
@@ -303,7 +303,7 @@ func (r *udpRelay) readFromUpstream() {
 			continue
 		}
 		if _, err := r.ln.WriteToUDP(buf[:n], clientAddr); err != nil {
-			Logger().Warnw("udp relay write back to client failed", "error", err)
+			LogWarnSampled("udp-write-back", "udp relay write back to client failed", "error", err)
 			return
 		}
 	}

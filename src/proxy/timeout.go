@@ -149,7 +149,7 @@ func (r *deadlineReader) Read(p []byte) (int, error) {
 					"user", r.trafficKey.User, "upstream", r.trafficKey.Upstream,
 					"target", r.trafficKey.Target, "direction", r.auditDirection, "error", recordErr)
 			} else {
-				Logger().Warnw("traffic audit record failed",
+				LogWarnSampled("traffic-audit-record", "traffic audit record failed",
 					"user", r.trafficKey.User, "error", recordErr)
 			}
 			return n, recordErr

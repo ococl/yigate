@@ -17,6 +17,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -503,5 +504,40 @@ func TestE2EHalfCloseOverTLSKeepsResponse(t *testing.T) {
 	}
 	if string(got) != response {
 		t.Fatalf("response truncated by half-close handling: got %q want %q", got, response)
+	}
+}
+
+// TestE2EHotPathWarningsAreSampled 验收：故障风暴下热路径告警被限频，
+// 不会每个会话/每个错误都写一行日志，但第一条错误仍然保留。
+func TestE2EHotPathWarningsAreSampled(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "sampled.log")
+	t.Cleanup(func() { _ = proxy.InitLogger(proxy.DefaultLogConfig()) })
+
+	proxyAddr, _ := startE2EServer(t, func(cfg *Config) {
+		cfg.Log = proxy.LogConfig{
+			Level: "warn", Format: "json", Output: "file", File: logPath,
+			Rotation: "size", MaxSize: 10, MaxAge: 1, MaxBackups: 1,
+		}
+	})
+	_, udpConn, relayAddr := udpAssociate(t, proxyAddr)
+	// 向无人监听的端口发包：每个会话都会收到 ICMP 不可达并触发一次读错误。
+	for i := 0; i < 192; i++ {
+		target := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 22000 + i}
+		if _, err := udpConn.WriteToUDP(buildUDPPacket(target, []byte("x")), relayAddr); err != nil {
+			t.Fatalf("send udp packet %d: %v", i, err)
+		}
+	}
+	time.Sleep(time.Second)
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	lines := strings.Count(string(data), "udp session read failed")
+	if lines == 0 {
+		t.Fatal("expected at least one udp session warning to be kept")
+	}
+	if lines > 5 {
+		t.Fatalf("hot path warning was not sampled: %d lines for 192 failing sessions", lines)
 	}
 }
