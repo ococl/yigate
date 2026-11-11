@@ -44,6 +44,9 @@ main:
         YIGATE_REQUIRE_SBOM: "1"
         # GitHub 镜像仓坐标（scripts/sync-github.sh 据此推送代码、标签与 Release）
         GITHUB_REPO: ococl/yigate
+        # 每日构建只出主流平台；26 平台全量编译留给 tag 发布，否则光是冷编译
+        # 就要 3 分钟，2 分钟的目标无从谈起。
+        YIGATE_PLATFORM_SCOPE: beta
       label:
         type: BETA
       stages:

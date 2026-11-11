@@ -72,7 +72,7 @@ echo "--- Verifying dependencies ---"
 # 跨平台编译
 # 26 个平台串行编译是整条流水线最慢的一段（每个平台都要重编全部依赖），
 # 这里按 CPU 数并发；单个平台仍是完整的 go build，产物与串行完全一致。
-PLATFORMS=($(all_platforms))
+PLATFORMS=($(selected_platforms))
 JOBS="${YIGATE_BUILD_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 echo "--- Cross-compiling ${#PLATFORMS[@]} platforms (jobs=${JOBS}) ---"
 
@@ -123,7 +123,7 @@ run_parallel package_platform "${PLATFORMS[@]}" || exit 1
 # 省掉 Dockerfile 里重复的 npm ci 与 go build。
 echo "--- Removing raw binaries ---"
 mkdir -p "${REPO_ROOT}/build"
-for platform in $(all_platforms); do
+for platform in "${PLATFORMS[@]}"; do
     name="$(output_name "${VERSION}" "${platform}")"
     if [[ "${platform}" == "linux/amd64" ]]; then
         mv -f "${RELEASE_DIR}/${name}" "${REPO_ROOT}/build/yigate-linux-amd64"

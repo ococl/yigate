@@ -71,6 +71,28 @@ all_platforms() {
   done
 }
 
+# 每日构建（beta）只出主流平台：26 平台全量编译是整条流水线最贵的一段，
+# 在 16 核上冷编译约 3 分钟。正式发布（tag）仍产出全部 26 个平台。
+YIGATE_BETA_PLATFORMS=(
+  linux/amd64
+  linux/arm64
+  linux/arm/v7
+  darwin/amd64
+  darwin/arm64
+  windows/amd64
+)
+
+# 按 YIGATE_PLATFORM_SCOPE 选择平台清单：beta = 主流子集，其他值 = 全部平台。
+selected_platforms() {
+  if [[ "${YIGATE_PLATFORM_SCOPE:-full}" == "beta" ]]; then
+    for p in "${YIGATE_BETA_PLATFORMS[@]}"; do
+      echo "$p"
+    done
+    return
+  fi
+  all_platforms
+}
+
 # 输出所有 Linux 平台标识（用于安装包）。
 linux_platforms() {
   for p in "${YIGATE_PLATFORMS[@]}"; do
