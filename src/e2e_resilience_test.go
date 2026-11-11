@@ -10,6 +10,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -427,5 +428,80 @@ func TestE2EMetricsDoNotCarryTargetLabel(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no yigate_traffic_bytes_total samples exported, test is not exercising anything")
+	}
+}
+
+// startEOFResponder 启动一个"读到 EOF 才回写响应"的 TCP 服务，
+// 用于复现半关闭场景：对端必须先看到客户端发完，才返回完整响应。
+func startEOFResponder(t *testing.T, response string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen eof responder: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_, _ = io.Copy(io.Discard, c) // 直到对端 CloseWrite
+				_, _ = c.Write([]byte(response))
+			}(conn)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// TestE2EHalfCloseOverTLSKeepsResponse 验收：TLS 入口连接不支持 CloseRead，
+// 客户端 CloseWrite 之后，对端回写的响应必须仍能完整送达，
+// 不能被"读方向关闭退化为整体 Close"截断。
+func TestE2EHalfCloseOverTLSKeepsResponse(t *testing.T) {
+	certFile, keyFile, _ := generateTestCerts(t)
+	const response = "response-after-client-eof"
+	targetAddr := startEOFResponder(t, response)
+	proxyAddr, _ := startE2EServer(t, func(cfg *Config) {
+		cfg.Listeners[0].TLS.CertFile = certFile
+		cfg.Listeners[0].TLS.KeyFile = keyFile
+	})
+
+	conn, err := tls.Dial("tcp", proxyAddr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("tls dial proxy: %v", err)
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		t.Fatalf("write greeting: %v", err)
+	}
+	greeting := make([]byte, 2)
+	if _, err := io.ReadFull(br, greeting); err != nil {
+		t.Fatalf("read greeting: %v", err)
+	}
+	req := append([]byte{0x05, 0x01, 0x00}, socks5Addr(targetAddr)...)
+	if _, err := conn.Write(req); err != nil {
+		t.Fatalf("write connect: %v", err)
+	}
+	rep, _, err := readSocks5Reply(br)
+	if err != nil || rep != 0x00 {
+		t.Fatalf("connect failed: rep=0x%02x err=%v", rep, err)
+	}
+	if _, err := conn.Write([]byte("request-body")); err != nil {
+		t.Fatalf("write request body: %v", err)
+	}
+	// 客户端发完，进入半关闭。
+	if err := conn.CloseWrite(); err != nil {
+		t.Fatalf("close write: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("read response after half-close: %v", err)
+	}
+	if string(got) != response {
+		t.Fatalf("response truncated by half-close handling: got %q want %q", got, response)
 	}
 }

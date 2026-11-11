@@ -76,10 +76,12 @@ func closeWrite(conn net.Conn) {
 	_ = conn.Close()
 }
 
+// closeRead 在半关闭语义下关闭读方向。
+// 注意不能退化为整体 Close：TLS 等包装连接不支持 CloseRead，直接 Close 会把
+// 另一方向尚未传完的数据一并切断（例如对端读到 EOF 后才回写响应的场景）。
+// 此时保持连接打开，由对端结束或空闲超时收尾，Tunnel 返回前会统一 Close。
 func closeRead(conn net.Conn) {
 	if c, ok := conn.(interface{ CloseRead() error }); ok {
 		_ = c.CloseRead()
-		return
 	}
-	_ = conn.Close()
 }
