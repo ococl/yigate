@@ -957,6 +957,7 @@ func withProbeJitter(d time.Duration) time.Duration {
 	if delta <= 0 {
 		return d
 	}
+	//nolint:gosec // 退避抖动只需均匀分布，不涉及安全用途
 	return d - delta + time.Duration(rand.Int64N(int64(2*delta)+1))
 }
 

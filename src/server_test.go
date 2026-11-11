@@ -1154,7 +1154,6 @@ func TestAcceptBackoffProgression(t *testing.T) {
 // failingListener 模拟 fd 耗尽：Accept 立即、持续地返回错误。
 type failingListener struct {
 	calls atomic.Int64
-	quit  chan struct{}
 }
 
 func (l *failingListener) Accept() (net.Conn, error) {

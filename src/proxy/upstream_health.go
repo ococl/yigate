@@ -419,6 +419,7 @@ func checkHTTPProtocol(conn net.Conn, up *Upstream, timeout time.Duration) bool 
 	br := bufio.NewReader(conn)
 	// 传入请求方法，ReadResponse 才能识别 CONNECT 200 是隧道响应而不是
 	// 无长度 body，避免后续读取卡到超时。
+	//nolint:bodyclose // 探测只读状态码：隧道/无长度 body 读完或关闭会阻塞到探测超时，连接由调用方关闭
 	resp, err := http.ReadResponse(br, &http.Request{Method: reqMethod})
 	if err != nil {
 		return false
