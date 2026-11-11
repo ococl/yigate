@@ -219,10 +219,16 @@ json_escape() {
 
 # release_payload <tag> <version> <body_file> — 生成创建 Release 的 JSON 请求体。
 release_payload() {
-  local tag="$1" version="$2" body_file="$3"
-  printf '{"tag_name":%s,"name":%s,"draft":false,"prerelease":false,"body":' \
+  local tag="$1" version="$2" body_file="$3" prerelease="false"
+  # 带预发布后缀（X.Y.Z-<prerelease>）的版本在 GitHub 侧同样标记为 prerelease，
+  # 避免它被当成默认下载的稳定版。
+  if [[ "$version" == *-* ]]; then
+    prerelease="true"
+  fi
+  printf '{"tag_name":%s,"name":%s,"draft":false,"prerelease":%s,"body":' \
     "$(printf '%s' "$tag" | json_escape)" \
-    "$(printf 'YiGate %s' "$version" | json_escape)"
+    "$(printf 'YiGate %s' "$version" | json_escape)" \
+    "$prerelease"
   json_escape < "$body_file"
   printf '}'
 }

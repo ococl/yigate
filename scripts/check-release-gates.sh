@@ -15,8 +15,8 @@ if [[ -z "${VERSION}" ]]; then
   exit 1
 fi
 
-if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9a-f]+)?$ ]]; then
-  echo "error: 版本号必须为 x.y.z 或 x.y.z-beta.<sha> / x.y.z-dev.<sha>" >&2
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+  echo "error: 版本号必须为 x.y.z 或 x.y.z-<prerelease>（如 0.8.0-beta1）" >&2
   exit 1
 fi
 
@@ -26,8 +26,9 @@ if [[ -n "$(git -C "${REPO_ROOT}" status --porcelain)" ]]; then
   exit 1
 fi
 
-# 正式版（纯 x.y.z）自动要求 tag；Beta/Dev 版不要求，避免两条流水线写成两份门禁。
-if [[ "${MODE}" == "--tag" || "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+# 正式版与预发布版都由 tag 触发，标签必须指向 HEAD；
+# 只有 CI 按提交自动生成的 0.0.0-*（main 的 Beta / 开发版）没有对应 tag。
+if [[ "${MODE}" == "--tag" || ! "${VERSION}" =~ ^0\.0\.0- ]]; then
   TAG="v${VERSION}"
   if ! git -C "${REPO_ROOT}" rev-parse "${TAG}" >/dev/null 2>&1; then
     echo "error: tag ${TAG} 不存在" >&2

@@ -8,29 +8,36 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 
 | 构建来源 | 版本号格式 | 说明 |
 |----------|------------|------|
-| `vX.Y.Z` 标签推送 | `X.Y.Z` | 正式版（去除 `v` 前缀，须为 `x.y.z`） |
-| `main` 分支推送 | `0.0.0-beta.<short-sha>` | Beta 构建（校验 + 归档 + `:main` 镜像） |
+| `vX.Y.Z` 标签推送 | `X.Y.Z` | 正式版（去除 `v` 前缀） |
+| `vX.Y.Z-<prerelease>` 标签推送 | `X.Y.Z-<prerelease>` | 预发布版，如 `0.8.0-beta1`；Release 标记 `preRelease` |
+| `main` 分支推送 | `0.0.0-beta.<short-sha>` | 按提交自动构建的 Beta，不含版本语义 |
 | 其他（本地 / 未匹配） | `0.0.0-dev.<short-sha>` | 开发版 |
 
-- `X.Y.Z` 为语义化版本；`short-sha` 为 7 位 commit 短哈希。
+- `X.Y.Z` 为语义化版本；`<prerelease>` 遵循 SemVer 预发布标识（`0-9A-Za-z` 与点，
+  如 `beta1`、`beta.1`、`rc.2`）；`short-sha` 为 7 位 commit 短哈希。
 - 本地构建（非 CI）回退到 `git rev-parse --short HEAD`。
+- 两者区别：`v*` 标签的预发布是**带版本号的正式发布**（有 Release、有归档），
+  `main` 的 `0.0.0-beta.<sha>` 只是每次提交的临时构件，不创建 Release。
 
 ## 分支与产物映射
 
 | 触发 | 流水线 | 产物 |
 |------|--------|------|
 | `main` 分支 push | beta | 全平台二进制归档 + SBOM + SHA256SUMS + Docker 镜像 `:main`（覆盖式） |
-| `v*` 标签 push | formal-release | 全平台二进制归档 + SBOM + SHA256SUMS + Docker 镜像 `:latest` 与 `:X.Y.Z` |
+| `vX.Y.Z` 标签 push | formal-release | 全平台二进制归档 + SBOM + SHA256SUMS + Docker 镜像 `:latest` 与 `:X.Y.Z` + Release（`latest: true`） |
+| `vX.Y.Z-<prerelease>` 标签 push | formal-release | 全平台二进制归档 + SBOM + SHA256SUMS + Docker 镜像 `:X.Y.Z-<prerelease>` + Release（`preRelease: true`，不动 `:latest`） |
 | PR to `main`/`dev` | pr-check | lint + test + race + 前端校验（不发布） |
 
-> 注：`main` 分支每次提交均触发 Beta 构建，推送覆盖式 `:main` Docker 镜像。正式镜像 `:latest` / `:X.Y.Z` 统一由 `v*` 标签流水线发布。
+> 注：`main` 分支每次提交均触发 Beta 构建，推送覆盖式 `:main` Docker 镜像。与版本号绑定的镜像（`:latest` / `:X.Y.Z` / `:X.Y.Z-<prerelease>`）统一由 `v*` 标签流水线发布。
 
-> 正式版产物按版本号归档并挂载到对应 Release；日常 Beta 构件挂在 commit 上，不创建 Release。
+> 正式版与预发布版的产物都按版本号归档并挂载到对应 Release；日常 Beta 构件挂在 commit 上，不创建 Release。
 
 ## Docker 镜像标签
 
 - `main` 分支：`registry/...:main`（Beta 构建，覆盖式）
-- `v*` 标签：`registry/...:latest` 与 `registry/...:X.Y.Z`
+- `vX.Y.Z` 标签：`registry/...:latest` 与 `registry/...:X.Y.Z`
+- `vX.Y.Z-<prerelease>` 标签：仅 `registry/...:X.Y.Z-<prerelease>`，**不移动 `:latest`**
+  （否则未指定版本的用户会默认拉到 beta）
 
 镜像基于 `golang:1.27.4` 多阶段构建，运行阶段为 `alpine:3.24.4`，使用非 root 的 `yigate` 用户，由 `entrypoint.sh` 在 root 启动时降权，工作目录 `/var/lib/yigate`，挂载 `data` 与 `logs`。
 
@@ -45,10 +52,23 @@ YiGate 使用 **CNB CI**（`.cnb.yml`）驱动的自动化发布。二进制跨�
 
 正式流水线先创建 Release 再上传附件（`cnbcool/attachments` 依赖已存在的 Release）；附件上传失败会直接使流水线失败，不会产生空发布。
 
+### 预发布版（手动打标签触发）
+
+流程与正式版完全相同，只差版本号带预发布后缀，以及两处产物差异：
+
+1. `CHANGELOG.md` 增加对应版本段落（如 `## [0.8.0-beta1]`），把 `[Unreleased]` 的内容归入。
+2. 打标签并推送：`git tag v0.8.0-beta1 && git push origin v0.8.0-beta1`。
+3. CI 走与正式版相同的门禁与构建，产物差异只有两点：
+   - 镜像只推 `:0.8.0-beta1`，不动 `:latest`；
+   - Release 标记 `preRelease: true`、`latest: false`，GitHub 镜像同步同样标记 `prerelease`。
+
+预发布标签同样不可变；修复后发新的预发布版本（`-beta2`、`-rc.1`），不要移动旧标签。
+
 ### Beta 构建（main 分支自动触发）
 
 - `main` 每次提交都会构建全平台归档、SBOM 和 `:main` 镜像，不创建 Git Release。
-- 需要对外发布的版本必须走 `v*` 标签流水线。
+- 版本号是 `0.0.0-beta.<short-sha>`，没有版本语义，仅用于定位某次提交的构件。
+- 需要对外发布的版本必须走 `v*` 标签流水线（正式版或预发布版）。
 
 ## 产物校验
 

@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.8.0-beta1] - 2026-11-11
+
 ### Added
 
 - 传输层国密适配（TLCP，GB/T 38636-2020）。listener 新增 `tls.protocol`：
@@ -55,6 +57,12 @@
 
 - 管理端口不提供国密 TLS；HTTP Basic / SOCKS5 认证与 CONNECT 隧道内加密不在本程序控制范围内。
 - 未内置密码机 / KMS，密评场景仍须补齐密码模块资质与密钥管理。
+
+### Changed
+
+- 发布通道新增预发布版：`vX.Y.Z-<prerelease>`（如 `v0.8.0-beta1`）走 `v*` 流水线，
+  产物与正式版同规格，但 Release 标记 `preRelease`、镜像只推版本 tag 不移动 `:latest`。
+  详见 `VERSIONING.md`。
 
 ## [0.7.0] - 2026-11-11
 

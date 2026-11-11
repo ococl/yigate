@@ -4,8 +4,9 @@
 # 流水线概览:
 #   main 分支 push   → 每日构建：单测 / 主流平台构建 两路并行
 #                      → Beta 构件 + Docker 镜像 :main（覆盖式）
-#   v* tag push      → 正式版：全量门禁（lint / vuln / race 与构建并行）
-#                      → release, latest + Docker 镜像
+#   v* tag push      → 发布版：全量门禁（lint / vuln / race 与构建并行）
+#                      → vX.Y.Z 为正式版（Release + :latest + :X.Y.Z）
+#                      → vX.Y.Z-<prerelease> 为预发布（标记 preRelease，只推 :X.Y.Z-<prerelease>）
 #   PR to main|dev   → lint / test / race / 前端校验 / 静态检查（并行，不发布）
 #
 # 浏览器 E2E 不在 CI 中执行：Playwright 用例在本地用 `make web-e2e` 跑。
@@ -288,15 +289,38 @@ main:
           jobs:
             - name: docker
               # 复用 cross-build 产出的 linux/amd64 二进制，镜像内不再跑 npm ci + go build。
+              # 预发布（X.Y.Z-<prerelease>）只推版本 tag，不移动 :latest：
+              # 否则没指定版本的用户会默认拉到 beta。
               script: |
-                docker build --target prebuilt \
-                  -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest \
-                  -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION} \
-                  -f deploy/docker/Dockerfile .
-                docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
-                docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${BUILD_VERSION}
+                IMAGE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+                if echo "${BUILD_VERSION}" | grep -q -- '-'; then
+                  docker build --target prebuilt \
+                    -t "${IMAGE}:${BUILD_VERSION}" \
+                    -f deploy/docker/Dockerfile .
+                  docker push "${IMAGE}:${BUILD_VERSION}"
+                else
+                  docker build --target prebuilt \
+                    -t "${IMAGE}:latest" \
+                    -t "${IMAGE}:${BUILD_VERSION}" \
+                    -f deploy/docker/Dockerfile .
+                  docker push "${IMAGE}:latest"
+                  docker push "${IMAGE}:${BUILD_VERSION}"
+                fi
+            # 预发布与正式版互斥：preRelease 让页面明确标为预发布，
+            # 且不抢占「最新版本」指针。
+            - name: create-prerelease
+              type: git:release
+              if: |
+                echo "${BUILD_VERSION}" | grep -q -- '-'
+              options:
+                title: YiGate ${BUILD_VERSION}
+                descriptionFromFile: LATEST_CHANGELOG.md
+                preRelease: true
+                latest: false
             - name: create-release
               type: git:release
+              if: |
+                ! echo "${BUILD_VERSION}" | grep -q -- '-'
               options:
                 title: YiGate
                 descriptionFromFile: LATEST_CHANGELOG.md
