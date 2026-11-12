@@ -102,7 +102,7 @@ func marshalSM2Key(t testing.TB, key *sm2.PrivateKey, password []byte) []byte {
 	if len(password) == 0 {
 		der, err = smx509.MarshalPKCS8PrivateKey(key)
 	} else {
-		var encrypter pkcs.PBESEncrypter = pkcs.NewSMPBESEncrypter(16, 10000)
+		encrypter := pkcs.NewSMPBESEncrypter(16, 10000)
 		der, err = pkcs8.MarshalPrivateKey(key, password, encrypter)
 	}
 	if err != nil {

@@ -84,11 +84,6 @@ func (u *Upstream) clientTLSOptions() ClientTLSOptions {
 	}
 }
 
-// dialProxyConn 在不掌握上游上下文时按标准 TLS 拨号（兼容旧调用）。
-func dialProxyConn(u *url.URL, timeout time.Duration) (net.Conn, error) {
-	return dialProxyConnWith(nil, u, timeout)
-}
-
 // dialProxyConnWith 按上游配置的传输层协议拨号：https 上游走 TLS/TLCP 协商，
 // 其余 scheme 仍是明文 TCP。
 func dialProxyConnWith(up *Upstream, u *url.URL, timeout time.Duration) (net.Conn, error) {

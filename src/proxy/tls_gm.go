@@ -393,7 +393,9 @@ func verifySM2KeyPair(leaf *smx509.Certificate, priv *sm2.PrivateKey) error {
 	if !ok {
 		return errors.New("tls: certificate public key is not an SM2 key")
 	}
-	if pub.X.Cmp(priv.X) != 0 || pub.Y.Cmp(priv.Y) != 0 {
+	// 用 Equal 而不是逐坐标比较：X/Y 自 Go 1.26 起已废弃，
+	// 直接读原始坐标可能得到非法的密钥表示。
+	if !pub.Equal(&priv.PublicKey) {
 		return errors.New("tls: private key does not match public key")
 	}
 	return nil
@@ -409,7 +411,8 @@ type ClientTLSOptions struct {
 
 func (o ClientTLSOptions) buildStandardConfig(addr string) (*tls.Config, error) {
 	cfg := &tls.Config{
-		MinVersion:         tls.VersionTLS12,
+		MinVersion: tls.VersionTLS12,
+		//nolint:gosec // G402: 该字段来自用户显式配置（默认 false），是排查自签证书上游的必要开关
 		InsecureSkipVerify: o.InsecureSkipVerify,
 	}
 	if strings.TrimSpace(o.CAFile) != "" {
