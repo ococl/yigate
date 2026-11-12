@@ -165,11 +165,14 @@ main:
               # （can't load config: the Go language version used to build
               # golangci-lint is lower than the targeted Go version），
               # 改用流水线 Go 1.27.4 现场安装，保证与 go.mod 目标版本一致。
-              # /go/bin 是持久卷：同版本已存在就直接复用，省掉一次完整编译。
+              # /go/bin 是持久卷：复用前必须确认二进制也是当前 Go 编译的，
+              # 否则会把上一代 Go 编译的旧二进制捞回来，重现同一个报错。
               script: |
                 BIN="$(go env GOPATH)/bin/golangci-lint"
-                if ! "$BIN" --version 2>/dev/null | grep -q '2\.15\.0'; then
-                  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+                GO_VER="$(go env GOVERSION)"
+                if ! { "$BIN" --version 2>/dev/null | grep -q '2\.15\.0' \
+                       && go version "$BIN" 2>/dev/null | grep -q -- "${GO_VER}$"; }; then
+                  GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
                 fi
                 cd src && "$BIN" run
       failStages:
@@ -249,15 +252,26 @@ main:
               # go vet 已包含在 golangci-lint 的 govet 里，不再单独跑。
               script: |
                 BIN="$(go env GOPATH)/bin/golangci-lint"
-                if ! "$BIN" --version 2>/dev/null | grep -q '2\.15\.0'; then
-                  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+                GO_VER="$(go env GOVERSION)"
+                # /go/bin 是持久卷，里面可能躺着旧版本 Go 编译的二进制：
+                # 它能通过版本号检查，却无法分析当前项目
+                # （can't load config: the Go language version used to build
+                #  golangci-lint is lower than the targeted Go version）。
+                # 因此同时比对构建它的 Go 版本，不一致就重装。
+                if ! { "$BIN" --version 2>/dev/null | grep -q '2\.15\.0' \
+                       && go version "$BIN" 2>/dev/null | grep -q -- "${GO_VER}$"; }; then
+                  GOTOOLCHAIN=local go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
                 fi
                 cd src && "$BIN" config verify && "$BIN" run
             vulnerability-scan:
               script: |
                 BIN="$(go env GOPATH)/bin/govulncheck"
-                if ! "$BIN" -version 2>/dev/null | grep -q '1\.9\.0'; then
-                  go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+                GO_VER="$(go env GOVERSION)"
+                # 同上：旧 Go 编译的 govulncheck 会直接报
+                # "package requires newer Go version go1.27"退出，而不是给出扫描结果。
+                if ! { "$BIN" -version 2>/dev/null | grep -q '1\.9\.0' \
+                       && go version "$BIN" 2>/dev/null | grep -q -- "${GO_VER}$"; }; then
+                  GOTOOLCHAIN=local go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
                 fi
                 cd src && "$BIN" ./...
             unit-test:
