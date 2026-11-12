@@ -1,0 +1,10 @@
+# CNB 代码安全扫描配置。
+#
+# 默认规则把测试装置里的固定假密码、部署模板里的占位符都报成高危敏感信息，
+# 每次扫描都是同一批噪声，掩盖真正的泄露。这里只收窄 secrets 能力的扫描范围，
+# 其余能力（vulnerability / license / issue / sbom）仍走默认规则。
+#
+# 规则文件用 gitignore 风格路径，详见 .cnb/security/scanignore/secrets。
+secrets:
+  scan:
+    ignoreFrom: .cnb/security/scanignore/secrets
