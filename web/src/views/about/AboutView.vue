@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { getVersion } from '@/api/system'
 import type { VersionInfo } from '@/types/api'
 import { formatUptime } from '@/utils/format'
+import { formatDateTime } from '@/utils/datetime'
 
 const { t } = useI18n()
 
@@ -42,7 +43,7 @@ onMounted(loadVersion)
     <a-descriptions-item :label="t('pages.about.fields.version')">{{ info?.version || '—' }}</a-descriptions-item>
     <a-descriptions-item :label="t('pages.about.fields.commit')">{{ info?.commit || '—' }}</a-descriptions-item>
     <a-descriptions-item :label="t('pages.about.fields.buildTime')">
-      {{ info?.build_time || '—' }}
+      {{ formatDateTime(info?.build_time) }}
     </a-descriptions-item>
     <a-descriptions-item :label="t('pages.about.fields.goVersion')">{{ info?.go_version || '—' }}</a-descriptions-item>
     <a-descriptions-item :label="t('pages.about.fields.platform')">{{ info?.platform || '—' }}</a-descriptions-item>

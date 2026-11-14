@@ -5,7 +5,7 @@ import { message, theme } from 'antdv-next'
 import { useVisiblePolling } from '@/composables/useVisiblePolling'
 import { useAppStore } from '@/stores/app'
 import { getStatus, getTraffic } from '@/api/system'
-import { formatTimeOnly } from '@/utils/datetime'
+import { formatDateTime } from '@/utils/datetime'
 import { formatBytes, formatUptime } from '@/utils/format'
 import { copyText } from '@/utils/clipboard'
 import type { ProxyEndpoint, StatusSnapshot, TrafficSnapshot, UpstreamStatus } from '@/types/api'
@@ -78,13 +78,6 @@ function updateSpeed(snapshot: TrafficSnapshot | null) {
     in: (current.in - prev.in) / elapsed,
     out: (current.out - prev.out) / elapsed,
   }
-}
-
-function formatTime(value?: string): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return '—'
-  return date.toLocaleString()
 }
 
 const totals = computed(() => {
@@ -409,7 +402,7 @@ useVisiblePolling(() => fetchData(true), 10000)
         <a-typography-text type="secondary">
           {{ t('pages.dashboard.subtitle') }}
           <span v-if="lastRefreshed">
-            · {{ t('pages.dashboard.lastUpdated', { time: formatTimeOnly(lastRefreshed) }) }}
+            · {{ t('pages.dashboard.lastUpdated', { time: formatDateTime(lastRefreshed) }) }}
           </span>
         </a-typography-text>
       </div>
@@ -512,10 +505,10 @@ useVisiblePolling(() => fetchData(true), 10000)
               </a-tag>
             </a-descriptions-item>
             <a-descriptions-item :label="t('pages.dashboard.buildTime')">
-              {{ status?.build_time && status.build_time !== 'unknown' ? status.build_time : '—' }}
+              {{ formatDateTime(status?.build_time) }}
             </a-descriptions-item>
             <a-descriptions-item :label="t('pages.dashboard.statusTime')">
-              {{ formatTime(status?.timestamp) }}
+              {{ formatDateTime(status?.timestamp) }}
             </a-descriptions-item>
           </a-descriptions>
         </a-card>

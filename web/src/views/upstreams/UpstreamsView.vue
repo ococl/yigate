@@ -593,20 +593,13 @@ function statusTooltip(record: UpstreamInfo) {
   ]
   if (rt.active_conns > 0) parts.push(t('pages.upstreams.status.activeConnections', { count: rt.active_conns }))
   if (rt.dead && rt.dead_since) {
-    parts.push(t('pages.upstreams.status.deadSince', { time: formatTime(rt.dead_since) }))
+    parts.push(t('pages.upstreams.status.deadSince', { time: formatDateTime(rt.dead_since) }))
   }
   return parts.join(t('pages.upstreams.status.joiner'))
 }
 
-function formatTime(value?: string) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return '—'
-  return formatDateTime(date)
-}
-
 function lastCheckText(record: UpstreamInfo) {
-  return formatTime(runtimeOf(record)?.last_check_at)
+  return formatDateTime(runtimeOf(record)?.last_check_at)
 }
 
 function healthCheckText(record: UpstreamInfo) {
