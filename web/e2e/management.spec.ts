@@ -123,10 +123,11 @@ test('dashboard shows placeholders instead of a false outage when the status API
   // 读不到状态时展示「—」而不是 0 个可用上游，另用提示说明接口不可用
   await expect(upCard).toContainText('—')
   await expect(page.getByText(copy.pages.dashboard.statusUnavailable)).toBeVisible()
-  const ready = page.getByTestId('stat-ready')
+  // 网速需要两次采样才能算出，首次加载展示「—」而不是 0
+  const speed = page.getByTestId('stat-speed')
   const runState = page.getByTestId('stat-status')
-  await expect(ready).toContainText('—')
-  await expect(ready).not.toContainText(copy.pages.dashboard.abnormal)
+  await expect(speed).toContainText('—')
+  await expect(speed).not.toContainText('/s')
   await expect(runState).toContainText('—')
 })
 

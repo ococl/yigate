@@ -19,6 +19,10 @@ const traffic = ref<TrafficSnapshot | null>(null)
 const loading = ref(false)
 const lastRefreshed = ref<Date | null>(null)
 
+// 接口只提供累计流量，实时网速由两次轮询的差值换算得出。
+const prevSample = ref<{ at: number; in: number; out: number } | null>(null)
+const speed = ref<{ in: number; out: number } | null>(null)
+
 const { token } = theme.useToken()
 const appStore = useAppStore()
 // antd 的 colorSuccess 是 #52c41a，白底上只有 2.27:1；状态值是大字号，至少要 3:1
@@ -36,10 +40,43 @@ async function fetchData(silent = false) {
     ])
     status.value = s
     traffic.value = t
+    updateSpeed(t)
     // 全部接口都失败时保留上一次成功时间，避免把刷新失败显示成「刚刚更新」
     if (s || t) lastRefreshed.value = new Date()
   } finally {
     if (!silent) loading.value = false
+  }
+}
+
+function sumTraffic(snapshot: TrafficSnapshot): { in: number; out: number } {
+  return snapshot.entries.reduce(
+    (acc, e) => ({ in: acc.in + e.bytes_in, out: acc.out + e.bytes_out }),
+    { in: 0, out: 0 },
+  )
+}
+
+/**
+ * 用相邻两次快照的累计字节差除以实际间隔得到平均速率。
+ * 请求失败（null）时保留基线，恢复后仍能算出跨间隔的平均值；
+ * 间隔过短（手动刷新）或累计值回退（保留期清理旧记录）时跳过，避免读数跳变。
+ */
+function updateSpeed(snapshot: TrafficSnapshot | null) {
+  if (!snapshot) return
+  if (!snapshot.enabled) {
+    prevSample.value = null
+    speed.value = null
+    return
+  }
+  const now = Date.now()
+  const current = sumTraffic(snapshot)
+  const prev = prevSample.value
+  prevSample.value = { at: now, ...current }
+  if (!prev) return
+  const elapsed = (now - prev.at) / 1000
+  if (elapsed < 1 || current.in < prev.in || current.out < prev.out) return
+  speed.value = {
+    in: (current.in - prev.in) / elapsed,
+    out: (current.out - prev.out) / elapsed,
   }
 }
 
@@ -341,9 +378,23 @@ const statusColor = computed(() => {
   if (!status.value) return token.value.colorTextSecondary
   return status.value.status === 'up' ? successText.value : errorText.value
 })
-const readyColor = computed(() => {
-  if (!status.value) return token.value.colorTextSecondary
-  return status.value.router_ready && status.value.manager_ready ? successText.value : errorText.value
+// 主值展示总速率，分方向的明细放在副文本，与相邻卡片「主值 + 说明」的信息层级一致
+const speedText = computed(() => {
+  if (!speed.value) return '—'
+  return formatBytes(speed.value.in + speed.value.out)
+})
+
+const speedDetail = computed(() => {
+  if (!speed.value) {
+    return traffic.value && !traffic.value.enabled
+      ? t('pages.dashboard.trafficAuditOff')
+      : t('pages.dashboard.speedPending')
+  }
+  // 方向命名沿用下方「流量概览」的流入/流出，避免箭头视角与图例对不上
+  return t('pages.dashboard.speedDetail', {
+    inbound: `${formatBytes(speed.value.in)}/s`,
+    outbound: `${formatBytes(speed.value.out)}/s`,
+  })
 })
 
 fetchData()
@@ -417,17 +468,14 @@ useVisiblePolling(() => fetchData(true), 10000)
       <a-col :xs="12" :sm="12" :lg="6">
         <a-card size="small" class="stat-card" style="height: 100%;">
           <a-statistic
-            data-testid="stat-ready"
-            :title="t('pages.dashboard.routerReady')"
-            :value="
-              status
-                ? status.router_ready && status.manager_ready
-                  ? t('pages.dashboard.ready')
-                  : t('pages.dashboard.abnormal')
-                : '—'
-            "
-            :value-style="{ color: readyColor }"
+            data-testid="stat-speed"
+            :title="t('pages.dashboard.networkSpeed')"
+            :value="speedText"
+            :suffix="speed ? '/s' : ''"
           />
+          <a-typography-text type="secondary" style="font-size: 12px;">
+            {{ speedDetail }}
+          </a-typography-text>
         </a-card>
       </a-col>
       <a-col :xs="12" :sm="12" :lg="6">
