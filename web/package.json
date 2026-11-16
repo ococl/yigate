@@ -31,7 +31,7 @@
     "@playwright/test": "^1.65.0",
     "@types/node": "^26.6.6",
     "@vitejs/plugin-vue": "^6.0.10",
-    "jsdom": "^31.0.0",
+    "jsdom": "^31.0.1",
     "typescript": "~6.0.3",
     "unplugin-auto-import": "^21.1.0",
     "unplugin-vue-components": "^32.1.0",
