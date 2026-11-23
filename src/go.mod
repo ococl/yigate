@@ -5,8 +5,8 @@ go 1.27.0
 toolchain go1.27.4
 
 require (
-	gitee.com/Trisia/gotlcp v1.6.2
-	github.com/emmansun/gmsm v0.45.0
+	gitee.com/Trisia/gotlcp v1.6.3
+	github.com/emmansun/gmsm v0.45.3
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/kardianos/service v1.3.0
 	go.uber.org/zap v1.28.0
@@ -18,5 +18,5 @@ require (
 
 require (
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 )
